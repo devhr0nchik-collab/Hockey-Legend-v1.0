@@ -6,16 +6,14 @@
 // Сейвы живут в IndexedDB и Service Worker их не трогает.
 // ============================================================
 
-const CACHE_NAME = 'hockey-legend-v1.0.0';
+const CACHE_NAME = 'hockey-legend-v1.1.0';
 
+// После перехода на Vite JS/CSS собираются в файлы с хешем в имени,
+// поэтому список «оболочки» минимальный: остальное кэшируется на лету
+// в обработчике fetch (network-first с фоллбэком в кэш).
 const APP_SHELL = [
     './',
     './index.html',
-    './style.css',
-    './i18n.js',
-    './datapack_rosters.js',
-    './script.js',
-    './datapack.js',
     './icon.svg',
     './manifest.webmanifest'
 ];

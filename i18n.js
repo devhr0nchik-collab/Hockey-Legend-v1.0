@@ -9,7 +9,7 @@
 
 console.log('🌐 i18n.js загружен');
 
-const LANG = {
+export const LANG = {
     current: 'ru',
 
     // Словари: { ключ: перевод }
@@ -4299,35 +4299,11 @@ const LANG = {
         try { localStorage.setItem('hockeyLegendLang', lang); } catch (e) {}
         try { document.documentElement.lang = lang; } catch (e) {}
         if (typeof translateDOM === 'function') translateDOM(document.body);
-        if (typeof updateLangButton === 'function') updateLangButton();
 
-        // Перерисовываем активные экраны, чтобы динамический контент
-        // (карточки, кнопки, статы) взял новый язык.
+        // Перерисовку активных экранов делает приложение (script.js):
+        // i18n не знает про его состояние и не должно о нём знать.
         try {
-            const visible = (id) => {
-                const el = document.getElementById(id);
-                return el && el.style.display !== 'none';
-            };
-            if (typeof updateAllDisplays === 'function') updateAllDisplays();
-            if (visible('clients-screen') && typeof renderClientsScreen === 'function') renderClientsScreen();
-            if (visible('market-screen') && typeof renderMarketScreen === 'function') renderMarketScreen();
-            if (visible('agency-screen') && typeof renderAgencyScreen === 'function') renderAgencyScreen();
-            if (visible('leagues-screen') && typeof renderLeaguesScreen === 'function') renderLeaguesScreen();
-            if (visible('standings-screen') && typeof renderStandingsScreen === 'function' && currentStandingsLeague) renderStandingsScreen(currentStandingsLeague);
-            if (visible('club-hub-screen') && typeof renderClubHub === 'function') renderClubHub();
-            if (visible('player-screen') && typeof renderPlayerScreen === 'function') renderPlayerScreen();
-            if (visible('world-cup-screen') && typeof renderWorldCupScreen === 'function') renderWorldCupScreen();
-            if (visible('national-tournament-screen') && typeof renderNationalTournamentScreen === 'function') renderNationalTournamentScreen();
-            if (visible('draft-list-screen') && typeof renderDraftListScreen === 'function') renderDraftListScreen();
-            if (visible('career-goals-screen')) {
-                if (typeof currentBranchKey !== 'undefined' && currentBranchKey) {
-                    if (typeof renderBranchDetail === 'function') renderBranchDetail();
-                } else if (typeof renderCareerGoalsTree === 'function') {
-                    renderCareerGoalsTree();
-                }
-            }
-            if (visible('news-feed-screen') && typeof renderNewsFeedScreen === 'function') renderNewsFeedScreen();
-            if (visible('event-history-screen') && typeof renderEventHistory === 'function') renderEventHistory();
+            if (typeof window.onLanguageChanged === 'function') window.onLanguageChanged(lang);
         } catch (e) { console.warn('Lang rerender error:', e); }
 
         console.log(`🌐 Язык переключён на ${lang}`);

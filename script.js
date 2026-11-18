@@ -1,3 +1,6 @@
+import { LANG } from './i18n.js';
+import { REAL_ROSTERS } from './datapack_rosters.js';
+
 if (window.DEBUG) console.log("✅ script.js загружен");
 // ============ 1. ЭЛЕМЕНТЫ ============
 const mainMenu = document.getElementById('main-menu');
@@ -340,7 +343,7 @@ const GOAL_BRANCH_NAMES = {
 };
 
 // ============ 3. БАЗА ЛИГ ============
-const LEAGUE_DATA = {
+export const LEAGUE_DATA = {
     "NHL": { country:"🇺🇸 США",group:"Северная Америка",min:60,max:99,playoffSpots:4,divisions:[
         {name:"Восточная • Атлантический",clubs:["Boston Bruins","Buffalo Sabres","Detroit Red Wings","Florida Panthers","Montreal Canadiens","Ottawa Senators","Tampa Bay Lightning","Toronto Maple Leafs"]},
         {name:"Восточная • Столичный",clubs:["Carolina Hurricanes","Columbus Blue Jackets","New Jersey Devils","New York Islanders","New York Rangers","Philadelphia Flyers","Pittsburgh Penguins","Washington Capitals"]},
@@ -437,7 +440,7 @@ function transliterate(str) {
     return str.toLowerCase().split('').map(ch => TRANSLIT_MAP[ch] !== undefined ? TRANSLIT_MAP[ch] : ch).join('');
 }
 
-function generateLogoSlug(club) {
+export function generateLogoSlug(club) {
     // Если активен режим фейковых названий — берём реальное имя для slug.
     // Так логотип "Boston Bears" найдётся как boston-bruins.
     const reverse = (typeof window !== 'undefined') ? window.TEAM_RENAMES_REVERSE : null;
@@ -450,6 +453,8 @@ function generateLogoSlug(club) {
 }
 
 function getTeamLogoHTML(club, leagueKey) {
+    // Датапак подменяет рендер логотипов (реальные PNG вместо SVG-щитов).
+    if (typeof window.__teamLogoRenderer === 'function') return window.__teamLogoRenderer(club, leagueKey);
     let hash = 0;
     for (let i=0;i<club.length;i++){hash=club.charCodeAt(i)+((hash<<5)-hash);hash=hash&hash;}
     const color = `hsl(${Math.abs(hash)%360},55%,32%)`;
@@ -9982,6 +9987,11 @@ function showFirstPickBanner(pick) {
 }
 
 function getFarmClub(nhlClub) {
+    // Датапак добавляет пары для фейковых названий (NHL → AHL).
+    if (typeof window.getFarmClubOverride === 'function') {
+        const overridden = window.getFarmClubOverride(nhlClub);
+        if (overridden !== undefined) return overridden;
+    }
     const pairs = {"Boston Bruins":"Providence Bruins","Buffalo Sabres":"Rochester Americans","Detroit Red Wings":"Grand Rapids Griffins","Florida Panthers":"Charlotte Checkers","Montreal Canadiens":"Laval Rocket","Ottawa Senators":"Belleville Senators","Tampa Bay Lightning":"Syracuse Crunch","Toronto Maple Leafs":"Toronto Marlies","Carolina Hurricanes":"Chicago Wolves","Columbus Blue Jackets":"Cleveland Monsters","New Jersey Devils":"Utica Comets","New York Islanders":"Hamilton Hammers","New York Rangers":"Hartford Wolf Pack","Philadelphia Flyers":"Lehigh Valley Phantoms","Pittsburgh Penguins":"Wilkes-Barre Scranton Penguins","Washington Capitals":"Hershey Bears","Chicago Blackhawks":"Rockford IceHogs","Colorado Avalanche":"Colorado Eagles","Dallas Stars":"Texas Stars","Minnesota Wild":"Iowa Wild","Nashville Predators":"Milwaukee Admirals","St. Louis Blues":"Springfield Thunderbirds","Utah Mammoth":"Tucson Roadrunners","Winnipeg Jets":"Manitoba Moose","Anaheim Ducks":"San Diego Gulls","Calgary Flames":"Calgary Wranglers","Edmonton Oilers":"Bakersfield Condors","Los Angeles Kings":"Ontario Reign","San Jose Sharks":"San Jose Barracuda","Seattle Kraken":"Coachella Valley Firebirds","Vancouver Canucks":"Abbotsford Canucks","Vegas Golden Knights":"Henderson Silver Knights"};
     return pairs[nhlClub] || null;
 }
@@ -15689,9 +15699,41 @@ document.getElementById('nt-team-modal')?.addEventListener('click', (e) => {
 
 if (window.DEBUG) console.log('✅ script.js полностью загружен');
 
+// ============ МОСТЫ ДЛЯ i18n И ДАТАПАКА ============
+// i18n.js и datapack.js не импортируют script.js (иначе циклические зависимости),
+// поэтому общаются с приложением через узкий набор window-хуков.
+export function isDatapackActive() { return datapackActive; }
+
+function onLanguageChanged() {
+    updateLangButton();
+    const visible = (id) => {
+        const el = document.getElementById(id);
+        return el && el.style.display !== 'none';
+    };
+    updateAllDisplays();
+    if (visible('clients-screen')) renderClientsScreen();
+    if (visible('market-screen')) renderMarketScreen();
+    if (visible('agency-screen')) renderAgencyScreen();
+    if (visible('leagues-screen')) renderLeaguesScreen();
+    if (visible('standings-screen') && currentStandingsLeague) renderStandingsScreen(currentStandingsLeague);
+    if (visible('club-hub-screen')) renderClubHub();
+    if (visible('player-screen')) renderPlayerScreen();
+    if (visible('world-cup-screen')) renderWorldCupScreen();
+    if (visible('national-tournament-screen')) renderNationalTournamentScreen();
+    if (visible('draft-list-screen')) renderDraftListScreen();
+    if (visible('career-goals-screen')) {
+        if (currentBranchKey) renderBranchDetail();
+        else renderCareerGoalsTree();
+    }
+    if (visible('news-feed-screen')) renderNewsFeedScreen();
+    if (visible('event-history-screen')) renderEventHistory();
+}
+window.onLanguageChanged = onLanguageChanged;
+
 // ============ SERVICE WORKER (оффлайн-оболочка) ============
 // Регистрируем только на http(s): file:// не поддерживает SW.
-if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+// В dev-режиме SW выключен: иначе он кэширует исходники и мешает HMR.
+if (import.meta.env.PROD && 'serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('sw.js').catch(err => {
             if (window.DEBUG) console.log('SW registration failed:', err && err.message);

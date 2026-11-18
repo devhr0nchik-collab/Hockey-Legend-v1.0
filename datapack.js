@@ -6,6 +6,8 @@
 // Подключается ПОСЛЕ script.js.
 // ============================================================
 
+import { LEAGUE_DATA, generateLogoSlug, isDatapackActive } from './script.js';
+
 console.log('📦 datapack.js загружен');
 
 // ============ СЛОВАРЬ ПЕРЕИМЕНОВАНИЙ (NHL) ============
@@ -508,14 +510,10 @@ const FARM_PAIRS_FAKE = {
     "Vegas Jackpots": "Henderson Steel Knights"
 };
 
-// Сохраняем оригинал (с реальными названиями) из script.js
-const _origGetFarmClub = window.getFarmClub;
-
-// Универсальная функция: сначала пробуем fake, потом real
-window.getFarmClub = function(nhlClub) {
-    if (FARM_PAIRS_FAKE[nhlClub]) return FARM_PAIRS_FAKE[nhlClub];
-    if (typeof _origGetFarmClub === 'function') return _origGetFarmClub(nhlClub);
-    return null;
+// Датапак лишь дополняет базовый резолвер script.js (фейковые пары).
+// undefined → script.js использует свои реальные пары.
+window.getFarmClubOverride = function(nhlClub) {
+    return FARM_PAIRS_FAKE[nhlClub];
 };
 
 window.FARM_PAIRS_FAKE = FARM_PAIRS_FAKE;
@@ -563,16 +561,14 @@ function generateShieldSVG(club) {
 // ============ ЗАГРУЗКА ЛОГОТИПОВ ИЗ GITHUB RELEASES ============
 const LOGO_BASE_URL = "https://github.com/devhr0nchik-collab/hockey-legend-logos/releases/download/v1.0-logos/";
 
-// Запоминаем оригинальную функцию (SVG-щиты) для fallback
-const _originalGetTeamLogoHTML = getTeamLogoHTML;
-
-getTeamLogoHTML = function(club, leagueKey) {
+// Заменяем рендер логотипов из script.js на «PNG с GitHub + SVG-fallback».
+window.__teamLogoRenderer = function(club, leagueKey) {
     // SVG-щит всегда генерируем — он нужен как fallback, если PNG не загрузится
     const svg = generateShieldSVG(club);
     const fallbackB64 = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
 
     // Без датапака — только SVG-щит (не грузим ничего с GitHub)
-    if (typeof datapackActive === 'undefined' || !datapackActive) {
+    if (!isDatapackActive()) {
         return `<img class="team-logo-img" src="${fallbackB64}" alt="${club}" />`;
     }
 

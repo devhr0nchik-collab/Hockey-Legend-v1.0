@@ -2,7 +2,7 @@
 // Формат: каждый клуб имеет prestige и массив игроков
 // name — имя, pos — позиция (G/D/C/LW/RW), rating — рейтинг, age — возраст
 
-const REAL_ROSTERS = {
+export const REAL_ROSTERS = {
   KHL: {
     "Локомотив": {
       prestige: 85,
