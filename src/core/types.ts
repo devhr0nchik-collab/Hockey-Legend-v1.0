@@ -136,3 +136,65 @@ export type PackedClub = [
     number, number, unknown[], unknown[], unknown[], number, number[],
     number, number, number, number, boolean
 ];
+
+/**
+ * Полный сейв (v23). Список полей соответствует saveGame().
+ * Все поля, кроме v/players, терпимы к отсутствию в старых сейвах.
+ */
+export interface SaveData {
+    v: number;
+    t: number;
+    agentName: string;
+    agencyName: string;
+    agencyCountry: string;
+    agencyFlag: string;
+    money: number;
+    s: number;
+    w: number;
+    upgrades: Record<string, number>;
+    rosterNames: string[];
+    news: unknown[];
+    standings: Record<string, any[]>;
+    teamStrengths: Record<string, unknown>;
+    npcAgencies: unknown[];
+    clubs: Record<string, PackedClub>;
+    portfolio: Record<string, unknown>;
+    agentXP: number;
+    agentLevel: number;
+    transferOffers: Record<string, unknown>;
+    activeCommissions: unknown[];
+    pendingClubReturn: unknown[];
+    playerNegotiations: Record<string, unknown>;
+    poachedPlayersThisSeason: Record<string, unknown>;
+    agencyPoachAttempts: Record<string, unknown>;
+    closedAgencies: Record<string, unknown>;
+    phase: string;
+    phaseWeeks: number;
+    playoffState: Record<string, unknown>;
+    playoffRound: number;
+    championsHistory: Record<string, any>;
+    presidentClubKey: string | null;
+    seasonSchedule: Record<string, any[]>;
+    clubSeasonPositions: Record<string, unknown>;
+    clubCouncil: unknown;
+    careerGoals: Record<string, number>;
+    careerCounters: Record<string, number>;
+    activeTasks: unknown[];
+    eventCooldowns: Record<string, unknown>;
+    eventHistory: unknown[];
+    weeklyEventCounter: number;
+    lastEventWeek: number;
+    activeChains: unknown[];
+    npcCooldownWeeks: number;
+    lostPlayerThisSeason: boolean;
+    worldCupState: any;
+    nationalTournament: unknown;
+    nationalTournamentHistory: unknown[];
+    favoriteNationalTeam: unknown;
+    datapackActive: boolean;
+    pendingEventId: string | null;
+    pendingEventPlayer: string | null;
+    draftData: unknown;
+    players: PackedPlayer[];
+    lastDraft?: unknown[];
+}

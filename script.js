@@ -5,6 +5,7 @@ import { generateAttributes } from './src/core/attributes';
 import { getLeagueSalaryCap, calculateSalary, calculateSalaryCap, formatSalary } from './src/core/salary';
 import { packPlayer, unpackPlayer, packClub, unpackClub } from './src/core/pack';
 import { createIdbStore } from './src/features/save/storage';
+import { isSaveData, normalizeLoadedSave } from './src/features/save/migrations';
 
 if (window.DEBUG) console.log("✅ script.js загружен");
 // ============ 1. ЭЛЕМЕНТЫ ============
@@ -3684,9 +3685,8 @@ async function loadGame() {
         teamStrengths = d.teamStrengths ?? {};
         npcAgencies = d.npcAgencies ?? generateNpcAgencies();
         myPortfolio = d.portfolio ?? {};
-        upgrades = d.upgrades || {office:1,scouting:1,reveal:1,youth:1,negotiator:1,reputation:1,media:1};
-        // Миграция старых сейвов: карточка тренера появилась позже
-        if (upgrades.trainer === undefined) upgrades.trainer = 1;
+        normalizeLoadedSave(d);
+        upgrades = d.upgrades;
         transferOffers = d.transferOffers ?? {};
         playerNegotiations = d.playerNegotiations ?? {};
         activeCommissions = d.activeCommissions ?? [];
@@ -3697,8 +3697,7 @@ async function loadGame() {
         seasonPhase = d.phase ?? 'regular';
         transferPhaseWeeksLeft = d.phaseWeeks ?? 0;
         playoffState = d.playoffState ?? {};
-        playoffRound = d.playoffRound ?? 0;
-        if (playoffRound > 4) playoffRound = 1;
+        playoffRound = d.playoffRound;
         if (d.players && d.players.length > 0) players = d.players.map(unpackPlayer);
         else { players = generateAllPlayers(); assignPlayersToNpcAgencies(); seedFreeAgents(250); }
 
@@ -14057,7 +14056,7 @@ function importSaveFile(file) {
     reader.onload = async () => {
         try {
             const data = JSON.parse(reader.result);
-            if (!data || typeof data !== 'object' || !data.v || !Array.isArray(data.players)) {
+            if (!isSaveData(data)) {
                 showToast(LANG.t('Файл не похож на сохранение Hockey Legend'), 'negative');
                 playSound('error');
                 return;

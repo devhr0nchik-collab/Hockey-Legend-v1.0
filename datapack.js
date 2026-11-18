@@ -7,6 +7,7 @@
 // ============================================================
 
 import { LEAGUE_DATA, generateLogoSlug, isDatapackActive } from './script.js';
+import { migrateSaveWithMap } from './src/features/save/migrations';
 
 console.log('📦 datapack.js загружен');
 
@@ -313,154 +314,10 @@ function applyFakeTeamNames() {
 }
 
 // ============ МИГРАЦИЯ СЕЙВА (real <-> fake) ============
-// Разбивает ключ вида "lk_club" с учётом лиг, в названии которых есть "_".
-function splitSaveKey(key) {
-    if (!key || typeof key !== 'string') return null;
-    const lkList = Object.keys(LEAGUE_DATA).sort((a, b) => b.length - a.length);
-    for (const lk of lkList) {
-        if (key.startsWith(lk + '_')) return { lk, club: key.substring(lk.length + 1) };
-    }
-    const idx = key.indexOf('_');
-    if (idx < 0) return null;
-    return { lk: key.substring(0, idx), club: key.substring(idx + 1) };
-}
+// Логика вынесена в src/features/save/migrations.ts (чистые функции + тесты).
 
-// Единая миграция: map — словарь «старое имя → новое имя».
-function migrateSaveWithMap(data, map) {
-    if (!data) return data;
-    const apply = (name) => (name && map[name]) ? map[name] : name;
-
-    // players (упакованные): club на индексе 1, seasonHistory на индексе 17
-    if (Array.isArray(data.players)) {
-        data.players.forEach(p => {
-            if (!Array.isArray(p)) return;
-            if (typeof p[1] === 'string') p[1] = apply(p[1]);
-            if (Array.isArray(p[17])) {
-                p[17].forEach(h => { if (Array.isArray(h) && typeof h[1] === 'string') h[1] = apply(h[1]); });
-            }
-        });
-    }
-
-    // standings
-    if (data.standings) {
-        Object.keys(data.standings).forEach(lk => {
-            (data.standings[lk] || []).forEach(t => { if (t.club) t.club = apply(t.club); });
-        });
-    }
-
-    // clubs — ключи вида "lk_club"
-    if (data.clubs) {
-        const newClubs = {};
-        Object.keys(data.clubs).forEach(key => {
-            const parts = splitSaveKey(key);
-            if (!parts) { newClubs[key] = data.clubs[key]; return; }
-            const newClub = apply(parts.club);
-            const c = data.clubs[key];
-            if (Array.isArray(c)) c[0] = newClub;
-            newClubs[parts.lk + '_' + newClub] = c;
-        });
-        data.clubs = newClubs;
-    }
-
-    // seasonSchedule
-    if (data.seasonSchedule) {
-        Object.keys(data.seasonSchedule).forEach(lk => {
-            (data.seasonSchedule[lk] || []).forEach(m => {
-                if (m.home) m.home = apply(m.home);
-                if (m.away) m.away = apply(m.away);
-            });
-        });
-    }
-
-    // championsHistory
-    if (data.championsHistory) {
-        Object.keys(data.championsHistory).forEach(lk => {
-            (data.championsHistory[lk] || []).forEach(h => {
-                if (h.champion) h.champion = apply(h.champion);
-                if (h.finalist) h.finalist = apply(h.finalist);
-            });
-        });
-    }
-
-    // clubSeasonPositions — ключи вида "lk_club"
-    if (data.clubSeasonPositions) {
-        const newPos = {};
-        Object.keys(data.clubSeasonPositions).forEach(key => {
-            const parts = splitSaveKey(key);
-            if (!parts) { newPos[key] = data.clubSeasonPositions[key]; return; }
-            newPos[parts.lk + '_' + apply(parts.club)] = data.clubSeasonPositions[key];
-        });
-        data.clubSeasonPositions = newPos;
-    }
-
-    // worldCupState
-    if (data.worldCupState) {
-        const wc = data.worldCupState;
-        if (Array.isArray(wc.teams)) wc.teams.forEach(t => { if (t.club) t.club = apply(t.club); });
-        if (wc.teamLeague) {
-            const tl = {};
-            Object.keys(wc.teamLeague).forEach(k => { tl[apply(k)] = wc.teamLeague[k]; });
-            wc.teamLeague = tl;
-        }
-        if (wc.strengths) {
-            const st = {};
-            Object.keys(wc.strengths).forEach(k => { st[apply(k)] = wc.strengths[k]; });
-            wc.strengths = st;
-        }
-        if (wc.standings) {
-            ['A', 'B'].forEach(conf => {
-                if (!wc.standings[conf]) return;
-                const ns = {};
-                Object.keys(wc.standings[conf]).forEach(k => {
-                    const row = wc.standings[conf][k];
-                    if (row) row.club = apply(row.club || k);
-                    ns[apply(k)] = row;
-                });
-                wc.standings[conf] = ns;
-            });
-        }
-        if (wc.conferences) {
-            ['A', 'B'].forEach(conf => {
-                if (Array.isArray(wc.conferences[conf])) {
-                    wc.conferences[conf].forEach(t => { if (t.club) t.club = apply(t.club); });
-                }
-            });
-        }
-        if (wc.playoff) {
-            const fixSeries = (s) => {
-                if (!s) return;
-                if (s.teamA && s.teamA.club) s.teamA.club = apply(s.teamA.club);
-                if (s.teamB && s.teamB.club) s.teamB.club = apply(s.teamB.club);
-                if (s.winner && s.winner.club) s.winner.club = apply(s.winner.club);
-            };
-            if (Array.isArray(wc.playoff.series)) wc.playoff.series.forEach(fixSeries);
-            if (Array.isArray(wc.playoff.history)) {
-                wc.playoff.history.forEach(h => {
-                    if (Array.isArray(h.series)) h.series.forEach(fixSeries);
-                });
-            }
-        }
-        if (wc.champion && wc.champion.club) wc.champion.club = apply(wc.champion.club);
-        if (Array.isArray(wc.history)) {
-            wc.history.forEach(h => {
-                if (h.champion) h.champion = apply(h.champion);
-                if (h.runnerUp) h.runnerUp = apply(h.runnerUp);
-            });
-        }
-    }
-
-    // lastDraft
-    if (Array.isArray(data.lastDraft)) {
-        data.lastDraft.forEach(a => {
-            if (Array.isArray(a) && typeof a[2] === 'string') a[2] = apply(a[2]);
-        });
-    }
-
-    return data;
-}
-
-function migrateSaveToFake(data) { return migrateSaveWithMap(data, TEAM_RENAMES); }
-function migrateSaveToReal(data) { return migrateSaveWithMap(data, TEAM_RENAMES_REVERSE); }
+function migrateSaveToFake(data) { return migrateSaveWithMap(data, TEAM_RENAMES, Object.keys(LEAGUE_DATA)); }
+function migrateSaveToReal(data) { return migrateSaveWithMap(data, TEAM_RENAMES_REVERSE, Object.keys(LEAGUE_DATA)); }
 
 // ============ ЭКСПОРТ В WINDOW ============
 window.TEAM_RENAMES = TEAM_RENAMES;
