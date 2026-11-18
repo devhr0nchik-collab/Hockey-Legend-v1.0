@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0d1420">
+    <meta name="description" content="Hockey Legend — симулятор хоккейного агента: клиенты, контракты, лиги, драфт и трофеи.">
+    <title>Hockey Legend v1.0</title>
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <link rel="apple-touch-icon" href="icon.svg">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="save-indicator" class="save-indicator">💾 Сохранено</div>
+
+    <!-- ============ ГЛАВНОЕ МЕНЮ ============ -->
+    <div id="main-menu" class="main-menu-screen">
+        <button id="menu-lang-btn" class="menu-lang-btn" title="Сменить язык">
+            <span id="menu-lang-flag">🇷🇺</span>
+            <span id="menu-lang-code">RU</span>
+        </button>
+        <div class="menu-bg-glow"></div>
+        <div class="menu-bg-grid"></div>
+        <svg class="menu-bg-rink" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice">
+            <defs>
+                <linearGradient id="rinkLine" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#00d4ff" stop-opacity="0"/>
+                    <stop offset="50%" stop-color="#00d4ff" stop-opacity="0.15"/>
+                    <stop offset="100%" stop-color="#00d4ff" stop-opacity="0"/>
+                </linearGradient>
+            </defs>
+            <line x1="200" y1="0" x2="200" y2="300" stroke="url(#rinkLine)" stroke-width="2"/>
+            <circle cx="200" cy="150" r="50" fill="none" stroke="url(#rinkLine)" stroke-width="2"/>
+            <line x1="130" y1="0" x2="130" y2="300" stroke="url(#rinkLine)" stroke-width="2"/>
+            <line x1="270" y1="0" x2="270" y2="300" stroke="url(#rinkLine)" stroke-width="2"/>
+            <circle cx="80" cy="80" r="30" fill="none" stroke="url(#rinkLine)" stroke-width="1.5"/>
+            <circle cx="80" cy="220" r="30" fill="none" stroke="url(#rinkLine)" stroke-width="1.5"/>
+            <circle cx="320" cy="80" r="30" fill="none" stroke="url(#rinkLine)" stroke-width="1.5"/>
+            <circle cx="320" cy="220" r="30" fill="none" stroke="url(#rinkLine)" stroke-width="1.5"/>
+        </svg>
+
+        <div class="menu-bg-pulses">
+            <div class="pulse-circle pulse-1"></div>
+            <div class="pulse-circle pulse-2"></div>
+            <div class="pulse-circle pulse-3"></div>
+        </div>
+
+        <div class="menu-bg-pucks">
+            <div class="flying-puck puck-1"></div>
+            <div class="flying-puck puck-2"></div>
+        </div>
+
+        <div class="menu-bg-snow" id="menu-snow"></div>
+        <div class="menu-bg-logos">
+            <svg viewBox="0 0 40 40" class="bg-logo bg-logo-1"><text x="20" y="28" text-anchor="middle" font-family="Arial" font-weight="900" font-size="28" fill="currentColor">N</text></svg>
+            <svg viewBox="0 0 40 40" class="bg-logo bg-logo-2"><text x="20" y="28" text-anchor="middle" font-family="Arial" font-weight="900" font-size="28" fill="currentColor">K</text></svg>
+            <svg viewBox="0 0 40 40" class="bg-logo bg-logo-3"><text x="20" y="28" text-anchor="middle" font-family="Arial" font-weight="900" font-size="28" fill="currentColor">A</text></svg>
+            <svg viewBox="0 0 40 40" class="bg-logo bg-logo-4"><text x="20" y="28" text-anchor="middle" font-family="Arial" font-weight="900" font-size="28" fill="currentColor">M</text></svg>
+        </div>
+
+        <div class="menu-content">
+            <div class="menu-greeting" id="menu-greeting">Доброе утро, агент</div>
+            <div class="menu-logo-wrap">
+                <svg viewBox="0 0 120 120" class="menu-logo-svg">
+                    <defs>
+                        <linearGradient id="puckGrad" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stop-color="#00d4ff"/>
+                            <stop offset="100%" stop-color="#0088cc"/>
+                        </linearGradient>
+                        <linearGradient id="shineGrad" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stop-color="rgba(255,255,255,0.6)"/>
+                            <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+                        </linearGradient>
+                    </defs>
+                    <ellipse cx="60" cy="80" rx="45" ry="14" fill="rgba(0,0,0,0.4)"/>
+                    <g class="puck-rotating">
+                        <ellipse cx="60" cy="72" rx="45" ry="20" fill="#1a1a2e" stroke="url(#puckGrad)" stroke-width="2.5"/>
+                        <ellipse cx="60" cy="68" rx="45" ry="20" fill="#25253d"/>
+                        <ellipse cx="60" cy="68" rx="40" ry="15" fill="none" stroke="url(#puckGrad)" stroke-width="1.5" opacity="0.6"/>
+                        <ellipse cx="45" cy="62" rx="15" ry="6" fill="url(#shineGrad)"/>
+                    </g>
+                    <rect class="puck-shine" x="10" y="55" width="30" height="3" fill="url(#shineGrad)" rx="1.5"/>
+                </svg>
+            </div>
+            <h1 class="menu-title">HOCKEY LEGEND</h1>
+            <div class="menu-divider">
+                <span class="divider-line"></span>
+                <span class="divider-text">СИМУЛЯТОР АГЕНТА</span>
+                <span class="divider-line"></span>
+            </div>
+            <div class="menu-news" id="menu-news">
+                <span class="news-icon">📰</span>
+                <span class="news-text" id="menu-news-text">Загрузка новостей...</span>
+            </div>
+            <div id="continue-card" class="continue-card" style="display:none;">
+                <div class="continue-header">
+                    <span class="continue-icon">▶</span>
+                    <span class="continue-label">ПРОДОЛЖИТЬ</span>
+                </div>
+                <div class="continue-info">
+                    <div class="continue-stat"><span class="stat-val" id="continue-season">2026/27</span><span class="stat-lbl">Сезон</span></div>
+                    <div class="continue-stat"><span class="stat-val" id="continue-week">1</span><span class="stat-lbl">Неделя</span></div>
+                    <div class="continue-stat"><span class="stat-val" id="continue-money">$3K</span><span class="stat-lbl">Баланс</span></div>
+                    <div class="continue-stat"><span class="stat-val" id="continue-clients">0</span><span class="stat-lbl">Клиенты</span></div>
+                </div>
+            </div>
+            <div class="menu-buttons">
+                <button id="btn-new-game" class="menu-btn primary">
+                    <span class="btn-icon">▶</span>
+                    <div class="btn-text"><span class="btn-title">Новая игра</span><span class="btn-desc">Начать карьеру агента с нуля</span></div>
+                </button>
+                <button id="btn-load-game" class="menu-btn secondary">
+                    <span class="btn-icon">📁</span>
+                    <div class="btn-text"><span class="btn-title">Загрузить игру</span><span class="btn-desc">Продолжить сохранённую карьеру</span></div>
+                </button>
+                <button id="btn-datapack" class="menu-btn secondary">
+                    <span class="btn-icon">📦</span>
+                    <div class="btn-text"><span class="btn-title" id="btn-datapack-title">Оригинальные данные</span><span class="btn-desc" id="btn-datapack-desc">Реальные названия и имена</span></div>
+                </button>
+                <button id="btn-settings" class="menu-btn secondary">
+                    <span class="btn-icon">⚙</span>
+                    <div class="btn-text"><span class="btn-title">Настройки</span><span class="btn-desc">Звук, уведомления, данные</span></div>
+                </button>
+                <button id="btn-about" class="menu-btn ghost">
+                    <span class="btn-icon">ℹ</span>
+                    <span>Об игре</span>
+                </button>
+            </div>
+        </div>
+        <div class="menu-footer">
+            <div class="menu-stats-row">
+                <div class="menu-stat"><span class="menu-stat-val">13</span><span class="menu-stat-lbl">лиг</span></div>
+                <div class="menu-stat-divider"></div>
+                <div class="menu-stat"><span class="menu-stat-val">250+</span><span class="menu-stat-lbl">клубов</span></div>
+                <div class="menu-stat-divider"></div>
+                <div class="menu-stat"><span class="menu-stat-val">4000+</span><span class="menu-stat-lbl">игроков</span></div>
+            </div>
+            <div class="menu-version">v1.0</div>
+            <div class="menu-disclaimer" id="menu-disclaimer">Неофициальная игра. Не связана с NHL, KHL, IIHF или любым клубом. Все названия и логотипы принадлежат их владельцам.</div>
+        </div>
+    </div>
+
+    <!-- ============ ЭКРАН СОЗДАНИЯ АГЕНТСТВА ============ -->
+    <div id="create-agency-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <div class="mobile-header-icon">🏢</div>
+            <div class="mobile-header-title">Создание агентства</div>
+        </div>
+        <div class="mobile-content" id="create-agency-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН ОФИСА ============ -->
+    <div id="office-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <div class="mobile-header-icon">🏒</div>
+            <div class="mobile-header-title" id="office-header-title">Офис Агента</div>
+        </div>
+        <div class="mobile-content">
+            <div class="agent-profile">
+                <div class="agent-avatar"><span class="avatar-emoji">🧑‍💼</span></div>
+                <div class="agent-name" id="office-agent-name">АГЕНТ</div>
+                <div class="agent-rank" id="office-agent-rank">Начинающий агент</div>
+            </div>
+            <div class="office-stats-card">
+                <div class="office-stat-line">
+                    <span class="office-stat-icon">💰</span>
+                    <span class="office-stat-label">Баланс</span>
+                    <span class="office-stat-value" id="office-money">$3,000</span>
+                </div>
+                <div class="office-stat-line">
+                    <span class="office-stat-icon">📅</span>
+                    <span class="office-stat-label">Сезон</span>
+                    <span class="office-stat-value" id="office-season">2026/27</span>
+                </div>
+                <div class="office-stat-line">
+                    <span class="office-stat-icon">🗓</span>
+                    <span class="office-stat-label">Неделя</span>
+                    <span class="office-stat-value" id="office-week">1</span>
+                </div>
+            </div>
+
+            <div class="xp-card">
+                <div class="xp-header">
+                    <span class="xp-level">⚡ Уровень: <b id="office-agent-level">1</b></span>
+                    <span class="xp-progress-text" id="office-xp-text">0 / 500 XP</span>
+                </div>
+                <div class="xp-bar"><div class="xp-fill" id="office-xp-fill"></div></div>
+            </div>
+
+            <div class="transfer-window-banner" id="office-window-banner" style="display:none;"></div>
+
+            <div class="active-tasks-block" id="active-tasks-block" style="display:none;"></div>
+
+            <button id="btn-play-week" class="big-action-btn">
+                <span class="big-action-icon">▶</span>
+                <span class="big-action-text">Играть неделю</span>
+            </button>
+<button id="btn-open-draft" class="draft-open-btn">
+    <span class="draft-open-icon">🎯</span>
+    <div class="draft-open-text">
+        <span class="draft-open-title">Драфт NHL</span>
+        <span class="draft-open-desc">Полный список пиков сезона</span>
+    </div>
+</button>
+<button id="btn-open-world-cup" class="draft-open-btn" style="display:none;">
+    <span class="draft-open-icon">🏆</span>
+    <div class="draft-open-text">
+        <span class="draft-open-title" id="btn-wc-title">Кубок Чемпионов</span>
+        <span class="draft-open-desc" id="btn-wc-desc">Турнир сильнейших клубов</span>
+    </div>
+</button>
+<button id="btn-open-national-tournament" class="draft-open-btn" style="display:none;">
+    <span class="draft-open-icon">🌍</span>
+    <div class="draft-open-text">
+        <span class="draft-open-title" id="btn-nt-title">Чемпионат мира</span>
+        <span class="draft-open-desc" id="btn-nt-desc">Турнир сборных</span>
+    </div>
+</button>
+            <div class="tile-grid">
+                <div class="tile" data-action="search">
+                    <div class="tile-icon">🔍</div>
+                    <div class="tile-label">Поиск</div>
+                    <div class="tile-desc">Найти игроков</div>
+                </div>
+                <div class="tile" data-action="news">
+                    <div class="tile-icon">📰</div>
+                    <div class="tile-label">Новости</div>
+                    <div class="tile-desc">Что нового</div>
+                </div>
+                <div class="tile" data-action="settings">
+                    <div class="tile-icon">⚙</div>
+                    <div class="tile-label">Настройки</div>
+                    <div class="tile-desc">Звук и данные</div>
+                </div>
+                <div class="tile" data-action="infrastructure" id="tile-infrastructure" style="display:none;">
+                    <div class="tile-icon">🏗</div>
+                    <div class="tile-label">Инфраструктура</div>
+                    <div class="tile-desc">Прокачай клуб</div>
+                </div>
+                <div class="tile" data-action="about">
+                    <div class="tile-icon">ℹ</div>
+                    <div class="tile-label">Об игре</div>
+                    <div class="tile-desc">Информация</div>
+                </div>
+                <div class="tile" data-action="goals">
+                    <div class="tile-icon">🎯</div>
+                    <div class="tile-label">Цели</div>
+                    <div class="tile-desc">Древо прогресса</div>
+                </div>
+                <div class="tile" data-action="history">
+                    <div class="tile-icon">📜</div>
+                    <div class="tile-label">Хроника</div>
+                    <div class="tile-desc">История решений</div>
+                </div>
+                <div class="tile" data-action="event-mail" id="event-mail-tile" style="display:none;">
+                    <div class="tile-icon em-icon">✉️</div>
+                    <div class="tile-label em-title">Новое событие</div>
+                    <div class="tile-desc em-sub">Требуется ваше решение</div>
+                </div>
+            </div>
+            <div class="news-mini-card">
+                <div class="news-mini-title">📰 Последние новости</div>
+                <div id="mini-news" class="news-mini-content">
+                    <p style="color:#606070;">Новостей пока нет...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ ЭКРАН КЛИЕНТОВ ============ -->
+    <div id="clients-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <div class="mobile-header-icon">👥</div>
+            <div class="mobile-header-title">Клиенты</div>
+        </div>
+        <div class="clients-tabs">
+            <button class="clients-tab active" data-tab="my">
+                <span class="tab-icon">⭐</span>
+                <span>Мои клиенты</span>
+                <span class="tab-count" id="my-clients-count">0</span>
+            </button>
+            <button class="clients-tab" data-tab="search">
+                <span class="tab-icon">🔍</span>
+                <span>Таланты</span>
+            </button>
+        </div>
+        <div class="mobile-content" id="clients-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН ЛИГ ============ -->
+    <div id="leagues-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <div class="mobile-header-icon">🌍</div>
+            <div class="mobile-header-title">Лиги</div>
+            <button id="btn-open-leaderboard" class="lb-open-btn" title="Лучшие игроки">🏅</button>
+        </div>
+        <div class="mobile-content" id="leagues-content"></div>
+    </div>
+
+    <!-- ============ ПУБЛИЧНЫЙ ХАБ КЛУБА (полноэкранный) ============ -->
+    <div id="public-club-hub-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <button id="pch-back" class="back-to-leagues" style="width:auto;padding:8px 14px;margin:0;">←</button>
+            <div class="mobile-header-icon" id="pch-icon">🏒</div>
+            <div class="mobile-header-title" id="pch-title">Клуб</div>
+            <button id="pch-manage-btn" class="pch-manage-btn" style="display:none;">⚙️ <span data-i18n="Управлять">Управлять</span></button>
+        </div>
+        <div class="clients-tabs pch-tabs" id="pch-tabs">
+            <button class="clients-tab active" data-ptab2="overview"><span class="tab-icon">📊</span><span data-i18n="Обзор">Обзор</span></button>
+            <button class="clients-tab" data-ptab2="roster"><span class="tab-icon">👥</span><span data-i18n="Состав">Состав</span></button>
+            <button class="clients-tab" data-ptab2="schedule"><span class="tab-icon">📅</span><span data-i18n="Расписание">Расписание</span></button>
+            <button class="clients-tab" data-ptab2="history"><span class="tab-icon">🏆</span><span data-i18n="История">История</span></button>
+            <button class="clients-tab" data-ptab2="stocks"><span class="tab-icon">📈</span><span data-i18n="Акции">Акции</span></button>
+        </div>
+        <div class="mobile-content" id="pch-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН ЛУЧШИХ ИГРОКОВ (Leaderboard) ============ -->
+    <div id="leaderboard-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <button id="lb-back" class="back-to-leagues" style="width:auto;padding:8px 12px;margin:0;">←</button>
+            <div class="mobile-header-icon">🏅</div>
+            <div class="mobile-header-title" id="leaderboard-title">Лучшие игроки</div>
+        </div>
+        <div class="clients-tabs" id="leaderboard-tabs">
+            <button class="clients-tab active" data-lb="world"><span class="tab-icon">🌍</span><span data-i18n="Топ-50 в мире">Топ-50 в мире</span></button>
+        </div>
+        <div class="mobile-content" id="leaderboard-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН ТАБЛИЦЫ ЛИГИ ============ -->
+    <div id="standings-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <div class="mobile-header-icon" id="standings-icon">📊</div>
+            <div class="mobile-header-title" id="standings-title">Таблица</div>
+        </div>
+        <div class="league-tabs">
+            <button class="league-tab active" data-ltab="table">
+                <span class="lt-icon">📊</span>
+                <span>Таблица</span>
+            </button>
+            <button class="league-tab" data-ltab="playoffs">
+                <span class="lt-icon">🏆</span>
+                <span>Плей-офф</span>
+            </button>
+            <button class="league-tab" data-ltab="history">
+                <span class="lt-icon">📜</span>
+                <span>История</span>
+            </button>
+            <button class="league-tab" data-ltab="schedule">
+                <span class="lt-icon">📅</span>
+                <span>Расписание</span>
+            </button>
+        </div>
+        <div class="mobile-content" id="standings-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН НАЦИОНАЛЬНОГО ТУРНИРА (ЧМ / ОЛИМПИАДА) ============ -->
+    <div id="national-tournament-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <button class="header-back-btn" id="nt-back">←</button>
+            <div class="mobile-header-icon" id="nt-header-icon">🌍</div>
+            <div class="mobile-header-title" id="nt-header-title">Турнир сборных</div>
+        </div>
+        <div class="clients-tabs" id="nt-tabs">
+            <button class="clients-tab active" data-nttab="groups">
+                <span class="tab-icon">📊</span>
+                <span>Группы</span>
+            </button>
+            <button class="clients-tab" data-nttab="playoff">
+                <span class="tab-icon">🏆</span>
+                <span>Плей-офф</span>
+            </button>
+            <button class="clients-tab" data-nttab="history">
+                <span class="tab-icon">📜</span>
+                <span>История</span>
+            </button>
+        </div>
+        <div id="nt-fav-bar" class="nt-fav-bar" style="display:none;"></div>
+        <div class="mobile-content" id="nt-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН КУБКА ЧЕМПИОНОВ ============ -->
+    <div id="world-cup-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <button class="header-back-btn" id="world-cup-back">←</button>
+            <div class="mobile-header-icon">🏆</div>
+            <div class="mobile-header-title">Кубок Чемпионов</div>
+        </div>
+        <div class="clients-tabs" id="world-cup-tabs">
+            <button class="clients-tab active" data-wctab="standings">
+                <span class="tab-icon">📊</span>
+                <span>Таблицы</span>
+            </button>
+            <button class="clients-tab" data-wctab="playoffs">
+                <span class="tab-icon">🏆</span>
+                <span>Плей-офф</span>
+            </button>
+            <button class="clients-tab" data-wctab="schedule">
+                <span class="tab-icon">📅</span>
+                <span>Расписание</span>
+            </button>
+            <button class="clients-tab" data-wctab="history">
+                <span class="tab-icon">📜</span>
+                <span>История</span>
+            </button>
+        </div>
+        <div class="mobile-content" id="world-cup-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН БИРЖИ ============ -->
+    <div id="market-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <div class="mobile-header-icon">💰</div>
+            <div class="mobile-header-title">Биржа акций</div>
+        </div>
+        <div class="clients-tabs">
+            <button class="clients-tab active" data-mtab="all">
+                <span class="tab-icon">📊</span>
+                <span>Рынок</span>
+            </button>
+            <button class="clients-tab" data-mtab="portfolio">
+                <span class="tab-icon">💼</span>
+                <span>Портфель</span>
+                <span class="tab-count" id="portfolio-count">0</span>
+            </button>
+        </div>
+        <div class="mobile-content" id="market-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН ИГРОКА ============ -->
+    <div id="player-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <button class="header-back-btn" id="player-back">←</button>
+            <div class="mobile-header-icon" id="player-header-icon">👤</div>
+            <div class="mobile-header-title" id="player-header-title">Игрок</div>
+        </div>
+        <div class="player-tabs">
+            <button class="player-tab active" data-ptab="info">
+                <span class="ptab-icon">📊</span>
+                <span class="ptab-label">Инфо</span>
+            </button>
+            <button class="player-tab" data-ptab="development">
+                <span class="ptab-icon">🏋️</span>
+                <span class="ptab-label">Развитие</span>
+            </button>
+            <button class="player-tab" data-ptab="transfer">
+                <span class="ptab-icon">📤</span>
+                <span class="ptab-label">Трансфер</span>
+            </button>
+            <button class="player-tab" data-ptab="history">
+                <span class="ptab-icon">📜</span>
+                <span class="ptab-label">История</span>
+            </button>
+        </div>
+        <div class="mobile-content" id="player-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН АГЕНТСТВА (ПРОКАЧКА + РЕЙТИНГ) ============ -->
+    <div id="agency-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <div class="mobile-header-icon">🏢</div>
+            <div class="mobile-header-title" id="agency-header-title">Агентство</div>
+        </div>
+        <div class="clients-tabs">
+            <button class="clients-tab active" data-atab="upgrade">
+                <span class="tab-icon">⬆</span>
+                <span>Прокачка</span>
+            </button>
+            <button class="clients-tab" data-atab="rating">
+                <span class="tab-icon">🏆</span>
+                <span>Рейтинг</span>
+            </button>
+        </div>
+        <div class="mobile-content" id="agency-content"></div>
+    </div>
+
+        <!-- ============ ЭКРАН ДРАФТА (ПОЛНЫЙ СПИСОК) ============ -->
+    <div id="draft-list-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <button class="header-back-btn" id="draft-list-back">←</button>
+            <div class="mobile-header-icon">🎯</div>
+            <div class="mobile-header-title">Драфт NHL</div>
+        </div>
+        <div class="clients-tabs">
+            <button class="clients-tab active" data-dtab="all"><span class="tab-icon">📋</span><span>Все пики</span></button>
+            <button class="clients-tab" data-dtab="mine"><span class="tab-icon">⭐</span><span>Мои клиенты</span><span class="tab-count" id="draft-mine-count">0</span></button>
+        </div>
+        <div class="mobile-content" id="draft-list-content"></div>
+    </div>
+
+        <!-- ============ ЭКРАН ЦЕЛЕЙ КАРЬЕРЫ ============ -->
+    <div id="career-goals-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <button class="header-back-btn" id="goals-back">←</button>
+            <div class="mobile-header-icon" id="goals-header-icon">🎯</div>
+            <div class="mobile-header-title" id="goals-title">Древо прогресса</div>
+        </div>
+        <div class="mobile-content" id="goals-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН ХАБА КЛУБА ============ -->
+    <div id="club-hub-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <button class="header-back-btn" id="club-hub-back">←</button>
+            <div class="mobile-header-icon" id="club-hub-icon">🏛️</div>
+            <div class="mobile-header-title" id="club-hub-title">Мой клуб</div>
+        </div>
+        <div class="club-hub-tabs">
+            <button class="club-hub-tab active" data-chub="overview">
+                <span class="cht-icon">📊</span><span>Обзор</span>
+            </button>
+            <button class="club-hub-tab" data-chub="roster">
+                <span class="cht-icon">👥</span><span>Состав</span>
+            </button>
+            <button class="club-hub-tab" data-chub="upgrade">
+                <span class="cht-icon">⬆</span><span>Прокачка</span>
+            </button>
+            <button class="club-hub-tab" data-chub="tasks">
+                <span class="cht-icon">📋</span><span>Задачи</span>
+            </button>
+            <button class="club-hub-tab" data-chub="reports">
+                <span class="cht-icon">📈</span><span>Отчёты</span>
+            </button>
+        </div>
+        <div class="mobile-content" id="club-hub-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН НОВОСТЕЙ ============ -->
+    <div id="news-feed-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <div class="mobile-header-icon">📰</div>
+            <div class="mobile-header-title">Новости</div>
+        </div>
+        <div class="clients-tabs">
+            <button class="clients-tab active" data-ntab="all"><span class="tab-icon">📰</span><span>Всё</span></button>
+            <button class="clients-tab" data-ntab="clients"><span class="tab-icon">🏒</span><span>Клиенты</span></button>
+            <button class="clients-tab" data-ntab="leagues"><span class="tab-icon">🌍</span><span>Лиги</span></button>
+            <button class="clients-tab" data-ntab="finance"><span class="tab-icon">💰</span><span>Финансы</span></button>
+        </div>
+        <div class="mobile-content" id="news-feed-content"></div>
+    </div>
+
+    <!-- ============ ЭКРАН ХРОНИКИ СОБЫТИЙ ============ -->
+    <div id="event-history-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <button class="header-back-btn" id="event-history-back">←</button>
+            <div class="mobile-header-icon">📜</div>
+            <div class="mobile-header-title">Хроника событий</div>
+        </div>
+        <div class="mobile-content" id="event-history-content"></div>
+    </div>
+
+    <!-- ============ НИЖНЯЯ НАВИГАЦИЯ ============ -->
+    <div id="bottom-nav" class="bottom-nav" style="display: none;">
+        <div class="nav-item active" data-nav="office">
+            <div class="nav-icon">🏠</div>
+            <div class="nav-label">Офис</div>
+        </div>
+        <div class="nav-item" data-nav="clients">
+            <div class="nav-icon">👥</div>
+            <div class="nav-label">Клиенты</div>
+        </div>
+        <div class="nav-item" data-nav="leagues">
+            <div class="nav-icon">🌍</div>
+            <div class="nav-label">Лиги</div>
+        </div>
+        <div class="nav-item" data-nav="market">
+            <div class="nav-icon">💰</div>
+            <div class="nav-label">Биржа</div>
+        </div>
+        <div class="nav-item" data-nav="agency">
+            <div class="nav-icon">🏢</div>
+            <div class="nav-label">Агентство</div>
+        </div>
+        <div class="nav-item nav-exit" data-nav="exit">
+            <div class="nav-icon">🚪</div>
+            <div class="nav-label">Выход</div>
+        </div>
+    </div>
+
+    <!-- ============ НИЖНЯЯ НАВИГАЦИЯ КЛУБА ============ -->
+    <div id="bottom-nav-club" class="bottom-nav" style="display: none;">
+        <div class="nav-item active" data-cnav="overview">
+            <div class="nav-icon">📊</div>
+            <div class="nav-label">Обзор</div>
+        </div>
+        <div class="nav-item" data-cnav="roster">
+            <div class="nav-icon">👥</div>
+            <div class="nav-label">Состав</div>
+        </div>
+        <div class="nav-item" data-cnav="upgrade">
+            <div class="nav-icon">⬆</div>
+            <div class="nav-label">Прокачка</div>
+        </div>
+        <div class="nav-item" data-cnav="tasks">
+            <div class="nav-icon">📋</div>
+            <div class="nav-label">Задачи</div>
+        </div>
+        <div class="nav-item" data-cnav="reports">
+            <div class="nav-icon">📈</div>
+            <div class="nav-label">Отчёты</div>
+        </div>
+        <div class="nav-item nav-exit" data-cnav="back">
+            <div class="nav-icon">←</div>
+            <div class="nav-label">Назад</div>
+        </div>
+    </div>
+
+    <!-- ============ ПАГИНАЦИЯ ============ -->
+    <div id="pagination" class="pagination" style="display: none;">
+        <button class="page-btn" id="page-prev">←</button>
+        <span class="page-info" id="page-info">Стр. 1 / 1</span>
+        <button class="page-btn" id="page-next">→</button>
+    </div>
+
+    <!-- ============ МОДАЛЬНОЕ ОКНО ПОДТВЕРЖДЕНИЯ ============ -->
+    <div id="confirm-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="confirm-title">Подтверждение</h2></div>
+            <div class="modal-body"><p id="confirm-text"></p></div>
+            <div class="modal-actions">
+                <button class="btn-neutral" id="confirm-cancel">Отмена</button>
+                <button class="btn-danger" id="confirm-ok">Подтвердить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛЬНОЕ ОКНО НАСТРОЕК ============ -->
+    <div id="settings-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2>Настройки</h2></div>
+            <div class="modal-body">
+                <div class="settings-row">
+                    <div class="settings-label"><span class="settings-icon">🔊</span><div><div class="settings-title">Звук</div><div class="settings-desc">Щелчки и уведомления</div></div></div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-sound" checked><span class="toggle-slider"></span></label>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label"><span class="settings-icon">📳</span><div><div class="settings-title">Вибрация</div><div class="settings-desc">Отклик на касания</div></div></div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-vibration" checked><span class="toggle-slider"></span></label>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label"><span class="settings-icon">🔔</span><div><div class="settings-title">Уведомления</div><div class="settings-desc">События в игре</div></div></div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-notifications" checked><span class="toggle-slider"></span></label>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label"><span class="settings-icon">🌐</span><div><div class="settings-title">Язык / Language</div><div class="settings-desc">Русский / English</div></div></div>
+                    <div class="lang-switch" id="settings-lang-switch">
+                        <button class="lang-switch-btn active" data-lang="ru">🇷🇺 RU</button>
+                        <button class="lang-switch-btn" data-lang="en">🇬🇧 EN</button>
+                    </div>
+                </div>
+                <div class="settings-divider"></div>
+                <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                    <div class="settings-label"><span class="settings-icon">💾</span><div><div class="settings-title" data-i18n="Сохранение">Сохранение</div><div class="settings-desc" data-i18n="Резервная копия карьеры в файл">Резервная копия карьеры в файл</div></div></div>
+                    <div style="display: flex; gap: 8px;">
+                        <button id="btn-export-save" class="btn-primary" style="flex:1; padding: 10px; font-size: 12px;">📤 <span data-i18n="Экспорт">Экспорт</span></button>
+                        <button id="btn-import-save" class="btn-neutral" style="flex:1; padding: 10px; font-size: 12px;">📥 <span data-i18n="Импорт">Импорт</span></button>
+                    </div>
+                    <input type="file" id="import-save-input" accept=".json,application/json" style="display: none;">
+                </div>
+                <div class="settings-divider"></div>
+                <div class="settings-danger">
+                    <div class="settings-title" style="color: var(--neon-red);">⚠ Опасная зона</div>
+                    <div class="settings-desc" style="margin-bottom: 10px;">Удалить все сохранения и начать заново</div>
+                    <button id="btn-reset-save" style="background: linear-gradient(135deg, #ff2d55 0%, #aa0033 100%); border: none; text-align: center;">Удалить сохранение</button>
+                </div>
+            </div>
+            <div class="modal-actions"><button id="btn-settings-close" class="btn-neutral">Закрыть</button></div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛЬНОЕ ОКНО ДАТАПАКА ============ -->
+    <div id="datapack-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="datapack-modal-title">📦 Оригинальные данные</h2></div>
+            <div class="modal-body" id="datapack-modal-body"></div>
+            <div class="modal-actions" id="datapack-modal-actions"></div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛЬНОЕ ОКНО "О ИГРЕ" ============ -->
+    <div id="about-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2>Об игре</h2></div>
+            <div class="modal-body">
+                <div class="about-hero">
+                    <div class="about-puck">
+                        <svg viewBox="0 0 80 80" width="80" height="80">
+                            <defs><linearGradient id="aboutGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#00d4ff"/><stop offset="100%" stop-color="#0088cc"/></linearGradient></defs>
+                            <ellipse cx="40" cy="55" rx="28" ry="8" fill="rgba(0,0,0,0.4)"/>
+                            <ellipse cx="40" cy="48" rx="28" ry="12" fill="#1a1a2e" stroke="url(#aboutGrad)" stroke-width="2"/>
+                            <ellipse cx="40" cy="45" rx="28" ry="12" fill="#25253d"/>
+                            <ellipse cx="40" cy="45" rx="24" ry="8" fill="none" stroke="url(#aboutGrad)" stroke-width="1" opacity="0.5"/>
+                        </svg>
+                    </div>
+                    <div class="about-title">HOCKEY LEGEND</div>
+                    <div class="about-version-tag">v1.0</div>
+                </div>
+                <p class="about-description">
+                    Симулятор хоккейного агента. Начни с нуля — подписывай игроков, 
+                    покупай акции клубов, становись президентом и приводи команды к чемпионству.
+                </p>
+                <div class="about-section-title">🎯 Возможности</div>
+                <div class="about-features">
+                    <div class="about-feature"><span class="feature-icon">🌍</span><div><div class="feature-title">13 лиг, 250+ клубов</div><div class="feature-desc">NHL, AHL, КХЛ, ВХЛ, МХЛ, Беларусь и Европа</div></div></div>
+                    <div class="about-feature"><span class="feature-icon">👥</span><div><div class="feature-title">4000+ игроков</div><div class="feature-desc">Полные составы всех команд мира</div></div></div>
+                    <div class="about-feature"><span class="feature-icon">🏢</span><div><div class="feature-title">50 агентств</div><div class="feature-desc">Создай империю и забери топ-игроков у конкурентов</div></div></div>
+                    <div class="about-feature"><span class="feature-icon">💰</span><div><div class="feature-title">Биржа акций</div><div class="feature-desc">Покупай, продавай, становись президентом</div></div></div>
+                    <div class="about-feature"><span class="feature-icon">🏆</span><div><div class="feature-title">Плей-офф и награды</div><div class="feature-desc">Сетка плей-офф, трофеи, личные награды</div></div></div>
+                    <div class="about-feature"><span class="feature-icon">⚙️</span><div><div class="feature-title">Прокачка агентства</div><div class="feature-desc">7 карточек × 25 уровней</div></div></div>
+                </div>
+                <div class="about-section-title">🛠 Разработка</div>
+                <p class="about-credits">Создано в образовательных целях. Игра не связана с NHL, KHL, IIHF или любым клубом. Все названия и логотипы принадлежат их владельцам.</p>
+                <div class="about-footer">© 2026 Hockey Legend<br>Сделано с ❤ для любителей хоккея</div>
+            </div>
+            <div class="modal-actions"><button id="btn-about-close" class="btn-neutral">Закрыть</button></div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛЬНОЕ ОКНО ВЫБОРА ПОСЛЕ ДРАФТА ============ -->
+    <div id="draft-choice-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2>🎯 Выбор после драфта</h2></div>
+            <div class="modal-body" id="draft-choice-body"></div>
+            <div class="modal-actions" id="draft-choice-actions"></div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛЬНОЕ ОКНО ИГРОКА ============ -->
+    <div id="client-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="client-modal-title">Игрок</h2></div>
+            <div class="modal-body" id="client-modal-body"></div>
+            <div class="modal-actions" id="client-modal-actions"></div>
+        </div>
+    </div>
+
+    <!-- ============ ЭКРАН ПРОСМОТРА МАТЧА ============ -->
+    <div id="match-view-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <button class="header-back-btn" id="mv-back">←</button>
+            <div class="mobile-header-icon">🏒</div>
+            <div class="mobile-header-title" id="mv-header-title">Матч</div>
+        </div>
+        <div class="mobile-content" id="mv-content"></div>
+    </div>
+
+        <!-- ============ МОДАЛЬНОЕ ОКНО МАТЧА ============ -->
+    <div id="match-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="match-modal-title">Матч</h2></div>
+            <div class="modal-body" id="match-modal-body"></div>
+            <div class="modal-actions">
+                <button class="btn-neutral" id="match-modal-close">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛЬНОЕ ОКНО ВЫБОРА СБОРНОЙ ДЛЯ БОЛЕНИЯ ============ -->
+    <div id="nt-pick-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="nt-pick-title">За кого болеешь?</h2></div>
+            <div class="modal-body" id="nt-pick-body"></div>
+            <div class="modal-actions" id="nt-pick-actions"></div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛЬНОЕ ОКНО ИНФО О СБОРНОЙ ============ -->
+    <div id="nt-team-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="nt-team-title">Сборная</h2></div>
+            <div class="modal-body" id="nt-team-body"></div>
+            <div class="modal-actions">
+                <button class="btn-neutral" id="nt-team-close">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛЬНОЕ ОКНО ИНФО О КЛУБЕ ============ -->
+    <div id="club-info-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="club-info-title">Клуб</h2></div>
+            <div class="modal-body" id="club-info-body"></div>
+            <div class="modal-actions">
+                <button class="btn-neutral" id="club-info-close">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛЬНОЕ ОКНО АКЦИЙ ============ -->
+    <div id="stock-trade-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="stock-trade-title">Акции</h2></div>
+            <div class="modal-body" id="stock-trade-body"></div>
+            <div class="modal-actions" id="stock-trade-actions"></div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛКА NPC-АГЕНТСТВА ============ -->
+    <div id="npc-agency-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="npc-agency-title">Агентство</h2></div>
+            <div class="modal-body" id="npc-agency-body"></div>
+            <div class="modal-actions" id="npc-agency-actions"></div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛКА ДИАЛОГА ПЕРЕМАНИВАНИЯ ============ -->
+    <div id="poach-dialog-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2>💬 Диалог с игроком</h2></div>
+            <div class="modal-body" id="poach-dialog-body"></div>
+            <div class="modal-actions" id="poach-dialog-actions"></div>
+        </div>
+    </div>
+
+
+    <!-- Модальные окна событий -->
+    <div id="event-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="event-title"></h2></div>
+            <div class="modal-body"><p id="event-text"></p><div id="event-details"></div></div>
+            <div class="modal-actions" id="event-actions"></div>
+        </div>
+    </div>
+    <div id="stock-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="stock-modal-title"></h2></div>
+            <div class="modal-body"><div id="stock-modal-content"></div></div>
+            <div class="modal-actions" id="stock-modal-actions"></div>
+        </div>
+    </div>
+    <div id="transfer-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header"><h2 id="transfer-modal-title"></h2></div>
+            <div class="modal-body"><div id="transfer-modal-content"></div></div>
+            <div class="modal-actions" id="transfer-modal-actions"></div>
+        </div>
+    </div>
+
+    <!-- Модалка переговоров в стиле смартфона (чат с клубом) -->
+    <div id="negotiation-modal" class="modal-overlay" style="display: none;">
+        <div class="phone-mockup">
+            <div class="phone-notch"><span class="phone-speaker"></span></div>
+            <div class="phone-screen">
+                <div class="phone-chat-header">
+                    <div class="phone-chat-avatar" id="phone-chat-avatar"></div>
+                    <div class="phone-chat-info">
+                        <span class="phone-chat-name" id="phone-chat-name"></span>
+                        <span class="phone-chat-status" id="phone-chat-status"></span>
+                    </div>
+                </div>
+                <div class="phone-chat-body" id="phone-chat-body"></div>
+                <div class="phone-input-bar" id="phone-input-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="i18n.js"></script>
+    <script src="datapack_rosters.js"></script>
+    <script src="script.js"></script>
+    <script src="datapack.js"></script>
+</body>
+</html>

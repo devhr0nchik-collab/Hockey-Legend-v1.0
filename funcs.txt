@@ -1,0 +1,446 @@
+33:function openDB() {
+51:function idbSet(key, value) {
+61:function idbGet(key) {
+71:function idbDelete(key) {
+389:function splitClubKey(key) {
+405:function getLeagueName(lk) {
+436:function transliterate(str) {
+440:function generateLogoSlug(club) {
+452:function getTeamLogoHTML(club, leagueKey) {
+486:function getLeaguePrize(lk, multiplier) {
+501:function getLeagueBaseCost(lk) {
+509:function clubUpgradeCost(cardKey, level, lk) {
+513:function generateClubUpgrades(prestige) {
+527:function getStadiumCapacity(lvl) { return 5000 + lvl * 2500; }
+528:function getStadiumHomeBonus(lvl) { return 0.02 + (lvl - 1) * 0.0045; }
+529:function getMarketingSponsors(lvl) { return 1 + Math.floor(lvl / 3); }
+530:function getMarketingMultiplier(lvl) { return 1 + (lvl - 1) * 0.10; }
+531:function getMedicalInjuryReduction(lvl) { return (lvl - 1) * 0.025; }
+532:function getMedicalRecoveryWeeks(lvl) { return lvl >= 20 ? 2 : lvl >= 10 ? 1 : 0; }
+533:function getTrainingGrowthBonus(lvl) { return 1 + (lvl - 1) * 0.025; }
+534:function getScoutingMinRating(lvl) { return 40 + Math.round((lvl - 1) * 0.75); }
+535:function getScoutingTalentChance(lvl) { return 0.05 + (lvl - 1) * 0.0083; }
+536:function getAcademyPotentialBonus(lvl) { return Math.round((lvl - 1) * 0.4); }
+538:function getClubUpgradesTotal(club) {
+542:function getClubUpgradesAvg(club) {
+545:function getClubSalaryLoad(club) {
+552:function upgradeCost(cardKey, level) {
+555:function weeklyCostForCard(cardKey) {
+559:function totalWeeklyCost() {
+565:function getSlots() { return 5 + upgrades.office; }
+566:function getMaxRatingVisible() { return 30 + Math.round((upgrades.scouting - 1) * 2.9); }
+572:function getRevealRange() {
+576:function getMinAge() { return 18 - Math.floor((upgrades.youth - 1) / 5); }
+577:function getTradeBonus() { return (upgrades.negotiator - 1) * 0.03; }
+578:function getDiscountBonus() { return (upgrades.negotiator - 1) * 0.01; }
+579:function getSignRefusalChance() { return Math.max(0, 0.60 - (upgrades.reputation - 1) * 0.025); }
+580:function getMediaMultiplier() { return 1.0 + (upgrades.media - 1) * 0.08; }
+584:function getTrainerSuccessChance() {
+588:function getTrainerWeeklyCost() { return Math.round(100 + Math.pow(upgrades.trainer, 1.7) * 12); }
+596:function getScoutedPlayersPerWindow() { return 1 + Math.floor(upgrades.scouting / 8); }
+598:function getScoutingRatingRange() {
+605:function getScoutedLoyalty() { return Math.min(95, 55 + Math.round(upgrades.scouting * 1.5)); }
+608:function generateScoutedPlayers() {
+646:function randomInt(min,max){return Math.floor(Math.random()*(max-min+1))+min;}
+647:function randomChoice(arr){return arr[Math.floor(Math.random()*arr.length)];}
+648:function getAllClubs(lk){const a=[];LEAGUE_DATA[lk].divisions.forEach(d=>a.push(...d.clubs));return a;}
+649:function hashString(str){let h=0;for(let i=0;i<str.length;i++)h=(h*31+str.charCodeAt(i))|0;return Math.abs(h);}
+650:function makeSeededRNG(seed){let s=seed|0;return function(){s=(s*1664525+1013904223)|0;return((s>>>0)/4294967296);};}
+652:function generateAttributes(position,rating,name){
+677:function getLeagueSalaryCap(lk) {
+681:function calculateSalary(rating, league){
+692:function calculateSalaryCap(rating, league) {
+697:function formatSalary(k){
+701:function formatMoney(a){
+706:function formatContractYears(y){
+796:function toLatin(name) {
+803:function getPoolPoolForLeague(leagueName) {
+834:function generatePlayerName(leagueName) {
+850:function getPlayerCountry(player) {
+857:function guessNationalityByName(name, league) {
+916:function getAvatarEthnicity(country) {
+927:function hexToRgb(hex) {
+931:function rgbToHex(r,g,b) {
+934:function shadeColor(hex, percent) {
+939:function getPlayerAvatarSVG(player) {
+1098:    function renderEye(ex) {
+1232:function createPlayer(name, club, league, position, age, rating, potential, nationality) {
+1264:function generateFakeCareerHistory(player) {
+1466:function createRealPlayer(data, club, league) {
+1518:function generateRoundRobin(clubs) {
+1538:function generateLeagueSchedule(leagueKey) {
+1570:function generateAllSchedules() {
+1589:function getWorldCupSlots() {
+1597:function selectWorldCupTeams() {
+1649:function splitWorldCupConferences(teams) {
+1680:function generateWorldCupSchedule(confTeams, confId) {
+1703:function ensureUniquePlayerNames() {
+1719:function generateAllPlayers() {
+1775:function padRealRoster(allPlayers, clubStart, club, leagueName, leagueData) {
+1861:function generateNpcAgencies() {
+1881:function assignPlayersToNpcAgencies() {
+1904:function getLeagueStockMultiplier(lk){
+1911:function getMyAgentReputation() {
+1926:function getNpcTopReputation() {
+1933:function countYoungReached(threshold) {
+1948:function incrementClientsSigned() {
+1953:function getGoalProgress(checkType) {    if (checkType === 'roster') return myRoster.length;
+2054:function checkAllGoals() {
+2097:function generateClubData() {
+2136:function simulateClubEconomy() {
+2182:function calculateDividends() {
+2202:function getIncomeMultiplier() {
+2208:function getEventMoneyMultiplier() {
+2215:function scaleEventMoney(amount) {
+2219:function calculatePassiveIncome() {
+2236:function payTransferCommission(player, oldSalary, newSalary) {
+2247:function generateCouncilTasks(club) {
+2308:function ensureCouncil() {
+2326:function checkTaskProgress(club, task) {
+2381:function simulateAIUpgrades() {
+2402:function simulateClubActions() {
+2421:function recalculateStockPrice(club) {
+2444:function updateAllStockPrices() {
+2454:function getPortfolioKey(club, lk) { return lk + "_" + club; }
+2455:function getTotalSharesCount() { let t = 0; for (const k of Object.keys(myPortfolio)) t += myPortfolio[k].shares; return t; }
+2458:function initializeStandings() {
+2473:function sortStandingsFn(a,b) {
+2480:function simulateStandingsWeek() {
+2496:function buildClubPlayerIndex(excludeGoalies) {
+2511:function simulateMatchWithDetails(match, lk, clubIndex) {
+2737:function weightedPickClub(clubs, lk) {
+2752:function generateVirtualChampionsHistory(seasonsBack) {
+2773:function recordChampion(lk, champion, finalist, season) {
+2780:function formatSeasonLabel(season) {
+2785:function resetStandingsForNewSeason() {
+2793:function resetWorldPlayerStats() {
+2802:function updateWorldCupSlots(winnerLeague, worstLeague) {
+2816:function computeWorldCupTeamStrength(team) {
+2824:function startWorldCup() {
+2865:function resetWorldCupForNewSeason() {
+2874:function simulateWorldCupMatch(match) {
+2936:function updateWorldCupStanding(conf, club, gf, ga, isWin) {
+2945:function simulateWorldCupRegularWeek() {
+2966:function buildWorldCupPlayoffBracket() {
+2996:function simulateWorldCupSeries(s) {
+3020:function buildWorldCupNextRound(prevSeries) {
+3057:function simulateWorldCupPlayoffRound() {
+3193:function showWorldCupScreen() {
+3207:function renderWorldCupScreen() {
+3222:function renderWcStandings(c) {
+3270:function renderWcPlayoffs(c) {
+3456:function buildWcBracketMatch(s) {
+3475:function renderWcSchedule(c) {
+3529:function renderWcHistory(c) {
+3645:function showSaveIndicator() {
+3651:function packPlayer(p) {
+3666:function unpackPlayer(a) {
+3704:function packClub(c) {
+3712:function unpackClub(a) {
+3733:function saveGame() {
+3801:function hasSave() {
+3811:async function loadGame() {
+4056:function deleteSave() {
+4064:function resetGame() {
+4138:function seedFreeAgents(count) {
+4145:function inferNewsCategory(text) {
+4152:function addNews(text, type="info") {
+4163:function generateRandomNews() {
+4177:function addXP(a) {
+4191:function getXPProgress() {
+4198:function getAgentRank(idx) {
+4204:function getPresidentClubs() {
+4215:function showBottomNav() { const n = document.getElementById('bottom-nav'); if (n) n.style.display = 'flex'; }
+4216:function hideBottomNav() { const n = document.getElementById('bottom-nav'); if (n) n.style.display = 'none'; }
+4218:function showPagination(totalItems, cb) {
+4231:function hidePagination() {
+4241:function showMobileScreen(id) {
+4251:function closeEventModal() { eventModal.style.display = 'none'; }
+4254:function renderOffice() {
+4390:function renderEventHistory() {
+4431:function showDraftListScreen() {
+4441:function renderDraftListScreen() {
+4510:document.querySelectorAll('#draft-list-screen .clients-tab').forEach(t => t.addEventListener('click', function () {
+4518:function buildClubPositionGraph(clubKey) {
+4561:function getClubTrophiesList(club) {
+4577:function showCareerGoalsScreen() {
+4590:function getBranchProgress(branchKey) {
+4596:function getTotalProgress() {
+4605:function renderCareerGoalsTree() {
+4653:function openBranchDetail(branchKey) {
+4658:function renderBranchDetail() {
+4752:function buildBranchCard(branchKey, isMain) {
+4769:function showInfrastructureScreen() {
+4780:function showClubBottomNav() {
+4786:function hideClubBottomNav() {
+4791:function renderClubHub() {
+4822:function renderClubOverview(c, club) {
+4949:function renderClubRoster(c, club) {
+5021:function buildRosterGroup(title, list) {
+5037:function buildRosterRow(p) {
+5076:function renderClubTasks(c, club) {
+5149:function renderClubReports(c, club) {
+5292:function renderClubUpgrade(c, club) {
+5374:function buildClubUpgradeCard(club, cardKey) {
+5439:function purchaseClubUpgrade(cardKey) {
+5461:function getCardEffects(cardKey, lvl) {
+5471:function formatEffectVal(cardKey, idx, val) {
+5517:    tab.addEventListener('click', function () {
+5527:    item.addEventListener('click', function () {
+5539:function showNewsFeedScreen() {
+5549:function getNewsCategoryFor(n) {
+5554:function renderNewsFeedScreen() {
+5610:document.querySelectorAll('#news-feed-screen .clients-tab').forEach(t => t.addEventListener('click', function () {
+5617:function updateAllDisplays() {
+5623:function renderClientsScreen() {
+5638:function renderMyClients(c) {
+5664:function renderSearchClients(c) {
+5760:function buildPlayerRow(p) {
+5796:function openPlayerScreen(player, source) {
+5808:function renderPlayerScreen() {
+5828:function renderPlayerInfo(c, p) {
+5940:function ppAttrBar(label, val) {
+5946:function buildSkaterStatsHTML(s, pts) {
+5959:function buildGoalieStatsHTML(s) {
+5970:function buildPlayerActions(p) {
+5987:function getNegotiationEntry(playerName) {
+5994:function pickRandomClubs(clubs, maxCount) {
+6013:function openClubPickModal(player) {
+6044:function renderSavedOffersInPhone(player, entry) {
+6094:function closeNegotiationModal() {
+6111:function startNegotiationFromSaved(player, savedOffer) {
+6129:function addClubMsg(text, offerSnapshot) {
+6133:function addAgentMsg(text) {
+6137:function addSystemMsg(text, isError) {
+6141:function buildPhoneChatHTML() {
+6163:function scrollChatToBottom() {
+6171:function renderPhoneActions(player) {
+6249:function renderNegotiationModal(player) {
+6274:function appendNewMessages() {
+6280:function renderTradeOptionsMenu(player) {
+6314:function getNegotiationSuccessChance(player, kind) {
+6323:function resolveNegotiationRound(player, kind) {
+6401:function endNegotiation(player, accepted, clubWalkedAway, keepOpen) {
+6426:function acceptNegotiation(player) {
+6478:function signPlayerToMyClub(player, offer) {
+6526:function getTrainingByAttr(attr) {
+6530:function renderPlayerDevelopment(c, p) {
+6607:function startPlayerTraining(p, attr) {
+6625:function processWeeklyTrainings() {
+6650:function renderPlayerTransfer(c, p) {
+6790:function getLeagueRegion(lk) {
+6798:function renderPlayerHistory(c, p) {
+7021:function buildCareerGraph(hist) {
+7064:function signPlayerFromScreen(p) {
+7087:function openSimpleInfoModal(title, text) {
+7100:function closePlayerScreen() {
+7142:document.querySelectorAll('.player-tab').forEach(t => t.addEventListener('click', function () {
+7152:function getLeaderboardData(lk) {
+7160:function openLeaderboard() {
+7168:function renderLeaderboard() {
+7213:function renderLeaguesScreen() {
+7247:function openLeagueStandings(lk) {
+7261:document.querySelectorAll('.league-tab').forEach(t => t.addEventListener('click', function () {
+7267:function openClubInfoModal(clubName, lk, parentScreenId) {
+7424:function closeClubInfoModal() {
+7457:function getStadiumName(clubName) {
+7469:function openPublicClubHub(clubName, lk, fromScreenId) {
+7486:function renderPublicClubHub() {
+7527:function renderPCHOverview(c, data, lk) {
+7568:function renderPCHRoster(c, clubName, lk) {
+7611:function renderPCHSchedule(c, clubName, lk) {
+7649:function renderPCHHistory(c, data, clubName, lk) {
+7688:function renderPCHStocks(c, data, clubName, lk) {
+7707:    tb.addEventListener('click', function () {
+7752:function getClubForm(clubName, lk, limit) {
+7774:function getClubFormHTML(clubName, lk) {
+7785:function renderStandingsScreen(lk) {
+7862:function getRoundName(round, totalRounds) {
+7870:function getRoundShortName(round, totalRounds) {
+7878:function getCupName(lk) {
+7884:function startPlayoffs() {
+7913:function simulateOneSeries(s) {
+7929:function buildNextRoundSeries(state, winners) {
+7993:function generatePlayoffMatchDetails(homeClub, awayClub, homeScore, awayScore, lk, seriesInfo) {
+8053:function simulatePlayoffRound() {
+8227:function openMatchQueueFromData(list, onFinish) {
+8238:function finishPlayoffs() {
+8246:function openMatchQueue(matches, lk) {
+8254:function openNextMatchInQueue() {
+8282:function openMatchView(match, lk) {
+8313:function buildMatchScript(match, lk) {
+8386:function renderMatchView() {
+8632:function startMatchPlayback() {
+8659:function pauseMatchPlayback() {
+8666:function skipMatchPlayback() {
+8675:function closeMatchView() {
+8729:function openMatchModal(match, lk) {
+8890:function renderLeagueSchedule(c, lk) {
+9082:function renderLeagueHistory(c, lk) {
+9157:function renderLeaguePlayoffs(c, lk) {
+9183:    function getSeriesForRound(r) {
+9322:function buildBracketMatch(s, lk) {
+9333:function showMarketScreen() {
+9342:function getMarketList() {
+9355:function sortMarketList(list) {
+9362:function renderMarketScreen() {
+9381:function makeMiniSparkline(hist, up) {
+9391:function renderMarketList(c) {
+9505:function renderPortfolio(c) {
+9562:function checkPresidentStatus() {
+9576:function getPresidentBlockHTML(key, owned) {
+9589:function openStockTradeModal(club, lk) {
+9651:    function updatePLPreview() {
+9666:    function updateButtons() {
+9760:function makeSparkline(hist) {
+9772:function histRangeStr(data) {
+9782:function runDraft() {
+9814:function generateYouthPlayer(forcedLeague) {
+9844:function generateFreeAgentYouth() {
+9857:function startDraftChoices() {
+9869:function showDraftSummary() {
+9963:function showFirstPickBanner(pick) {
+9984:function getFarmClub(nhlClub) {
+9989:function showNextDraftChoice() {
+10028:function applyDraftChoice(choice) {
+10059:function closeDraftAndStartSeason() {
+10104:function evaluateCouncilSeason() {
+10140:function processEndOfSeasonContracts() {
+10165:function advanceSeasonAges() {
+10174:function archiveSeason(p) {
+10190:function isTop10Scorer(p) {
+10204:function evolvePlayer(p) {
+10263:function trackYoungMilestones(p) {
+10277:function processRetirements() {
+10303:function replenishYouth() {
+10342:function pickClubForYouth(lk) {
+10358:function makeUniqueName(baseName, league, usedSet) {
+10369:function rebalanceClubRosters(minSize) {
+10399:function awardEndOfSeason() {
+10465:function checkAward(top, name, lk) {
+10475:function showAgencyScreen() {
+10487:function renderAgencyScreen() {
+10502:    tab.addEventListener('click', function () {
+10508:function renderUpgradeTab(c) {
+10526:function buildUpgradeCard(key, isDebt) {
+10582:function renderRatingTab(c) {
+10635:function openNpcAgency(ag) {
+10738:function openPoachDialog(player, npcAgency) {
+10802:function resolvePoach(player, npcAgency, reply) {
+10884:btnPlayWeek.addEventListener('click', function () {
+10908:function playTournamentWeek() {
+10942:function finishTournament() {
+10977:function getWealthTax() {
+10986:function playRegularWeek() {
+11092:function playTransferWeek() {
+11170:function getTeamBonusForPM(player) {
+11185:function simulateWeekForPlayer(p) {
+12251:function isInHomeCountry(player) {
+12272:function createTask(config) {
+12296:function getTaskWeeksLeft(task) {
+12302:function findTaskPlayer(task) {
+12307:function removeClientFromRoster(p) {
+12312:function completeTask(task, customMessage) {
+12327:function failTask(task) {
+12339:function checkActiveTasks() {
+12402:function renderActiveTasks() {
+12438:function addEventHistory(entry) {
+12444:function startChain(chainId) {
+12457:function advanceChain(chainId) {
+12469:function tryChainEvent() {
+12491:function showChainStage(chain, stage, player) {
+12542:function checkChains() {
+12547:function triggerChainStart(chainId) {
+12560:function showWeeklyEvent(ev) {
+12570:function openPendingEvent() {
+12576:function renderEventInPhone(ev, player) {
+12655:function renderPendingEventBadge() {
+12674:function simulateAITransfers() {
+12743:function tryWeeklyEvent() {
+12776:function applyEventChoice(ev, choice, player) {
+12819:function tryNpcPoaching() {
+12839:function showPoachingEvent(player, agent, newSalary, compensation) {
+12901:function getLeagueTier(lk) {
+12906:function getPlayingTimeInfo(player, clubInfo) {
+12928:function getClubsForPlayer(player, options) {
+12978:function generateTransferOffer(player, clubInfo) {
+13064:function generateOffersForPlayer(player, count, options) {
+13081:function startActiveTransferSearch(player) {
+13108:function tickTransferOffers() {
+13121:function acceptTransferOffer(player, offer) {    // Игрок может отказаться, если интерес низкий
+13181:function declineTransferOffer(player, offer, permanent) {
+13200:function cancelActiveTransfer(player) {
+13209:function getAdvisorReport(player, offer) {
+13242:function openTransferOfferModal(player, offer) {
+13313:function tryTradeOffer(player, offer) {
+13347:function tryPassiveTransferOffer() {
+13385:function showPassiveOffer(player, bestOffer, allOffers) {
+13450:function processPendingClubReturns() {
+13476:function isRenewalWindow() {
+13480:function generateRenewalOffer(player) {
+13495:function rollPlayerWantsToLeave(player) {
+13506:function tryContractRenewal() {
+13521:function showContractRenewalModal(player, offer, wantsLeave) {
+13609:function applyContractRenewal(player, offer) {
+13623:function tryTradeContract(player, offer) {
+13643:function requestContractRenewalFromCard(player) {
+13655:    item.addEventListener('click', async function () {
+13693:document.querySelectorAll('#clients-screen .clients-tab').forEach(t => t.addEventListener('click', function () {
+13713:document.querySelectorAll('#market-screen .clients-tab').forEach(t => t.addEventListener('click', function () {
+13721:    tile.addEventListener('click', function () {
+13754:function showCreateAgencyScreen() {
+13765:function renderCreateAgency() {
+13830:function startNewGame() {
+13842:btnNewGame.addEventListener('click', async function () {
+13847:btnLoadGame.addEventListener('click', async function () {
+13866:function updateLangButton() {
+13883:function switchLang(lang) {
+13911:function updateDatapackButton() {
+13925:function openDatapackModal() {
+14038:function getAudioCtx() {
+14058:function playSound(kind) {
+14093:function vibrate(kind) {
+14109:function uiAlert(text, type) {
+14120:function uiConfirm(message, options) {
+14151:function showToast(text, type) {    if (!gameSettings.notifications) return;
+14178:function loadSettings() {
+14185:function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(gameSettings)); } catch (e) {} }
+14188:function exportSave() {
+14212:function importSaveFile(file) {
+14275:function updateGreeting() {
+14294:function updateWorldNews() {
+14304:function generateSnowflakes() {
+14322:async function updateContinueCard() {
+14341:function applyClubRenameMap(R) {
+14531:function activateDatapack() {
+14547:function deactivateDatapack() {
+14588:function pushModalHistory() {
+14603:(function () {
+14631:(function initA11y() {
+14675:function getTournamentType(year) {
+14680:function getTournamentName(type) {
+14684:function collectNationalTeams() {
+14708:function generateTournamentGroups(teams) {
+14722:function generateTournamentSchedule(groups) {
+14741:function calcNationalStrength(team) {
+14749:function simulateNationalMatch(teamA, teamB) {
+14825:function buildNationalMatchForView(homeTeam, awayTeam, res) {
+14873:function updateTournamentStanding(group, codeHome, codeAway, result) {
+14891:function resyncNationalTournamentPlayers() {
+14909:function startNationalTournament() {
+14961:function simulateTournamentWeek() {
+14991:function buildNationalPlayoffBracket() {
+15024:function startNationalPlayoff() {
+15038:function simulateNationalPlayoffSeries(s) {
+15050:function buildNationalNextRound(prevSeries, round) {
+15068:function simulateNationalPlayoffRound() {
+15137:function awardNationalTournamentMedals(gold, silver, bronze) {
+15170:function showNationalPickModal() {
+15258:function showNationalTournamentScreen() {
+15269:function renderNationalTournamentScreen() {
+15296:function renderNtFavBar() {
+15360:function renderNtGroups(c) {
+15426:function renderNtPlayoff(c) {
+15540:function renderNtHistory(c) {
+15589:    t.addEventListener('click', function () {
+15614:function openNationalTeamModal(code) {

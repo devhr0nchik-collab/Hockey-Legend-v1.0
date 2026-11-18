@@ -1,0 +1,260 @@
+3:const mainMenu = document.getElementById('main-menu');
+4:const officeScreen = document.getElementById('office-screen');
+5:const saveIndicator = document.getElementById('save-indicator');
+6:const eventModal = document.getElementById('event-modal');
+7:const eventTitle = document.getElementById('event-title');
+8:const eventText = document.getElementById('event-text');
+9:const eventDetails = document.getElementById('event-details');
+10:const eventActions = document.getElementById('event-actions');
+12:const negotiationModal = document.getElementById('negotiation-modal');
+13:const phoneChatAvatar = document.getElementById('phone-chat-avatar');
+14:const phoneChatName = document.getElementById('phone-chat-name');
+15:const phoneChatStatus = document.getElementById('phone-chat-status');
+16:const phoneChatBody = document.getElementById('phone-chat-body');
+17:const phoneInputBar = document.getElementById('phone-input-bar');
+18:const btnNewGame = document.getElementById('btn-new-game');
+19:const btnLoadGame = document.getElementById('btn-load-game');
+20:const btnSettings = document.getElementById('btn-settings');
+21:const settingsModal = document.getElementById('settings-modal');
+22:const btnSettingsClose = document.getElementById('btn-settings-close');
+23:const btnAbout = document.getElementById('btn-about');
+24:const aboutModal = document.getElementById('about-modal');
+25:const btnAboutClose = document.getElementById('btn-about-close');
+26:const btnPlayWeek = document.getElementById('btn-play-week');
+3200:    const s = document.getElementById('world-cup-screen');
+3208:    const c = document.getElementById('world-cup-content');
+3632:document.getElementById('world-cup-back')?.addEventListener('click', () => {
+3634:    const os = document.getElementById('office-screen');
+4215:function showBottomNav() { const n = document.getElementById('bottom-nav'); if (n) n.style.display = 'flex'; }
+4216:function hideBottomNav() { const n = document.getElementById('bottom-nav'); if (n) n.style.display = 'none'; }
+4219:    const pag = document.getElementById('pagination');
+4225:    document.getElementById('page-info').textContent = `${LANG.t('Стр.')} ${currentPage} / ${tp}`;
+4226:    document.getElementById('page-prev').disabled = currentPage <= 1;
+4227:    document.getElementById('page-next').disabled = currentPage >= tp;
+4232:    const p = document.getElementById('pagination');
+4238:document.getElementById('page-prev')?.addEventListener('click', () => { if (currentPage > 1) { currentPage--; if (paginationCallback) paginationCallback(); } });
+4239:document.getElementById('page-next')?.addEventListener('click', () => { currentPage++; if (paginationCallback) paginationCallback(); });
+4243:    const t = document.getElementById(id);
+4258:    const mEl = document.getElementById('office-money');
+4259:    const sEl = document.getElementById('office-season');
+4260:    const wEl = document.getElementById('office-week');
+4261:    const nEl = document.getElementById('office-agent-name');
+4262:    const rEl = document.getElementById('office-agent-rank');
+4263:    const htEl = document.getElementById('office-header-title');
+4275:    const banner = document.getElementById('office-window-banner');
+4318:    const xpL = document.getElementById('office-agent-level');
+4319:    const xpT = document.getElementById('office-xp-text');
+4320:    const xpF = document.getElementById('office-xp-fill');
+4325:    const infraTile = document.getElementById('tile-infrastructure');
+4330:    const ntBtn = document.getElementById('btn-open-national-tournament');
+4336:            const ntTitle = document.getElementById('btn-nt-title');
+4337:            const ntDesc = document.getElementById('btn-nt-desc');
+4356:    const wcBtn = document.getElementById('btn-open-world-cup');
+4360:            const wcTitle = document.getElementById('btn-wc-title');
+4361:            const wcDesc = document.getElementById('btn-wc-desc');
+4378:    const mini = document.getElementById('mini-news');
+4391:    const c = document.getElementById('event-history-content');
+4417:document.getElementById('event-history-back')?.addEventListener('click', () => {
+4419:    const os = document.getElementById('office-screen');
+4434:    const s = document.getElementById('draft-list-screen');
+4442:    const c = document.getElementById('draft-list-content');
+4453:    const cntEl = document.getElementById('draft-mine-count');
+4580:    const t = document.getElementById('goals-title');
+4583:    const s = document.getElementById('career-goals-screen');
+4606:    const c = document.getElementById('goals-content');
+4607:    const t = document.getElementById('goals-title');
+4659:    const c = document.getElementById('goals-content');
+4660:    const t = document.getElementById('goals-title');
+4676:        const ttl = document.getElementById('goals-title');
+4774:    const s = document.getElementById('club-hub-screen');
+4781:    document.getElementById('bottom-nav').style.display = 'none';
+4782:    const cn = document.getElementById('bottom-nav-club');
+4787:    const cn = document.getElementById('bottom-nav-club');
+4792:    const c = document.getElementById('club-hub-content');
+4793:    const t = document.getElementById('club-hub-title');
+4794:    const ic = document.getElementById('club-hub-icon');
+4937:        const os = document.getElementById('office-screen');
+5353:        const os = document.getElementById('office-screen');
+5425:        renderClubUpgrade(document.getElementById('club-hub-content'), clubData[presidentClubKey]);
+5458:    renderClubUpgrade(document.getElementById('club-hub-content'), clubData[presidentClubKey]);
+5481:document.getElementById('goals-back')?.addEventListener('click', () => {
+5485:        const t = document.getElementById('goals-title');
+5493:    const os = document.getElementById('office-screen');
+5502:document.getElementById('club-hub-back')?.addEventListener('click', () => {
+5506:    const os = document.getElementById('office-screen');
+5530:            document.getElementById('club-hub-back')?.click();
+5542:    const ns = document.getElementById('news-feed-screen');
+5555:    const c = document.getElementById('news-feed-content');
+5624:    const c = document.getElementById('clients-content');
+5626:    const cnt = document.getElementById('my-clients-count');
+5802:    const ps = document.getElementById('player-screen');
+5811:    const tEl = document.getElementById('player-header-title');
+5812:    const iEl = document.getElementById('player-header-icon');
+5819:    const c = document.getElementById('player-content');
+5936:    const signBtn = document.getElementById('btn-pp-sign');
+6099:document.getElementById('negotiation-modal')?.addEventListener('click', (e) => {
+6757:    document.getElementById('pt-negotiate-btn')?.addEventListener('click', () => {
+6764:    document.getElementById('pt-cancel-btn')?.addEventListener('click', async () => {
+7123:            const cs = document.getElementById('clients-screen');
+7128:            const os = document.getElementById('office-screen');
+7136:        const os = document.getElementById('office-screen');
+7146:document.getElementById('player-back')?.addEventListener('click', closePlayerScreen);
+7162:    const s = document.getElementById('leaderboard-screen');
+7169:    const c = document.getElementById('leaderboard-content');
+7174:    const tabs = document.getElementById('leaderboard-tabs');
+7214:    const c = document.getElementById('leagues-content');
+7252:    const s = document.getElementById('standings-screen');
+7273:        const os = document.getElementById('office-screen');
+7287:    const modal = document.getElementById('club-info-modal');
+7288:    const title = document.getElementById('club-info-title');
+7289:    const body = document.getElementById('club-info-body');
+7417:            document.getElementById('club-info-modal').style.display = 'none';
+7425:    document.getElementById('club-info-modal').style.display = 'none';
+7430:        const ps = document.getElementById(parent);
+7440:        const os = document.getElementById('office-screen');
+7446:document.getElementById('club-info-close')?.addEventListener('click', closeClubInfoModal);
+7447:document.getElementById('club-info-modal')?.addEventListener('click', (e) => {
+7494:    const s = document.getElementById('public-club-hub-screen');
+7499:    const title = document.getElementById('pch-title');
+7500:    const icon = document.getElementById('pch-icon');
+7504:    const manageBtn = document.getElementById('pch-manage-btn');
+7516:    const c = document.getElementById('pch-content');
+7712:document.getElementById('pch-back')?.addEventListener('click', () => {
+7719:    const back = document.getElementById(target);
+7727:        const os = document.getElementById('office-screen');
+7732:document.getElementById('pch-manage-btn')?.addEventListener('click', () => {
+7786:    const c = document.getElementById('standings-content');
+7787:    const ti = document.getElementById('standings-title');
+7788:    const ic = document.getElementById('standings-icon');
+7804:        const l = document.getElementById('leagues-screen');
+8266:        const os = document.getElementById('office-screen');
+8288:    const modal = document.getElementById('match-modal');
+8299:    const screen = document.getElementById('match-view-screen');
+8303:    const title = document.getElementById('mv-header-title');
+8387:    const c = document.getElementById('mv-content');
+8593:    const playBtn = document.getElementById('mv-play');
+8594:    const pauseBtn = document.getElementById('mv-pause');
+8595:    const skipBtn = document.getElementById('mv-skip');
+8596:    const closeBtn = document.getElementById('mv-close');
+8705:            const os = document.getElementById('office-screen');
+8717:    const os = document.getElementById('office-screen');
+8726:document.getElementById('mv-back')?.addEventListener('click', closeMatchView);
+8731:    const modal = document.getElementById('match-modal');
+8732:    const title = document.getElementById('match-modal-title');
+8733:    const body = document.getElementById('match-modal-body');
+8879:document.getElementById('match-modal-close')?.addEventListener('click', () => {
+8880:    document.getElementById('match-modal').style.display = 'none';
+8882:document.getElementById('match-modal')?.addEventListener('click', (e) => {
+8920:            const l = document.getElementById('leagues-screen');
+9336:    const ms = document.getElementById('market-screen');
+9363:    const c = document.getElementById('market-content');
+9365:    const cnt = document.getElementById('portfolio-count');
+9596:    const modal = document.getElementById('stock-trade-modal');
+9597:    const title = document.getElementById('stock-trade-title');
+9598:    const body = document.getElementById('stock-trade-body');
+9599:    const actions = document.getElementById('stock-trade-actions');
+9669:        const buyBtn = document.getElementById('btn-stock-buy');
+9670:        const sellBtn = document.getElementById('btn-stock-sell');
+9870:    const modal = document.getElementById('draft-choice-modal');
+9871:    const body = document.getElementById('draft-choice-body');
+9872:    const actions = document.getElementById('draft-choice-actions');
+9990:    if (draftChoiceQueue.length === 0) { document.getElementById('draft-choice-modal').style.display = 'none'; closeDraftAndStartSeason(); return; }
+9995:    document.getElementById('draft-choice-body').innerHTML = `
+10006:    const actions = document.getElementById('draft-choice-actions');
+10025:    document.getElementById('draft-choice-modal').style.display = 'flex';
+10478:    const a = document.getElementById('agency-screen');
+10488:    const c = document.getElementById('agency-content');
+10489:    const ht = document.getElementById('agency-header-title');
+10636:    const modal = document.getElementById('npc-agency-modal');
+10637:    const title = document.getElementById('npc-agency-title');
+10638:    const body = document.getElementById('npc-agency-body');
+10639:    const actions = document.getElementById('npc-agency-actions');
+10739:    const modal = document.getElementById('poach-dialog-modal');
+10740:    const body = document.getElementById('poach-dialog-body');
+10741:    const actions = document.getElementById('poach-dialog-actions');
+10791:    const cont = document.getElementById('pd-replies');
+10803:    const modal = document.getElementById('poach-dialog-modal');
+10804:    const body = document.getElementById('poach-dialog-body');
+10874:    const actions = document.getElementById('poach-dialog-actions');
+12403:    const container = document.getElementById('active-tasks-block');
+12656:    const tile = document.getElementById('event-mail-tile');
+13674:            const cs = document.getElementById('clients-screen');
+13682:            const ls = document.getElementById('leagues-screen');
+13702:document.getElementById('btn-open-leaderboard')?.addEventListener('click', openLeaderboard);
+13703:document.getElementById('lb-back')?.addEventListener('click', () => {
+13706:    const l = document.getElementById('leagues-screen');
+13731:            const cs = document.getElementById('clients-screen');
+13745:            const hs = document.getElementById('event-history-screen');
+13760:    const s = document.getElementById('create-agency-screen');
+13766:    const c = document.getElementById('create-agency-content');
+13804:    const grid = document.getElementById('ca-countries');
+13818:    document.getElementById('ca-start').addEventListener('click', () => {
+13819:        const name = document.getElementById('ca-name').value.trim() || LANG.t('Агент');
+13820:        const agency = document.getElementById('ca-agency').value.trim() || LANG.t('Моё агентство');
+13832:    document.getElementById('create-agency-screen').style.display = 'none';
+13863:document.getElementById('btn-datapack')?.addEventListener('click', openDatapackModal);
+13867:    const flagEl = document.getElementById('menu-lang-flag');
+13868:    const codeEl = document.getElementById('menu-lang-code');
+13892:document.getElementById('menu-lang-btn')?.addEventListener('click', () => {
+13912:    const titleEl = document.getElementById('btn-datapack-title');
+13913:    const descEl = document.getElementById('btn-datapack-desc');
+13926:    const modal = document.getElementById('datapack-modal');
+13927:    const body = document.getElementById('datapack-modal-body');
+13928:    const actions = document.getElementById('datapack-modal-actions');
+13929:    const titleEl = document.getElementById('datapack-modal-title');
+14122:    const modal = document.getElementById('confirm-modal');
+14123:    const textEl = document.getElementById('confirm-text');
+14124:    const titleEl = document.getElementById('confirm-title');
+14125:    const okBtn = document.getElementById('confirm-ok');
+14126:    const cancelBtn = document.getElementById('confirm-cancel');
+14153:        let wrap = document.getElementById('toast-wrap');
+14180:    const sS = document.getElementById('setting-sound'), sV = document.getElementById('setting-vibration'), sN = document.getElementById('setting-notifications');
+14251:document.getElementById('btn-export-save')?.addEventListener('click', exportSave);
+14252:document.getElementById('btn-import-save')?.addEventListener('click', () => {
+14253:    document.getElementById('import-save-input')?.click();
+14255:document.getElementById('import-save-input')?.addEventListener('change', (e) => {
+14259:document.getElementById('setting-sound')?.addEventListener('change', e => { gameSettings.sound = e.target.checked; saveSettings(); });
+14260:document.getElementById('setting-vibration')?.addEventListener('change', e => { gameSettings.vibration = e.target.checked; saveSettings(); });
+14261:document.getElementById('setting-notifications')?.addEventListener('change', e => { gameSettings.notifications = e.target.checked; saveSettings(); });
+14262:document.getElementById('btn-reset-save')?.addEventListener('click', async () => {
+14276:    const el = document.getElementById('menu-greeting');
+14295:    const t = document.getElementById('menu-news-text');
+14305:    const c = document.getElementById('menu-snow');
+14323:    const card = document.getElementById('continue-card');
+14329:        document.getElementById('continue-season').textContent = (d.s || 2026) + '/' + ((d.s || 2026) + 1);
+14330:        document.getElementById('continue-week').textContent = d.w || 1;
+14331:        document.getElementById('continue-money').textContent = '$' + ((d.money || 3000) >= 1000 ? Math.floor((d.money || 3000) / 1000) + 'K' : d.money);
+14332:        document.getElementById('continue-clients').textContent = (d.roster || []).length;
+14336:document.getElementById('continue-card')?.addEventListener('click', () => document.getElementById('btn-load-game')?.click());
+14581:    { id: 'stock-trade-modal', close: () => { document.getElementById('stock-trade-modal').style.display = 'none'; } },
+14583:    { id: 'datapack-modal',    close: () => { document.getElementById('datapack-modal').style.display = 'none'; } },
+14586:    { id: 'draft-choice-modal',close: () => { document.getElementById('draft-choice-modal').style.display = 'none'; } }
+14593:        const el = document.getElementById(h.id);
+14607:            const el = document.getElementById(id);
+14612:        const el = document.getElementById(id);
+14621:    const menu = document.getElementById('main-menu');
+14659:document.getElementById('btn-open-draft')?.addEventListener('click', showDraftListScreen);
+14661:document.getElementById('btn-open-world-cup')?.addEventListener('click', showWorldCupScreen);
+14662:document.getElementById('draft-list-back')?.addEventListener('click', () => {
+14664:    const os = document.getElementById('office-screen');
+15172:    const modal = document.getElementById('nt-pick-modal');
+15173:    const body = document.getElementById('nt-pick-body');
+15174:    const actions = document.getElementById('nt-pick-actions');
+15175:    const title = document.getElementById('nt-pick-title');
+15221:        const ntScreen = document.getElementById('national-tournament-screen');
+15246:            const ntScreen = document.getElementById('national-tournament-screen');
+15262:    const s = document.getElementById('national-tournament-screen');
+15270:    const c = document.getElementById('nt-content');
+15271:    const titleEl = document.getElementById('nt-header-title');
+15272:    const iconEl = document.getElementById('nt-header-icon');
+15297:    const bar = document.getElementById('nt-fav-bar');
+15598:document.getElementById('nt-back')?.addEventListener('click', () => {
+15601:    const os = document.getElementById('office-screen');
+15611:document.getElementById('btn-open-national-tournament')?.addEventListener('click', showNationalTournamentScreen);
+15619:    const modal = document.getElementById('nt-team-modal');
+15620:    const title = document.getElementById('nt-team-title');
+15621:    const body = document.getElementById('nt-team-body');
+15675:            document.getElementById('nt-team-modal').style.display = 'none';
+15683:document.getElementById('nt-team-close')?.addEventListener('click', () => {
+15684:    document.getElementById('nt-team-modal').style.display = 'none';
+15686:document.getElementById('nt-team-modal')?.addEventListener('click', (e) => {

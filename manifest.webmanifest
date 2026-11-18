@@ -1,0 +1,26 @@
+{
+  "name": "Hockey Legend — Симулятор агента",
+  "short_name": "Hockey Legend",
+  "description": "Симулятор хоккейного агента: клиенты, контракты, лиги, драфт и трофеи.",
+  "lang": "ru",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1420",
+  "theme_color": "#0d1420",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

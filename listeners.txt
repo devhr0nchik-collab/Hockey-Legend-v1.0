@@ -1,0 +1,175 @@
+3264:            row.addEventListener('click', () => openPublicClubHub(t.club, t.league));
+3623:    t.addEventListener('click', function() {
+3632:document.getElementById('world-cup-back')?.addEventListener('click', () => {
+4238:document.getElementById('page-prev')?.addEventListener('click', () => { if (currentPage > 1) { currentPage--; if (paginationCallback) paginationCallback(); } });
+4239:document.getElementById('page-next')?.addEventListener('click', () => { currentPage++; if (paginationCallback) paginationCallback(); });
+4417:document.getElementById('event-history-back')?.addEventListener('click', () => {
+4510:document.querySelectorAll('#draft-list-screen .clients-tab').forEach(t => t.addEventListener('click', function () {
+4674:    backBtn.addEventListener('click', () => {
+4764:    div.addEventListener('click', () => openBranchDetail(branchKey));
+4929:    leaveBtn.addEventListener('click', async () => {
+4986:        b.addEventListener('click', () => {
+5042:    row.addEventListener('click', () => {
+5345:    leaveBtn.addEventListener('click', async () => {
+5422:    div.addEventListener('click', (e) => {
+5430:        btn.addEventListener('click', (e) => {
+5481:document.getElementById('goals-back')?.addEventListener('click', () => {
+5502:document.getElementById('club-hub-back')?.addEventListener('click', () => {
+5517:    tab.addEventListener('click', function () {
+5527:    item.addEventListener('click', function () {
+5601:        span.addEventListener('click', (ev) => {
+5610:document.querySelectorAll('#news-feed-screen .clients-tab').forEach(t => t.addEventListener('click', function () {
+5651:        row.addEventListener('click', () => openPlayerScreen(p, 'my'));
+5723:        row.addEventListener('click', () => openPlayerScreen(p, 'search'));
+5731:        b.addEventListener('click', () => {
+5738:    if (sortSel) sortSel.addEventListener('change', () => {
+5744:    if (clearBtn) clearBtn.addEventListener('click', () => {
+5937:    if (signBtn) signBtn.addEventListener('click', () => signPlayerFromScreen(p));
+6058:        backBtn.addEventListener('click', () => { closeNegotiationModal(); renderPlayerScreen(); });
+6076:        closeBtn.addEventListener('click', () => { closeNegotiationModal(); renderPlayerScreen(); saveGame(); });
+6081:        el.addEventListener('click', () => {
+6099:document.getElementById('negotiation-modal')?.addEventListener('click', (e) => {
+6181:        closeBtn.addEventListener('click', () => {
+6195:    acceptBtn.addEventListener('click', () => acceptNegotiation(player));
+6213:        myClubBtn.addEventListener('click', () => signPlayerToMyClub(player, neg.offer));
+6221:    tradeBtn.addEventListener('click', () => renderTradeOptionsMenu(player));
+6228:    declineBtn.addEventListener('click', () => {
+6245:    closeBtn.addEventListener('click', () => { closeNegotiationModal(); renderPlayerScreen(); });
+6289:    moneyBtn.addEventListener('click', () => resolveNegotiationRound(player, 'money'));
+6296:    yearsBtn.addEventListener('click', () => resolveNegotiationRound(player, 'years'));
+6303:    bonusBtn.addEventListener('click', () => resolveNegotiationRound(player, 'bonus'));
+6309:    backBtn.addEventListener('click', () => renderPhoneActions(player));
+6603:        btn.addEventListener('click', () => startPlayerTraining(p, btn.getAttribute('data-attr')));
+6757:    document.getElementById('pt-negotiate-btn')?.addEventListener('click', () => {
+6764:    document.getElementById('pt-cancel-btn')?.addEventListener('click', async () => {
+6771:            el.addEventListener('click', () => {
+6782:        el.addEventListener('click', () => {
+7095:    okBtn.addEventListener('click', closeEventModal);
+7142:document.querySelectorAll('.player-tab').forEach(t => t.addEventListener('click', function () {
+7146:document.getElementById('player-back')?.addEventListener('click', closePlayerScreen);
+7178:        b.addEventListener('click', () => { leaderboardTab = b.getAttribute('data-lb'); renderLeaderboard(); });
+7207:        row.addEventListener('click', () => openPlayerScreen(p, 'search'));
+7223:    lbBtn.addEventListener('click', openLeaderboard);
+7240:            card.addEventListener('click', () => openLeagueStandings(lg.key));
+7261:document.querySelectorAll('.league-tab').forEach(t => t.addEventListener('click', function () {
+7407:        row.addEventListener('click', () => {
+7446:document.getElementById('club-info-close')?.addEventListener('click', closeClubInfoModal);
+7447:document.getElementById('club-info-modal')?.addEventListener('click', (e) => {
+7602:        row.addEventListener('click', () => {
+7700:    c.querySelector('#pch-trade-stocks')?.addEventListener('click', () => {
+7707:    tb.addEventListener('click', function () {
+7712:document.getElementById('pch-back')?.addEventListener('click', () => {
+7732:document.getElementById('pch-manage-btn')?.addEventListener('click', () => {
+7801:    back.addEventListener('click', () => {
+7848:            row.addEventListener('click', () => openPublicClubHub(t.club, lk));
+8621:    if (playBtn) playBtn.addEventListener('click', startMatchPlayback);
+8622:    if (pauseBtn) pauseBtn.addEventListener('click', pauseMatchPlayback);
+8623:    if (skipBtn) skipBtn.addEventListener('click', skipMatchPlayback);
+8624:    if (closeBtn) closeBtn.addEventListener('click', () => {
+8726:document.getElementById('mv-back')?.addEventListener('click', closeMatchView);
+8879:document.getElementById('match-modal-close')?.addEventListener('click', () => {
+8882:document.getElementById('match-modal')?.addEventListener('click', (e) => {
+8910:    c.querySelector('#schedule-club-select')?.addEventListener('change', (e) => {
+8917:        back2.addEventListener('click', () => {
+9017:                row.addEventListener('click', () => {
+9477:        row.addEventListener('click', () => openStockTradeModal(item.club, item.league));
+9485:        b.addEventListener('click', () => {
+9495:        sortSelect.addEventListener('change', () => {
+9555:        row.addEventListener('click', () => openStockTradeModal(item.club, item.league));
+9640:        b.addEventListener('click', () => {
+9675:    input.addEventListener('input', updateButtons);
+9681:    buyBtn.addEventListener('click', () => {
+9701:    sellBtn.addEventListener('click', () => {
+9723:    closeBtn.addEventListener('click', () => modal.style.display = 'none');
+9731:        presBtn.addEventListener('click', () => {
+9744:        leaveBtn.addEventListener('click', async () => {
+9950:    okBtn.addEventListener('click', () => {
+9975:    overlay.addEventListener('click', () => {
+10011:    optStay.addEventListener('click', () => applyDraftChoice('stay'));
+10016:    optNHL.addEventListener('click', () => applyDraftChoice('nhl'));
+10022:        optAHL.addEventListener('click', () => applyDraftChoice('ahl'));
+10502:    tab.addEventListener('click', function () {
+10570:        div.querySelector('.ac-upgrade-btn').addEventListener('click', () => {
+10605:        b.addEventListener('click', () => { window.agencyFilter = b.getAttribute('data-af'); renderAgencyScreen(); });
+10630:        row.addEventListener('click', () => openNpcAgency(ag));
+10685:    closeBtn.addEventListener('click', () => modal.style.display = 'none');
+10692:        row.addEventListener('click', () => { modal.style.display = 'none'; openPoachDialog(p, ag); });
+10776:    closeBtn.addEventListener('click', () => modal.style.display = 'none');
+10796:        btn.addEventListener('click', () => resolvePoach(player, npcAgency, r));
+10879:    okBtn.addEventListener('click', () => { modal.style.display = 'none'; renderAgencyScreen(); });
+10884:btnPlayWeek.addEventListener('click', function () {
+12425:        row.addEventListener('click', () => {
+12500:        btn.addEventListener('click', () => {
+12522:            okBtn.addEventListener('click', () => {
+12599:        btn.addEventListener('click', () => {
+12638:            okBtn.addEventListener('click', () => {
+12788:        cancelBtn.addEventListener('click', () => { eventModal.style.display = 'none'; });
+12807:    closeBtn.addEventListener('click', () => {
+12850:    b1.addEventListener('click', () => {
+12862:    b2.addEventListener('click', () => {
+12876:    b3.addEventListener('click', () => {
+13289:    b1.addEventListener('click', () => { closeEventModal(); acceptTransferOffer(player, offer); });
+13295:    b2.addEventListener('click', () => { closeEventModal(); declineTransferOffer(player, offer, false); });
+13301:    b3.addEventListener('click', () => tryTradeOffer(player, offer));
+13307:    b4.addEventListener('click', () => closeEventModal());
+13414:        allBtn.addEventListener('click', () => {
+13428:    b1.addEventListener('click', () => { closeEventModal(); acceptTransferOffer(player, bestOffer); });
+13434:    b2.addEventListener('click', () => {
+13550:        b1.addEventListener('click', () => {
+13568:        b2.addEventListener('click', () => {
+13579:        b3.addEventListener('click', () => closeEventModal());
+13585:        b1.addEventListener('click', () => { closeEventModal(); applyContractRenewal(player, offer); });
+13591:        b2.addEventListener('click', () => tryTradeContract(player, offer));
+13597:        b3.addEventListener('click', () => {
+13655:    item.addEventListener('click', async function () {
+13693:document.querySelectorAll('#clients-screen .clients-tab').forEach(t => t.addEventListener('click', function () {
+13702:document.getElementById('btn-open-leaderboard')?.addEventListener('click', openLeaderboard);
+13703:document.getElementById('lb-back')?.addEventListener('click', () => {
+13713:document.querySelectorAll('#market-screen .clients-tab').forEach(t => t.addEventListener('click', function () {
+13721:    tile.addEventListener('click', function () {
+13810:        btn.addEventListener('click', () => {
+13818:    document.getElementById('ca-start').addEventListener('click', () => {
+13842:btnNewGame.addEventListener('click', async function () {
+13847:btnLoadGame.addEventListener('click', async function () {
+13860:if (btnSettings) btnSettings.addEventListener('click', () => { settingsModal.style.display = 'flex'; loadSettings(); });
+13863:document.getElementById('btn-datapack')?.addEventListener('click', openDatapackModal);
+13892:document.getElementById('menu-lang-btn')?.addEventListener('click', () => {
+13899:    b.addEventListener('click', () => {
+13990:        offBtn.addEventListener('click', async () => {
+14005:        onBtn.addEventListener('click', () => {
+14019:    closeBtn.addEventListener('click', () => modal.style.display = 'none');
+14027:if (btnSettingsClose) btnSettingsClose.addEventListener('click', () => settingsModal.style.display = 'none');
+14028:if (settingsModal) settingsModal.addEventListener('click', e => { if (e.target === settingsModal) settingsModal.style.display = 'none'; });
+14029:if (btnAbout) btnAbout.addEventListener('click', () => aboutModal.style.display = 'flex');
+14030:if (btnAboutClose) btnAboutClose.addEventListener('click', () => aboutModal.style.display = 'none');
+14031:if (aboutModal) aboutModal.addEventListener('click', e => { if (e.target === aboutModal) aboutModal.style.display = 'none'; });
+14049:document.addEventListener('pointerdown', () => {
+14145:        okBtn.addEventListener('click', onOk);
+14146:        cancelBtn.addEventListener('click', onCancel);
+14251:document.getElementById('btn-export-save')?.addEventListener('click', exportSave);
+14252:document.getElementById('btn-import-save')?.addEventListener('click', () => {
+14255:document.getElementById('import-save-input')?.addEventListener('change', (e) => {
+14259:document.getElementById('setting-sound')?.addEventListener('change', e => { gameSettings.sound = e.target.checked; saveSettings(); });
+14260:document.getElementById('setting-vibration')?.addEventListener('change', e => { gameSettings.vibration = e.target.checked; saveSettings(); });
+14261:document.getElementById('setting-notifications')?.addEventListener('change', e => { gameSettings.notifications = e.target.checked; saveSettings(); });
+14262:document.getElementById('btn-reset-save')?.addEventListener('click', async () => {
+14336:document.getElementById('continue-card')?.addEventListener('click', () => document.getElementById('btn-load-game')?.click());
+14570:document.addEventListener('pointerdown', (e) => {
+14591:window.addEventListener('popstate', () => {
+14643:    document.addEventListener('keydown', (e) => {
+14659:document.getElementById('btn-open-draft')?.addEventListener('click', showDraftListScreen);
+14661:document.getElementById('btn-open-world-cup')?.addEventListener('click', showWorldCupScreen);
+14662:document.getElementById('draft-list-back')?.addEventListener('click', () => {
+15216:    skipBtn.addEventListener('click', () => {
+15230:        btn.addEventListener('click', (e) => {
+15318:        if (btn) btn.addEventListener('click', showNationalPickModal);
+15336:        if (btn) btn.addEventListener('click', showNationalPickModal);
+15357:    if (btn) btn.addEventListener('click', showNationalPickModal);
+15415:            row.addEventListener('click', () => openNationalTeamModal(r.code));
+15589:    t.addEventListener('click', function () {
+15598:document.getElementById('nt-back')?.addEventListener('click', () => {
+15611:document.getElementById('btn-open-national-tournament')?.addEventListener('click', showNationalTournamentScreen);
+15670:        row.addEventListener('click', () => {
+15683:document.getElementById('nt-team-close')?.addEventListener('click', () => {
+15686:document.getElementById('nt-team-modal')?.addEventListener('click', (e) => {
+15695:    window.addEventListener('load', () => {
