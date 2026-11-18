@@ -6,6 +6,7 @@ import { getLeagueSalaryCap, calculateSalary, calculateSalaryCap, formatSalary }
 import { packPlayer, unpackPlayer, packClub, unpackClub } from './src/core/pack';
 import { createIdbStore } from './src/features/save/storage';
 import { isSaveData, normalizeLoadedSave } from './src/features/save/migrations';
+import { setSimulationSeed, simRandom, simInt, matchSeed } from './src/core/sim-random';
 
 if (window.DEBUG) console.log("✅ script.js загружен");
 // ============ 1. ЭЛЕМЕНТЫ ============
@@ -2429,6 +2430,11 @@ function buildClubPlayerIndex(excludeGoalies) {
 function simulateMatchWithDetails(match, lk, clubIndex) {
     const homeClub = match.home;
     const awayClub = match.away;
+    // Результат матча детерминирован: фикстура + сезон/неделя + агентство.
+    // Повторный расчёт того же матча даст тот же счёт и тех же авторов голов.
+    setSimulationSeed(matchSeed([
+        agentName, agencyName, lk, homeClub, awayClub, currentSeason, currentWeek, seasonPhase
+    ]));
     const dataH = clubData[lk + "_" + homeClub];
     const dataA = clubData[lk + "_" + awayClub];
 
@@ -2440,15 +2446,15 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
     if (dataA && dataA.upgrades) sA = Math.min(1.0, sA * (1 + getStadiumHomeBonus(dataA.upgrades.stadium || 1)));
 
     // Счёт
-    let goalsH = Math.max(0, Math.floor(Math.random() * 4 * sH + Math.random() * 3 - 0.5));
-    let goalsA = Math.max(0, Math.floor(Math.random() * 4 * sA + Math.random() * 3 - 0.5));
+    let goalsH = Math.max(0, Math.floor(simRandom() * 4 * sH + simRandom() * 3 - 0.5));
+    let goalsA = Math.max(0, Math.floor(simRandom() * 4 * sA + simRandom() * 3 - 0.5));
 
     // Овертайм если ничья
     let isOT = false, isSO = false;
     if (goalsH === goalsA) {
-        isOT = Math.random() < 0.65;
+        isOT = simRandom() < 0.65;
         isSO = !isOT;
-        if (Math.random() < 0.5) goalsH++; else goalsA++;
+        if (simRandom() < 0.5) goalsH++; else goalsA++;
     }
 
     // Игроки обеих команд (из индекса, если передан — иначе фильтруем)
@@ -2465,7 +2471,7 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
         if (arr.length === 0) return null;
         const weights = arr.map(p => Math.pow(p.rating, 2) * (p.position === 'C' || p.position === 'LW' || p.position === 'RW' ? 1.5 : 1));
         const total = weights.reduce((a, b) => a + b, 0);
-        let r = Math.random() * total;
+        let r = simRandom() * total;
         for (let i = 0; i < arr.length; i++) {
             r -= weights[i];
             if (r <= 0) return arr[i];
@@ -2475,13 +2481,13 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
 
     for (let i = 0; i < goalsH; i++) {
         const scorer = pickScorer(playersHome);
-        const minute = randomInt(1, 60);
+        const minute = simInt(1, 60);
         const period = minute <= 20 ? 1 : minute <= 40 ? 2 : 3;
         const assists = [];
-        if (Math.random() < 0.7 && playersHome.length > 1) {
+        if (simRandom() < 0.7 && playersHome.length > 1) {
             const a1 = pickScorer(playersHome.filter(p => p !== scorer));
             if (a1) assists.push(a1.name);
-            if (Math.random() < 0.4) {
+            if (simRandom() < 0.4) {
                 const a2 = pickScorer(playersHome.filter(p => p !== scorer && (!a1 || p !== a1)));
                 if (a2) assists.push(a2.name);
             }
@@ -2498,13 +2504,13 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
 
     for (let i = 0; i < goalsA; i++) {
         const scorer = pickScorer(playersAway);
-        const minute = randomInt(1, 60);
+        const minute = simInt(1, 60);
         const period = minute <= 20 ? 1 : minute <= 40 ? 2 : 3;
         const assists = [];
-        if (Math.random() < 0.7 && playersAway.length > 1) {
+        if (simRandom() < 0.7 && playersAway.length > 1) {
             const a1 = pickScorer(playersAway.filter(p => p !== scorer));
             if (a1) assists.push(a1.name);
-            if (Math.random() < 0.4) {
+            if (simRandom() < 0.4) {
                 const a2 = pickScorer(playersAway.filter(p => p !== scorer && (!a1 || p !== a1)));
                 if (a2) assists.push(a2.name);
             }
@@ -2561,7 +2567,7 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
         rt += g.goals * 0.8 + g.assists * 0.4;
         if (teamWonHome) rt += 0.5;
         else if (!isOT && !isSO && !teamWonHome) rt -= 0.3;
-        rt += (Math.random() - 0.5) * 0.6;
+        rt += (simRandom() - 0.5) * 0.6;
         rt = Math.max(1.0, Math.min(10.0, rt));
         allRatings.push({ name: p.name, rating: Math.round(rt * 10) / 10, goals: g.goals, assists: g.assists, team: 'home' });
     });
@@ -2571,7 +2577,7 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
         rt += g.goals * 0.8 + g.assists * 0.4;
         if (teamWonAway) rt += 0.5;
         else if (!isOT && !isSO && !teamWonAway) rt -= 0.3;
-        rt += (Math.random() - 0.5) * 0.6;
+        rt += (simRandom() - 0.5) * 0.6;
         rt = Math.max(1.0, Math.min(10.0, rt));
         allRatings.push({ name: p.name, rating: Math.round(rt * 10) / 10, goals: g.goals, assists: g.assists, team: 'away' });
     });
@@ -2587,7 +2593,7 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
         if (!p) return;
         p.stats.gp++;
         p.stats.ratingSum += r.rating;
-        p.stats.pim += randomInt(0, 3);
+        p.stats.pim += simInt(0, 3);
         let pm = 0;
         if (r.goals > 0 || r.assists > 0) pm += 1;
         const isHome = r.team === 'home';
@@ -2595,7 +2601,7 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
         const lost = isHome ? (goalsH < goalsA) : (goalsA < goalsH);
         if (won) pm += 1;
         else if (lost) pm -= 1;
-        pm += randomInt(-1, 1);
+        pm += simInt(-1, 1);
         p.stats.plusMinus += Math.max(-3, Math.min(3, pm));
     });
 
@@ -2609,9 +2615,9 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
         let gr = 5.5 + (goalieHome.rating - 50) / 25 - goalsA * 0.3;
         if (goalsH > goalsA) gr += 0.5;
         else if (goalsH < goalsA) gr -= 0.3;
-        gr += (Math.random() - 0.5) * 0.4;
+        gr += (simRandom() - 0.5) * 0.4;
         goalieHome.stats.ratingSum += Math.max(1, Math.min(10, gr));
-        goalieHome.stats.pim += randomInt(0, 2);
+        goalieHome.stats.pim += simInt(0, 2);
     }
     if (goalieAway) {
         goalieAway.stats.gp++;
@@ -2619,9 +2625,9 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
         let gr = 5.5 + (goalieAway.rating - 50) / 25 - goalsH * 0.3;
         if (goalsA > goalsH) gr += 0.5;
         else if (goalsA < goalsH) gr -= 0.3;
-        gr += (Math.random() - 0.5) * 0.4;
+        gr += (simRandom() - 0.5) * 0.4;
         goalieAway.stats.ratingSum += Math.max(1, Math.min(10, gr));
-        goalieAway.stats.pim += randomInt(0, 2);
+        goalieAway.stats.pim += simInt(0, 2);
     }
     // === КОНЕЦ ФИКСА ===
 
@@ -15577,7 +15583,12 @@ if (import.meta.env.DEV) {
             seasonPhase,
             playersCount: players.length,
             roster: myRoster.map((p) => p.name)
-        })
+        }),
+        // Детерминированный прогон матча: одинаковые входы → одинаковый результат.
+        simulateMatch: (lk = 'NHL') => {
+            const clubs = getAllClubs(lk);
+            return simulateMatchWithDetails({ home: clubs[0], away: clubs[1] }, lk, null);
+        }
     };
 }
 
