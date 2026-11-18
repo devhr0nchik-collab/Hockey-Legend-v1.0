@@ -4,6 +4,7 @@ import { hashString, makeSeededRNG } from './src/core/rng';
 import { generateAttributes } from './src/core/attributes';
 import { getLeagueSalaryCap, calculateSalary, calculateSalaryCap, formatSalary } from './src/core/salary';
 import { packPlayer, unpackPlayer, packClub, unpackClub } from './src/core/pack';
+import { createIdbStore } from './src/features/save/storage';
 
 if (window.DEBUG) console.log("✅ script.js загружен");
 // ============ 1. ЭЛЕМЕНТЫ ============
@@ -36,54 +37,10 @@ const DB_NAME = 'hockeyLegendDB';
 const DB_STORE = 'saves';
 const HAS_SAVE_FLAG = 'hockeyLegendHasSave';
 
-let dbPromise = null;
-function openDB() {
-    if (dbPromise) return dbPromise;
-    dbPromise = new Promise((resolve, reject) => {
-        try {
-            const req = indexedDB.open(DB_NAME, 1);
-            req.onupgradeneeded = (e) => {
-                const db = e.target.result;
-                if (!db.objectStoreNames.contains(DB_STORE)) {
-                    db.createObjectStore(DB_STORE);
-                }
-            };
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
-        } catch (e) { reject(e); }
-    });
-    return dbPromise;
-}
-
-function idbSet(key, value) {
-    return openDB().then(db => new Promise((resolve, reject) => {
-        const tx = db.transaction(DB_STORE, 'readwrite');
-        const store = tx.objectStore(DB_STORE);
-        const req = store.put(value, key);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-    }));
-}
-
-function idbGet(key) {
-    return openDB().then(db => new Promise((resolve, reject) => {
-        const tx = db.transaction(DB_STORE, 'readonly');
-        const store = tx.objectStore(DB_STORE);
-        const req = store.get(key);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-    }));
-}
-
-function idbDelete(key) {
-    return openDB().then(db => new Promise((resolve, reject) => {
-        const tx = db.transaction(DB_STORE, 'readwrite');
-        const store = tx.objectStore(DB_STORE);
-        const req = store.delete(key);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-    }));
-}
+const idb = createIdbStore(DB_NAME, DB_STORE);
+const idbSet = idb.set;
+const idbGet = idb.get;
+const idbDelete = idb.delete;
 
 // ============ 2. СОСТОЯНИЕ ============
 let agentName = 'Агент';
