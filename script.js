@@ -15562,6 +15562,26 @@ function onLanguageChanged() {
 }
 window.onLanguageChanged = onLanguageChanged;
 
+// Доступ к состоянию для тестов/отладки — только в dev-сборке (в prod не попадает).
+if (import.meta.env.DEV) {
+    window.__HL = {
+        saveGame,
+        loadGame,
+        resetGame,
+        deleteSave,
+        getState: () => ({
+            agentName,
+            agencyName,
+            currentSeason,
+            currentWeek,
+            agentMoney,
+            seasonPhase,
+            playersCount: players.length,
+            roster: myRoster.map((p) => p.name)
+        })
+    };
+}
+
 // ============ SERVICE WORKER (оффлайн-оболочка) ============
 // Регистрируем только на http(s): file:// не поддерживает SW.
 // В dev-режиме SW выключен: иначе он кэширует исходники и мешает HMR.
