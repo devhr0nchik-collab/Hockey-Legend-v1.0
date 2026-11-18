@@ -11,11 +11,18 @@ import { makeSeededRNG, type Rng } from './rng';
 let impl: Rng = Math.random;
 let seed = 0;
 let seeded = false;
+let draws = 0;
 
 export function setSimulationSeed(value: number): void {
     seed = value >>> 0;
     seeded = true;
+    draws = 0;
     impl = makeSeededRNG(seed);
+}
+
+/** Сколько чисел сгенерировано с последнего seed (диагностика/тесты). */
+export function getSimulationDraws(): number {
+    return draws;
 }
 
 export function isSimulationSeeded(): boolean {
@@ -27,6 +34,7 @@ export function getSimulationSeed(): number {
 }
 
 export function simRandom(): number {
+    draws++;
     return impl();
 }
 

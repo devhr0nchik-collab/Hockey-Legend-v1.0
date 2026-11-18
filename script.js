@@ -6,7 +6,7 @@ import { getLeagueSalaryCap, calculateSalary, calculateSalaryCap, formatSalary }
 import { packPlayer, unpackPlayer, packClub, unpackClub } from './src/core/pack';
 import { createIdbStore } from './src/features/save/storage';
 import { isSaveData, normalizeLoadedSave } from './src/features/save/migrations';
-import { setSimulationSeed, simRandom, simInt, simChoice, matchSeed } from './src/core/sim-random';
+import { setSimulationSeed, simRandom, simInt, simChoice, matchSeed, getSimulationDraws } from './src/core/sim-random';
 
 if (window.DEBUG) console.log("✅ script.js загружен");
 // ============ 1. ЭЛЕМЕНТЫ ============
@@ -699,6 +699,14 @@ const NAME_POOLS = {
 // Глобальный пул использованных имён (уникальность по всей игре)
 const GLOBAL_USED_NAMES = new Set();
 
+// Пересобрать пул по текущему списку игроков.
+// Нужно после загрузки сейва, чтобы генерация новых имён зависела
+// только от состояния сейва, а не от истории текущей сессии.
+function rebuildGlobalUsedNames() {
+    GLOBAL_USED_NAMES.clear();
+    players.forEach((p) => { if (p && p.name) GLOBAL_USED_NAMES.add(p.name); });
+}
+
 // ============ ИМЕНА — ВСЕГДА ЛАТИНИЦА (как в FIFA) ============
 const _NAME_CYR_TO_LAT = {
     'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'yo','ж':'zh','з':'z','и':'i','й':'y',
@@ -756,10 +764,10 @@ function generatePlayerName(leagueName) {
     let nationality = '🇷🇺';
     let attempts = 0;
     do {
-        const pool = randomChoice(poolCodes);
+        const pool = simChoice(poolCodes);
         const p = NAME_POOLS[pool] || NAME_POOLS.RU;
         nationality = POOL_TO_FLAG[pool] || '🇷🇺';
-        name = randomChoice(p.first) + ' ' + randomChoice(p.last);
+        name = simChoice(p.first) + ' ' + simChoice(p.last);
         attempts++;
     } while (GLOBAL_USED_NAMES.has(name) && attempts < 50);
     GLOBAL_USED_NAMES.add(name);
@@ -1151,28 +1159,28 @@ function getPlayerAvatarSVG(player) {
 function createPlayer(name, club, league, position, age, rating, potential, nationality) {
     // Пик драфта — по рейтингу (только 2 раунда в игре)
     let draftRound = 0, draftPickNum = 0;
-    if (rating >= 85) { draftRound = 1; draftPickNum = randomInt(1, 10); }
-    else if (rating >= 75) { draftRound = 1; draftPickNum = randomInt(11, 30); }
-    else if (rating >= 65) { draftRound = 2; draftPickNum = randomInt(31, 60); }
-    else if (rating >= 55) { draftRound = 2; draftPickNum = randomInt(61, 64); }
+    if (rating >= 85) { draftRound = 1; draftPickNum = simInt(1, 10); }
+    else if (rating >= 75) { draftRound = 1; draftPickNum = simInt(11, 30); }
+    else if (rating >= 65) { draftRound = 2; draftPickNum = simInt(31, 60); }
+    else if (rating >= 55) { draftRound = 2; draftPickNum = simInt(61, 64); }
     // rating < 55 — не задрафтован
     const draftYear = currentSeason - age + 18;
     const draftInfo = draftRound > 0 ? `R${draftRound} Pick ${draftPickNum}` : '';
 
     return {name,nationality: nationality || null,club,league,position,age,rating,
         draftInfo, draftYear,
-        clubLoyalty: club ? randomInt(40, 70) : 0,
-        potential: potential || Math.min(100, rating + randomInt(5, 40)),
+        clubLoyalty: club ? simInt(40, 70) : 0,
+        potential: potential || Math.min(100, rating + simInt(5, 40)),
         cost: Math.max(100, (rating-10)*50),
         salary: club ? calculateSalary(rating, league) : 25,
         attributes: generateAttributes(position, rating, name),
         form:0, injuryWeeks:0, loyalty:100,
-        contractYears: randomInt(1, 4),
+        contractYears: simInt(1, 4),
         lastTransferSeason: 0,
         declinedRenewal: false,
         trophies: [],
         awards: [],
-        character: randomChoice(['ambitious','calm','pragmatic','capricious','loyal']),
+        character: simChoice(['ambitious','calm','pragmatic','capricious','loyal']),
         agentId: null,
         stats:{gp:0,goals:0,assists:0,pim:0,plusMinus:0,ratingSum:0,goalsAgainst:0},
         seasonHistory:[]};
@@ -1181,6 +1189,10 @@ function createPlayer(name, club, league, position, age, rating, potential, nati
 // ============ 7.5. СОЗДАНИЕ РЕАЛЬНОГО ИГРОКА (из REAL_ROSTERS) ============
 // ============ ГЕНЕРАЦИЯ ПРАВДОПОДОБНОЙ КАРЬЕРЫ ДЛЯ РЕАЛЬНЫХ ИГРОКОВ ============
 function generateFakeCareerHistory(player) {
+    // Детерминированно: одна и та же карьера при каждой загрузке сейва.
+    const careerRng = makeSeededRNG(hashString("career|" + (player && player.name ? player.name : "unknown")));
+    const careerInt = (min, max) => Math.floor(careerRng() * (max - min + 1)) + min;
+    const careerChoice = (arr) => arr[Math.floor(careerRng() * arr.length)];
     if (!player || !player.age) return;
     const startAge = 17;
     const currentAge = player.age;
@@ -1209,7 +1221,7 @@ function generateFakeCareerHistory(player) {
             if (!clubs || clubs.length === 0) return null;
             // Убираем текущий клуб, чтобы не «сидеть в нём всю жизнь»
             const filtered = clubs.filter(c => c !== currentClub);
-            return randomChoice(filtered.length > 0 ? filtered : clubs);
+            return careerChoice(filtered.length > 0 ? filtered : clubs);
         } catch (e) { return null; }
     };
 
@@ -1232,7 +1244,7 @@ function generateFakeCareerHistory(player) {
         // Рейтинг линейно растёт от 50% до 100% от текущего
         const progress = (a - startAge) / Math.max(1, currentAge - startAge);
         const baseR = Math.round(currentRating * (0.5 + progress * 0.5));
-        const rating = Math.max(40, Math.min(currentRating, baseR + randomInt(-2, 2)));
+        const rating = Math.max(40, Math.min(currentRating, baseR + careerInt(-2, 2)));
 
         // === ВЫБОР КЛУБА И ЛИГИ ДЛЯ ЭТОГО СЕЗОНА ===
         let club, league;
@@ -1262,7 +1274,7 @@ function generateFakeCareerHistory(player) {
             const canMoveUp = league !== currentLeague && rating >= (LEAGUE_DATA[currentLeague]?.min || 60) - 5;
             const isTransferYear = (a - lastTransferAge) >= 2;
 
-            if (canMoveUp && Math.random() < 0.45) {
+            if (canMoveUp && careerRng() < 0.45) {
                 // Скачок в целевую лигу
                 const newClub = randomClubIn(currentLeague);
                 if (newClub) {
@@ -1270,7 +1282,7 @@ function generateFakeCareerHistory(player) {
                     league = currentLeague;
                     lastTransferAge = a;
                 }
-            } else if (isTransferYear && Math.random() < 0.30) {
+            } else if (isTransferYear && careerRng() < 0.30) {
                 // Трансфер внутри текущей лиги
                 const newClub = randomClubIn(league);
                 if (newClub && newClub !== club) {
@@ -1286,24 +1298,24 @@ function generateFakeCareerHistory(player) {
         simLeague = league;
 
         // === СТАТИСТИКА СЕЗОНА ===
-        const gp = randomInt(40, 82);
+        const gp = careerInt(40, 82);
         let goals = 0, assists = 0, pim = 0, plusMinus = 0;
         let goalsAgainst = 0, gaa = '—';
 
         if (player.position === 'G') {
-            goalsAgainst = randomInt(80, 200);
+            goalsAgainst = careerInt(80, 200);
             gaa = (goalsAgainst / gp).toFixed(2);
-            pim = randomInt(0, 20);
+            pim = careerInt(0, 20);
         } else if (player.position === 'D') {
-            goals = Math.max(0, Math.round(gp * (0.03 + rating / 2500)) + randomInt(-3, 3));
-            assists = Math.max(0, Math.round(gp * (0.20 + rating / 900)) + randomInt(-5, 5));
-            pim = randomInt(20, 120);
-            plusMinus = randomInt(-15, 25);
+            goals = Math.max(0, Math.round(gp * (0.03 + rating / 2500)) + careerInt(-3, 3));
+            assists = Math.max(0, Math.round(gp * (0.20 + rating / 900)) + careerInt(-5, 5));
+            pim = careerInt(20, 120);
+            plusMinus = careerInt(-15, 25);
         } else {
-            goals = Math.max(0, Math.round(gp * (0.20 + rating / 500)) + randomInt(-5, 5));
-            assists = Math.max(0, Math.round(gp * (0.30 + rating / 600)) + randomInt(-5, 5));
-            pim = randomInt(5, 60);
-            plusMinus = randomInt(-12, 30);
+            goals = Math.max(0, Math.round(gp * (0.20 + rating / 500)) + careerInt(-5, 5));
+            assists = Math.max(0, Math.round(gp * (0.30 + rating / 600)) + careerInt(-5, 5));
+            pim = careerInt(5, 60);
+            plusMinus = careerInt(-12, 30);
         }
 
         history.push({
@@ -1311,7 +1323,7 @@ function generateFakeCareerHistory(player) {
             goals, assists, pim, plusMinus,
             rating,
             goalsAgainst, gaa,
-            avgRating: (6.2 + Math.random() * 1.5).toFixed(1),
+            avgRating: (6.2 + careerRng() * 1.5).toFixed(1),
             age: a,
             salary: calculateSalary(rating, league),
             position: player.position
@@ -1391,36 +1403,36 @@ function createRealPlayer(data, club, league) {
 
     // Пик драфта — по рейтингу (та же логика что в createPlayer)
     let draftRound = 0, draftPickNum = 0;
-    if (rating >= 85) { draftRound = 1; draftPickNum = randomInt(1, 10); }
-    else if (rating >= 75) { draftRound = 1; draftPickNum = randomInt(11, 30); }
-    else if (rating >= 65) { draftRound = 2; draftPickNum = randomInt(31, 60); }
-    else if (rating >= 55) { draftRound = 2; draftPickNum = randomInt(61, 64); }
+    if (rating >= 85) { draftRound = 1; draftPickNum = simInt(1, 10); }
+    else if (rating >= 75) { draftRound = 1; draftPickNum = simInt(11, 30); }
+    else if (rating >= 65) { draftRound = 2; draftPickNum = simInt(31, 60); }
+    else if (rating >= 55) { draftRound = 2; draftPickNum = simInt(61, 64); }
     const draftYear = currentSeason - age + 18;
     const draftInfo = draftRound > 0 ? `R${draftRound} Pick ${draftPickNum}` : '';
 
     // Потенциал: реальные игроки уже сформированы, потенциал = rating + небольшой запас
     // Молодые получают больший потенциал
     let potentialBonus = 3;
-    if (age <= 21) potentialBonus = randomInt(10, 20);
-    else if (age <= 25) potentialBonus = randomInt(5, 12);
-    else if (age <= 29) potentialBonus = randomInt(2, 6);
+    if (age <= 21) potentialBonus = simInt(10, 20);
+    else if (age <= 25) potentialBonus = simInt(5, 12);
+    else if (age <= 29) potentialBonus = simInt(2, 6);
     const potential = Math.min(100, rating + potentialBonus);
 
     const _player = {
         name, nationality: knownFlag, club, league, position, age, rating,
         draftInfo, draftYear,
-        clubLoyalty: club ? randomInt(50, 80) : 0,
+        clubLoyalty: club ? simInt(50, 80) : 0,
         potential,
         cost: Math.max(100, (rating-10)*50),
         salary: calculateSalary(rating, league),
         attributes: generateAttributes(position, rating, name),
         form: 0, injuryWeeks: 0, loyalty: 100,
-        contractYears: randomInt(1, 4),
+        contractYears: simInt(1, 4),
         lastTransferSeason: 0,
         declinedRenewal: false,
         trophies: [],
         awards: [],
-        character: randomChoice(['ambitious','calm','pragmatic','capricious','loyal']),
+        character: simChoice(['ambitious','calm','pragmatic','capricious','loyal']),
         agentId: null,
         stats:{gp:0,goals:0,assists:0,pim:0,plusMinus:0,ratingSum:0,goalsAgainst:0},
         seasonHistory: []
@@ -1675,12 +1687,12 @@ function generateAllPlayers() {
                 const template = ["G","G","D","D","D","D","D","D","C","C","C","LW","LW","LW","RW","RW","RW"];
                 template.forEach(position => {
                     const { name, nationality } = generatePlayerName(leagueName);
-                    const baseRating = randomInt(leagueData.min, leagueData.max);
-                    const rating = Math.max(1, Math.min(100, baseRating + randomInt(-5, 5)));
+                    const baseRating = simInt(leagueData.min, leagueData.max);
+                    const rating = Math.max(1, Math.min(100, baseRating + simInt(-5, 5)));
                     let age;
-                    if (leagueName === "MHL" || leagueName === "Belarus_Vysshaya") age = randomInt(14, 20);
-                    else if (leagueName === "NHL") age = randomInt(19, 35);
-                    else age = randomInt(16, 34);
+                    if (leagueName === "MHL" || leagueName === "Belarus_Vysshaya") age = simInt(14, 20);
+                    else if (leagueName === "NHL") age = simInt(19, 35);
+                    else age = simInt(16, 34);
                     allPlayers.push(createPlayer(name, club, leagueName, position, age, rating, null, nationality));
                 });
             }
@@ -1714,9 +1726,9 @@ function padRealRoster(allPlayers, clubStart, club, leagueName, leagueData) {
         }
         if (!name) name = 'Player ' + (allPlayers.length + 1);
         GLOBAL_USED_NAMES.add(name);
-        const baseRating = randomInt(leagueData.min, leagueData.max);
-        const rating = Math.max(1, Math.min(100, baseRating + randomInt(-5, 5)));
-        const age = (leagueName === "MHL" || leagueName === "Belarus_Vysshaya") ? randomInt(14, 20) : randomInt(18, 30);
+        const baseRating = simInt(leagueData.min, leagueData.max);
+        const rating = Math.max(1, Math.min(100, baseRating + simInt(-5, 5)));
+        const age = (leagueName === "MHL" || leagueName === "Belarus_Vysshaya") ? simInt(14, 20) : simInt(18, 30);
         allPlayers.push(createPlayer(name, club, leagueName, position, age, rating, null, nationality));
         have[position] = (have[position] || 0) + 1;
         total++;
@@ -1789,8 +1801,8 @@ function generateNpcAgencies() {
             country: t.country,
             rep: t.rep,
             description: t.desc,
-            budget: Math.round(t.rep * t.rep * 100 + randomInt(0, 50000)),
-            clients: randomInt(clientMin, clientMax),
+            budget: Math.round(t.rep * t.rep * 100 + simInt(0, 50000)),
+            clients: simInt(clientMin, clientMax),
             clientIds: []
         });
     }
@@ -1800,7 +1812,7 @@ function generateNpcAgencies() {
 function assignPlayersToNpcAgencies() {
     const freePlayers = players.filter(p => !p.agentId);
     for (let i = freePlayers.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = Math.floor(simRandom() * (i + 1));
         [freePlayers[i], freePlayers[j]] = [freePlayers[j], freePlayers[i]];
     }
     let assigned = 0;
@@ -2202,13 +2214,13 @@ function generateCouncilTasks(club) {
 
     // Выбираем 3 задачи из разных категорий
     const cats = ['sport', 'finance', 'roster', 'infra', 'prestige'];
-    const shuffledCats = cats.sort(() => Math.random() - 0.5);
+    const shuffledCats = cats.sort(() => simRandom() - 0.5);
     const picked = [];
     for (const cat of shuffledCats) {
         if (picked.length >= 3) break;
         if (pool[cat].length === 0) continue;
-        const pick = randomChoice(pool[cat]);
-        picked.push({ ...pick, type: cat, id: cat + '_' + Date.now() + '_' + Math.random(), startValue: null, progress: 0, done: false });
+        const pick = simChoice(pool[cat]);
+        picked.push({ ...pick, type: cat, id: cat + '_' + Date.now() + '_' + simRandom(), startValue: null, progress: 0, done: false });
     }
 
     // Фиксируем startValue
@@ -2665,7 +2677,7 @@ function weightedPickClub(clubs, lk) {
         return Math.pow(p, 3);
     });
     const total = weights.reduce((a, b) => a + b, 0);
-    let r = Math.random() * total;
+    let r = simRandom() * total;
     for (let i = 0; i < clubs.length; i++) {
         r -= weights[i];
         if (r <= 0) return clubs[i];
@@ -3716,6 +3728,7 @@ async function loadGame() {
             }
         });
         if (migrated > 0 && window.DEBUG) console.log(`🔄 Миграция карьер: ${migrated} игроков получили историю`);
+        rebuildGlobalUsedNames();
         // Восстанавливаем myRoster как ССЫЛКИ на объекты из players (а не отдельные копии)
         const rosterNames = d.rosterNames || (d.roster || []).map(r => r[0]).filter(Boolean);
         if (rosterNames.length > 0) {
@@ -7757,10 +7770,10 @@ function simulateOneSeries(s) {
     const sA = teamStrengths[lk + "_" + s.teamA.name] || 0.5;
     const sB = teamStrengths[lk + "_" + s.teamB.name] || 0.5;
     while (s.winsA < 4 && s.winsB < 4) {
-        const gA = Math.max(0, Math.floor(Math.random() * 4 * sA + Math.random() * 3 - 0.5));
-        const gB = Math.max(0, Math.floor(Math.random() * 4 * sB + Math.random() * 3 - 0.5));
+        const gA = Math.max(0, Math.floor(simRandom() * 4 * sA + simRandom() * 3 - 0.5));
+        const gB = Math.max(0, Math.floor(simRandom() * 4 * sB + simRandom() * 3 - 0.5));
         let fA = gA, fB = gB;
-        if (gA === gB) { if (Math.random() < 0.5) fA++; else fB++; }
+        if (gA === gB) { if (simRandom() < 0.5) fA++; else fB++; }
         s.games.push({a: fA, b: fB});
         if (fA > fB) s.winsA++; else s.winsB++;
     }
@@ -7840,16 +7853,16 @@ function generatePlayoffMatchDetails(homeClub, awayClub, homeScore, awayScore, l
         if (arr.length === 0) return null;
         const weights = arr.map(p => Math.pow(p.rating, 2) * (p.position === 'C' || p.position === 'LW' || p.position === 'RW' ? 1.5 : 1));
         const total = weights.reduce((a, b) => a + b, 0);
-        let r = Math.random() * total;
+        let r = simRandom() * total;
         for (let i = 0; i < arr.length; i++) { r -= weights[i]; if (r <= 0) return arr[i]; }
         return arr[arr.length - 1];
     };
     for (let i = 0; i < homeScore; i++) {
         const scorer = pickScorer(playersHome);
-        const minute = randomInt(1, 60);
+        const minute = simInt(1, 60);
         const period = minute <= 20 ? 1 : minute <= 40 ? 2 : 3;
         const assists = [];
-        if (Math.random() < 0.7 && playersHome.length > 1) {
+        if (simRandom() < 0.7 && playersHome.length > 1) {
             const a1 = pickScorer(playersHome.filter(p => p !== scorer));
             if (a1) assists.push(a1.name);
         }
@@ -7857,10 +7870,10 @@ function generatePlayoffMatchDetails(homeClub, awayClub, homeScore, awayScore, l
     }
     for (let i = 0; i < awayScore; i++) {
         const scorer = pickScorer(playersAway);
-        const minute = randomInt(1, 60);
+        const minute = simInt(1, 60);
         const period = minute <= 20 ? 1 : minute <= 40 ? 2 : 3;
         const assists = [];
-        if (Math.random() < 0.7 && playersAway.length > 1) {
+        if (simRandom() < 0.7 && playersAway.length > 1) {
             const a1 = pickScorer(playersAway.filter(p => p !== scorer));
             if (a1) assists.push(a1.name);
         }
@@ -7870,13 +7883,13 @@ function generatePlayoffMatchDetails(homeClub, awayClub, homeScore, awayScore, l
     const teamWonHome = homeScore > awayScore;
     const allRatings = [];
     playersHome.forEach(p => {
-        let rt = 5.0 + (p.rating - 50) / 25 + (Math.random() - 0.5) * 0.6;
+        let rt = 5.0 + (p.rating - 50) / 25 + (simRandom() - 0.5) * 0.6;
         if (teamWonHome) rt += 0.5; else rt -= 0.3;
         rt = Math.max(1.0, Math.min(10.0, rt));
         allRatings.push({ name: p.name, rating: Math.round(rt * 10) / 10, goals: 0, assists: 0, team: 'home' });
     });
     playersAway.forEach(p => {
-        let rt = 5.0 + (p.rating - 50) / 25 + (Math.random() - 0.5) * 0.6;
+        let rt = 5.0 + (p.rating - 50) / 25 + (simRandom() - 0.5) * 0.6;
         if (!teamWonHome) rt += 0.5; else rt -= 0.3;
         rt = Math.max(1.0, Math.min(10.0, rt));
         allRatings.push({ name: p.name, rating: Math.round(rt * 10) / 10, goals: 0, assists: 0, team: 'away' });
@@ -7894,6 +7907,8 @@ function generatePlayoffMatchDetails(homeClub, awayClub, homeScore, awayScore, l
 
 function simulatePlayoffRound() {
     if (seasonPhase !== 'playoffs') return;
+    // Раунд плей-офф воспроизводим независимо от просмотра матчей игроком.
+    setSimulationSeed(matchSeed([agentName, agencyName, 'poff', currentSeason, playoffRound]));
 
     // Проверка: если у ВСЕХ лиг уже есть champion — плей-офф завершён, идём в драфт
     const keys = Object.keys(playoffState);
@@ -9623,6 +9638,7 @@ function histRangeStr(data) {
 // ============ 22. ДРАФТ ============
 function runDraft() {
     seasonPhase = 'draft';
+    setSimulationSeed(matchSeed([agentName, agencyName, 'draft', currentSeason]));
     const pool = players.filter(p => p.age >= 19 && p.age <= 21 && p.rating >= 45 && p.rating <= 78 && !['NHL','AHL'].includes(p.league)).slice(0, 64);
     while (pool.length < 64) {
         const y = generateYouthPlayer();
@@ -9656,14 +9672,14 @@ function runDraft() {
 function generateYouthPlayer(forcedLeague) {
     const lgs = ['MHL','MHL','MHL','VHL','Belarus_Vysshaya','SHL','Liiga','Czech_Extraliga','DEL'];
     // Молодёжь для конкретной лиги (нужно для пополнения NHL/AHL/KHL)
-    const ln = (forcedLeague && LEAGUE_DATA[forcedLeague]) ? forcedLeague : randomChoice(lgs);
-    const club = forcedLeague ? pickClubForYouth(ln) : randomChoice(getAllClubs(ln));
-    const pos = randomChoice(["C","C","LW","LW","RW","RW","D","D","D","G"]);
+    const ln = (forcedLeague && LEAGUE_DATA[forcedLeague]) ? forcedLeague : simChoice(lgs);
+    const club = forcedLeague ? pickClubForYouth(ln) : simChoice(getAllClubs(ln));
+    const pos = simChoice(["C","C","LW","LW","RW","RW","D","D","D","G"]);
     let rating, age;
-    if (ln === 'NHL') { rating = randomInt(66, 78); age = randomInt(19, 21); }
-    else if (ln === 'AHL' || ln === 'KHL') { rating = randomInt(58, 72); age = randomInt(18, 21); }
-    else if (['SHL','Liiga','Czech_Extraliga','DEL','NL_Switzerland'].includes(ln)) { rating = randomInt(50, 65); age = randomInt(18, 20); }
-    else { rating = randomInt(38, 58); age = randomInt(18, 20); }
+    if (ln === 'NHL') { rating = simInt(66, 78); age = simInt(19, 21); }
+    else if (ln === 'AHL' || ln === 'KHL') { rating = simInt(58, 72); age = simInt(18, 21); }
+    else if (['SHL','Liiga','Czech_Extraliga','DEL','NL_Switzerland'].includes(ln)) { rating = simInt(50, 65); age = simInt(18, 20); }
+    else { rating = simInt(38, 58); age = simInt(18, 20); }
     const { name, nationality } = generatePlayerName(ln);
     const player = createPlayer(name, club, ln, pos, age, rating, null, nationality);
 
@@ -9685,10 +9701,10 @@ function generateYouthPlayer(forcedLeague) {
 
 function generateFreeAgentYouth() {
     const lgs = ['MHL','MHL','VHL','SHL','Liiga','Czech_Extraliga','DEL','NL_Switzerland','Belarus_Vysshaya'];
-    const ln = randomChoice(lgs);
-    const pos = randomChoice(["C","C","LW","LW","RW","RW","D","D","D","G"]);
-    const rating = randomInt(18, 38);
-    const age = randomInt(14, 19);
+    const ln = simChoice(lgs);
+    const pos = simChoice(["C","C","LW","LW","RW","RW","D","D","D","G"]);
+    const rating = simInt(18, 38);
+    const age = simInt(14, 19);
     const { name, nationality } = generatePlayerName(ln);
     // Создаём как свободного агента: клуб пустой, но лига остаётся для определения страны
     const p = createPlayer(name, '', ln, pos, age, rating, null, nationality);
@@ -9883,7 +9899,7 @@ function applyDraftChoice(choice) {
         const oldS = p.salary;
         p.club = currentDraftChoice.nhlClub;
         p.league = 'NHL';
-        p.contractYears = randomInt(2, 3);
+        p.contractYears = simInt(2, 3);
         p.rating = Math.min(100, p.rating + 5);
         const newS = calculateSalary(p.rating, 'NHL');
         p.salary = newS;
@@ -9893,7 +9909,7 @@ function applyDraftChoice(choice) {
         const oldS = p.salary;
         p.club = currentDraftChoice.farmClub;
         p.league = 'AHL';
-        p.contractYears = randomInt(1, 2);
+        p.contractYears = simInt(1, 2);
         const newS = calculateSalary(p.rating, 'AHL');
         p.salary = newS;
         payTransferCommission(p, oldS, newS);
@@ -9905,6 +9921,7 @@ function applyDraftChoice(choice) {
 
 function closeDraftAndStartSeason() {
     draftData.active = false;
+    setSimulationSeed(matchSeed([agentName, agencyName, 'offseason', currentSeason]));
     // Старт национального турнира (ЧМ каждый год, Олимпиада раз в 4 года)
     if (startNationalTournament()) {
         seasonPhase = 'world_champ';
@@ -10002,7 +10019,7 @@ function processEndOfSeasonContracts() {
         if (!p.club) return;
         if (becameFreeAgent.has(p)) return;
         if (p.contractYears > 0) p.contractYears--;
-        if (p.contractYears <= 0) p.contractYears = randomInt(1, 4);
+        if (p.contractYears <= 0) p.contractYears = simInt(1, 4);
     });
 }
 
@@ -10014,7 +10031,7 @@ function advanceSeasonAges() {
     players.forEach(p => {
         p.age++;
         if (rosterSet.has(p)) evolvePlayer(p);
-        else if (Math.random() < 0.85) evolvePlayer(p);
+        else if (simRandom() < 0.85) evolvePlayer(p);
     });
 }
 
@@ -10051,12 +10068,12 @@ function isTop10Scorer(p) {
 function evolvePlayer(p) {
     // Базовая возрастная дельта (как раньше)
     let delta;
-    if (p.age < 22) delta = randomInt(1, 4);
-    else if (p.age < 25) delta = randomInt(0, 3);
-    else if (p.age < 28) delta = randomInt(0, 2);
-    else if (p.age < 30) delta = randomInt(-1, 1);
-    else if (p.age < 34) delta = randomInt(-2, 0);
-    else delta = randomInt(-3, -1);
+    if (p.age < 22) delta = simInt(1, 4);
+    else if (p.age < 25) delta = simInt(0, 3);
+    else if (p.age < 28) delta = simInt(0, 2);
+    else if (p.age < 30) delta = simInt(-1, 1);
+    else if (p.age < 34) delta = simInt(-2, 0);
+    else delta = simInt(-3, -1);
     const lm = {NHL:1.5, AHL:1.4, KHL:1.3, SHL:1.2, NL_Switzerland:1.2, Liiga:1.2, Czech_Extraliga:1.1, DEL:1.1, Belarus_Extraliga:1.0, ICE_HL:1.1, VHL:1.0, MHL:0.8, Belarus_Vysshaya:0.8}[p.league] || 1.0;
 
     // ===== Коэффициент игры (performanceBonus) =====
@@ -10125,7 +10142,7 @@ function processRetirements() {
     const rosterSet = new Set(myRoster);
     const retirees = [];
     // Один бросок на игрока — иначе клиент мог «умереть» в одном списке и остаться в другом
-    players.forEach(p => { if (p.age >= 34 && Math.random() < 0.5) retirees.push(p); });
+    players.forEach(p => { if (p.age >= 34 && simRandom() < 0.5) retirees.push(p); });
     const retireSet = new Set(retirees);
     players = players.filter(p => !retireSet.has(p));
     retirees.forEach(p => {
@@ -10163,12 +10180,12 @@ function replenishYouth() {
                 total++;
                 continue;
             }
-            const r = Math.random();
+            const r = simRandom();
             if (r < 0.5 && npcAgencies.length > 0) {
                 // Половина идёт к NPC (в клубах)
                 const y = generateYouthPlayer(lk);
                 y.name = makeUniqueName(y.name, y.league, usedNames);
-                const ag = randomChoice(npcAgencies);
+                const ag = simChoice(npcAgencies);
                 y.agentId = ag.id;
                 ag.clientIds.push(y.name);
                 players.push(y);
@@ -10229,10 +10246,10 @@ function rebalanceClubRosters(minSize) {
             const k = lk + '|' + club;
             let have = counts.get(k) || 0;
             while (have < MIN) {
-                const pos = randomChoice(["G","D","D","C","C","LW","LW","RW"]);
-                const age = (lk === 'MHL' || lk === 'Belarus_Vysshaya') ? randomInt(14, 20) : randomInt(18, 24);
-                const base = randomInt(ld.min, ld.max);
-                const rating = Math.max(1, Math.min(100, base + randomInt(-8, 2)));
+                const pos = simChoice(["G","D","D","C","C","LW","LW","RW"]);
+                const age = (lk === 'MHL' || lk === 'Belarus_Vysshaya') ? simInt(14, 20) : simInt(18, 24);
+                const base = simInt(ld.min, ld.max);
+                const rating = Math.max(1, Math.min(100, base + simInt(-8, 2)));
                 const g = generatePlayerName(lk);
                 const name = makeUniqueName(g.name, lk, usedNames);
                 players.push(createPlayer(name, club, lk, pos, age, rating, null, g.nationality));
@@ -10757,6 +10774,7 @@ function playTournamentWeek() {
         finishTournament();
         return;
     }
+    setSimulationSeed(matchSeed([agentName, agencyName, 'nt', currentSeason, nationalTournament.currentWeek, nationalTournament.phase]));
     simulateTournamentWeek();
     const t = nationalTournament;
     if (!t) return;
@@ -10787,6 +10805,7 @@ function playTournamentWeek() {
 }
 
 function finishTournament() {
+    setSimulationSeed(matchSeed([agentName, agencyName, 'offseason', currentSeason]));
     if (nationalTournament) {
         const _t = nationalTournament;
         addNews(`🏆 ${_t.name} ${_t.year} завершён.`, "info");
@@ -14556,7 +14575,7 @@ function collectNationalTeams() {
 }
 
 function generateTournamentGroups(teams) {
-    const shuffled = [...teams].sort(() => Math.random() - 0.5);
+    const shuffled = [...teams].sort(() => simRandom() - 0.5);
     // 8 команд — 2 группы по 4
     if (teams.length === 8) {
         return { A: shuffled.slice(0, 4), B: shuffled.slice(4, 8) };
@@ -14600,19 +14619,19 @@ function simulateNationalMatch(teamA, teamB) {
     const sA = calcNationalStrength(teamA);
     const sB = calcNationalStrength(teamB);
     const total = sA + sB;
-    let goalsA = Math.max(0, Math.floor(Math.random() * 6 * (sA / total)));
-    let goalsB = Math.max(0, Math.floor(Math.random() * 6 * (sB / total)));
+    let goalsA = Math.max(0, Math.floor(simRandom() * 6 * (sA / total)));
+    let goalsB = Math.max(0, Math.floor(simRandom() * 6 * (sB / total)));
     let isOT = false;
     if (goalsA === goalsB) {
         isOT = true;
-        if (Math.random() < 0.5) goalsA++; else goalsB++;
+        if (simRandom() < 0.5) goalsA++; else goalsB++;
     }
     const pickScorer = (team, excludeName) => {
         const sk = team.players.filter(p => p.position !== 'G' && (!excludeName || p.name !== excludeName));
         if (sk.length === 0) return null;
         const w = sk.map(p => Math.pow(p.rating, 2));
         const tw = w.reduce((a, b) => a + b, 0);
-        let r = Math.random() * tw;
+        let r = simRandom() * tw;
         for (let i = 0; i < sk.length; i++) { r -= w[i]; if (r <= 0) return sk[i]; }
         return sk[sk.length - 1];
     };
@@ -14622,15 +14641,15 @@ function simulateNationalMatch(teamA, teamB) {
         if (!s) return;
         if (!s.nationalStats) s.nationalStats = { gp: 0, goals: 0, assists: 0 };
         s.nationalStats.goals++;
-        const minute = randomInt(1, 60);
+        const minute = simInt(1, 60);
         const assists = [];
-        if (Math.random() < 0.7) {
+        if (simRandom() < 0.7) {
             const a1 = pickScorer(team, s.name);
             if (a1) {
                 assists.push(a1.name);
                 if (!a1.nationalStats) a1.nationalStats = { gp: 0, goals: 0, assists: 0 };
                 a1.nationalStats.assists++;
-                if (Math.random() < 0.4) {
+                if (simRandom() < 0.4) {
                     const a2 = pickScorer(team, null);
                     if (a2 && a2.name !== s.name && a2.name !== a1.name) {
                         assists.push(a2.name);
@@ -15602,6 +15621,17 @@ if (import.meta.env.DEV) {
             return p.name;
         },
         advanceWeek: () => playRegularWeek(),
+        // Плей-офф: старт и раунд (dev/test only).
+        startPlayoffsNow: () => startPlayoffs(),
+        playoffTick: () => simulatePlayoffRound(),
+        finishTournamentNow: () => finishTournament(),
+        playoffSnapshot: () => JSON.stringify({            phase: seasonPhase,
+            round: playoffRound,
+            state: playoffState,
+            clubs: Object.fromEntries(Object.entries(clubData).map(([k, c]) => [k, c.budget])),
+            news: newsFeed.slice(0, 12).map((n) => n.text),
+            history: championsHistory
+        }),
         // Записать произвольный сейв и загрузить его (тесты детерминизма).
         importSaveData: async (data) => {
             await idbSet(SAVE_KEY, data);
@@ -15623,7 +15653,10 @@ if (import.meta.env.DEV) {
             tasks: activeTasks,
             chains: activeChains,
             counters: careerCounters,
-            npc: npcAgencies.map((a) => [a.name, a.reputation, a.money])
+            npc: npcAgencies.map((a) => [a.name, a.reputation, a.money]),
+            pool: [players.length, players.reduce((s, p) => s + p.rating, 0)],
+            draws: getSimulationDraws(),
+            ratings: players.map((p) => `${p.name}|${p.rating}|${p.age}|${p.potential}`)
         })
     };
 }
