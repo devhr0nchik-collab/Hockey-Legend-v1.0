@@ -49,7 +49,7 @@ tests/                vitest: smoke (jsdom) + юнит-тесты ядра
 - [x] Фаза 1. Vite + ESM-модули, SW только в prod, smoke-тесты
 - [x] Фаза 2. Модель и сейвы: `types.ts`, `core/pack.ts`, `features/save/storage.ts`, `features/save/migrations.ts`, roundtrip-тест сейва на fake-indexeddb
 - [ ] Фаза 2.5. Вынести `saveGame`/`loadGame` из `script.js` (требует единого state-объекта — делается вместе с Фазой 3)
-- [~] Фаза 3. Детерминизм: `core/sim-random.ts` + seeded RNG в симуляции матча (готово). Осталось: перевести остальные `Math.random` (недельная симуляция, экономика, события) и вынести match/league/economy в `features/sim/`
+- [~] Фаза 3. Детерминизм: `core/sim-random.ts`, seeded RNG в матче и **во всём недельном тике** (0 вызовов `Math.random` за неделю, проверяется тестом). Осталось: плей-офф, драфт, межсезонье и вынос sim-модулей в `features/sim/`
 - [ ] Фаза 3. Симуляция: RNG-сервис вместо `Math.random`, модули match/league/economy/draft/playoffs
 - [ ] Фаза 4. i18n на ключи, удаление regex-слоя и MutationObserver
 - [ ] Фаза 5. UI-экраны по одному: шаблоны + экранирование вместо `innerHTML`
