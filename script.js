@@ -6,7 +6,7 @@ import { getLeagueSalaryCap, calculateSalary, calculateSalaryCap, formatSalary }
 import { packPlayer, unpackPlayer, packClub, unpackClub } from './src/core/pack';
 import { createIdbStore } from './src/features/save/storage';
 import { isSaveData, normalizeLoadedSave } from './src/features/save/migrations';
-import { setSimulationSeed, simRandom, simInt, matchSeed } from './src/core/sim-random';
+import { setSimulationSeed, simRandom, simInt, simChoice, matchSeed } from './src/core/sim-random';
 
 if (window.DEBUG) console.log("✅ script.js загружен");
 // ============ 1. ЭЛЕМЕНТЫ ============
@@ -580,7 +580,7 @@ function generateScoutedPlayers() {
     const created = [];
     const usedNames = new Set(players.map(p => p && p.name).filter(Boolean));
     for (let i = 0; i < count; i++) {
-        const rating = Math.max(1, Math.min(99, randomInt(range.min, range.max)));
+        const rating = Math.max(1, Math.min(99, simInt(range.min, range.max)));
         // Лига подбирается под рейтинг: сильные таланты — сразу из взрослых лиг,
         // иначе getClubsForPlayer не найдёт им ни одного клуба
         let leagues;
@@ -588,12 +588,12 @@ function generateScoutedPlayers() {
         else if (rating >= 55) leagues = ['VHL','VHL','KHL','SHL','Liiga','Czech_Extraliga','DEL','Belarus_Extraliga','ICE_HL','AHL'];
         else if (rating >= 38) leagues = ['MHL','VHL','Belarus_Vysshaya','Belarus_Extraliga','ICE_HL','Liiga','DEL'];
         else leagues = ['MHL','MHL','Belarus_Vysshaya','VHL'];
-        const ln = randomChoice(leagues);
-        const pos = randomChoice(posTemplate);
+        const ln = simChoice(leagues);
+        const pos = simChoice(posTemplate);
         // Потенциал выше рейтинга; на высоком скаутинге — звёзды с высоким потолком
         const potMin = rating + Math.round(upgrades.scouting / 3);
-        const potential = Math.min(99, Math.max(rating, potMin + randomInt(0, 20)));
-        const age = randomInt(Math.max(16, getMinAge()), 21);
+        const potential = Math.min(99, Math.max(rating, potMin + simInt(0, 20)));
+        const age = simInt(Math.max(16, getMinAge()), 21);
         const { name, nationality } = generatePlayerName(ln);
         const p = createPlayer(name, '', ln, pos, age, rating, potential, nationality);
         p.name = makeUniqueName(p.name, ln, usedNames);
@@ -2305,13 +2305,13 @@ function simulateAIUpgrades() {
         if (!club.upgrades) continue;
 
         // Раз в 3 сезона (33% шанс) клуб получает +1 уровень
-        if (Math.random() > 0.33) continue;
+        if (simRandom() > 0.33) continue;
 
         // Выбираем случайную карточку, которая ещё не на максимуме
         const cardKeys = Object.keys(CLUB_UPGRADE_CARDS).filter(k => (club.upgrades[k] || 1) < 25);
         if (cardKeys.length === 0) continue;
 
-        const pick = randomChoice(cardKeys);
+        const pick = simChoice(cardKeys);
         club.upgrades[pick] = (club.upgrades[pick] || 1) + 1;
         totalUpgrades++;
     }
@@ -2322,7 +2322,7 @@ function simulateClubActions() {
     // Пока AI-прокачка упрощена — расширим в этапе 5
     for (const key of Object.keys(clubData)) {
         const c = clubData[key];
-        if (Math.random() > 0.05) continue;
+        if (simRandom() > 0.05) continue;
         if (c.budget < 0) {
             const cps = players.filter(p => p.club === c.club && p.league === c.league);
             if (cps.length > 0) {
@@ -2347,7 +2347,7 @@ function recalculateStockPrice(club) {
     const losses = club.form.filter(f => f === 'L').length;
     const formBonus = (wins - losses) * 3000;
     const titlesBonus = club.titles * 100;
-    const noise = 0.95 + Math.random() * 0.1;
+    const noise = 0.95 + simRandom() * 0.1;
     let np = Math.max(Math.round(1000 * lm), Math.round((basePrice + cashBonus + infraBonus + formBonus + titlesBonus) * noise));
 
     const priceCap = Math.round((club.prestige * 1000 * lm) * 4 + 500000 * lm);
@@ -2363,7 +2363,7 @@ function recalculateStockPrice(club) {
 function updateAllStockPrices() {
     for (const key of Object.keys(clubData)) {
         const c = clubData[key];
-        const r = Math.random();
+        const r = simRandom();
         c.form.push(r < 0.45 ? 'W' : r < 0.75 ? 'L' : 'OT');
         if (c.form.length > 5) c.form.shift();
         recalculateStockPrice(c);
@@ -2802,12 +2802,12 @@ function simulateWorldCupMatch(match) {
     let sA = worldCupState.strengths[match.away] || 0.5;
     sH = Math.min(1.0, sH * 1.03);
 
-    let gH = Math.max(0, Math.floor(Math.random() * 4 * sH + Math.random() * 3 - 0.5));
-    let gA = Math.max(0, Math.floor(Math.random() * 4 * sA + Math.random() * 3 - 0.5));
+    let gH = Math.max(0, Math.floor(simRandom() * 4 * sH + simRandom() * 3 - 0.5));
+    let gA = Math.max(0, Math.floor(simRandom() * 4 * sA + simRandom() * 3 - 0.5));
     let isOT = false;
     if (gH === gA) {
         isOT = true;
-        if (Math.random() < 0.5) gH++; else gA++;
+        if (simRandom() < 0.5) gH++; else gA++;
     }
 
     const playersH = players.filter(p => p.club === match.home && p.league === lkH && p.position !== 'G');
@@ -2817,7 +2817,7 @@ function simulateWorldCupMatch(match) {
         if (arr.length === 0) return null;
         const weights = arr.map(p => Math.pow(p.rating, 2) * (p.position === 'C' || p.position === 'LW' || p.position === 'RW' ? 1.5 : 1));
         const total = weights.reduce((a, b) => a + b, 0);
-        let r = Math.random() * total;
+        let r = simRandom() * total;
         for (let i = 0; i < arr.length; i++) { r -= weights[i]; if (r <= 0) return arr[i]; }
         return arr[arr.length - 1];
     };
@@ -2825,9 +2825,9 @@ function simulateWorldCupMatch(match) {
     const goals = [];
     const addGoal = (scorer, team) => {
         const arr = team === 'home' ? playersH : playersA;
-        const minute = randomInt(1, 60);
+        const minute = simInt(1, 60);
         const assists = [];
-        if (Math.random() < 0.7 && arr.length > 1) {
+        if (simRandom() < 0.7 && arr.length > 1) {
             const a1 = pickScorer(arr.filter(p => p !== scorer));
             if (a1) assists.push(a1.name);
         }
@@ -2925,10 +2925,10 @@ function simulateWorldCupSeries(s) {
     const strengthB = worldCupState.strengths[s.teamB.club] || 0.5;
 
     while (s.winsA < 4 && s.winsB < 4) {
-        let gA = Math.max(0, Math.floor(Math.random() * 4 * strengthA + Math.random() * 3 - 0.5));
-        let gB = Math.max(0, Math.floor(Math.random() * 4 * strengthB + Math.random() * 3 - 0.5));
+        let gA = Math.max(0, Math.floor(simRandom() * 4 * strengthA + simRandom() * 3 - 0.5));
+        let gB = Math.max(0, Math.floor(simRandom() * 4 * strengthB + simRandom() * 3 - 0.5));
         if (gA === gB) {
-            if (Math.random() < 0.5) gA++; else gB++;
+            if (simRandom() < 0.5) gA++; else gB++;
         }
         s.games.push({ a: gA, b: gB });
         if (gA > gB) s.winsA++; else s.winsB++;
@@ -4004,14 +4004,14 @@ function addNews(text, type="info") {
 
 function generateRandomNews() {
     if (myRoster.length === 0) return;
-    const p = randomChoice(myRoster);
+    const p = simChoice(myRoster);
     const events = [
         {text:`${p.name} дал интервью и похвалил вас`,type:"positive"},
         {text:`Скауты НХЛ следят за ${p.name}`,type:"positive"},
         {text:`${p.name} попал в скандал`,type:"negative"},
         {text:`${p.name} стал игроком недели`,type:"positive"}
     ];
-    const e = randomChoice(events);
+    const e = simChoice(events);
     addNews(e.text, e.type);
 }
 
@@ -6475,7 +6475,7 @@ function processWeeklyTrainings() {
         p.trainingAttr = null;
         if (!p.attributes) p.attributes = generateAttributes(p.position, p.rating, p.name);
         const chance = getTrainerSuccessChance();
-        if (Math.random() < chance) {
+        if (simRandom() < chance) {
             p.attributes[attr] = Math.min(99, (p.attributes[attr] || 0) + 1);
             // Рейтинг +1 и пересчет зарплаты (логика calculateSalary не тронута)
             p.rating = Math.min(99, (p.rating || 1) + 1);
@@ -10832,6 +10832,8 @@ function getWealthTax() {
 
 function playRegularWeek() {
     const playedWeek = currentWeek;
+    // Вся неделя воспроизводима по seed: сейв + сезон + неделя.
+    setSimulationSeed(matchSeed([agentName, agencyName, 'week', currentSeason, currentWeek]));
     
     // Расходы агентства
     const weekly = totalWeeklyCost();
@@ -10888,7 +10890,7 @@ function playRegularWeek() {
     // NPC-кулдаун тикает КАЖДУЮ неделю (а не только при удачном 8%-броске)
     if (npcCooldownWeeks > 0) npcCooldownWeeks--;
     // Событие NPC
-    if (Math.random() < 0.08) tryNpcPoaching();
+    if (simRandom() < 0.08) tryNpcPoaching();
 
     // Проверка активных задач
     checkActiveTasks();
@@ -10900,7 +10902,7 @@ function playRegularWeek() {
     }
 
     // Случайный старт новой цепочки (8% шанс в неделю, если нет активных)
-    if (activeChains.length === 0 && Math.random() < 0.08) {
+    if (activeChains.length === 0 && simRandom() < 0.08) {
         const chainPool = [
             'bad_press_chain', 'rival_war',
             'doping_chain', 'home_return_chain', 'coach_conflict_chain',
@@ -10908,7 +10910,7 @@ function playRegularWeek() {
             'personal_crisis_chain', 'career_turn_chain', 'business_empire_chain',
             'national_team_chain', 'media_mogul_chain'
         ];
-        const pick = chainPool[Math.floor(Math.random() * chainPool.length)];
+        const pick = chainPool[Math.floor(simRandom() * chainPool.length)];
         if (!activeChains.some(c => c.chainId === pick)) {
             triggerChainStart(pick);
         }
@@ -10916,7 +10918,7 @@ function playRegularWeek() {
 
     // Продление в конце сезона
     if (currentWeek >= RENEWAL_WEEKS_START && currentWeek <= RENEWAL_WEEKS_END) {
-        if (Math.random() < 0.25) tryContractRenewal();
+        if (simRandom() < 0.25) tryContractRenewal();
     }
 
     // Если президент — показать матчи его клуба после симуляции
@@ -10938,6 +10940,7 @@ function playRegularWeek() {
 
 function playTransferWeek() {
     transferPhaseWeeksLeft--;
+    setSimulationSeed(matchSeed([agentName, agencyName, 'transfer', currentSeason, currentWeek, seasonPhase]));
     addNews(`🔄 ${LANG.t('Неделя ТО')}: ${LANG.t('осталось')} ${transferPhaseWeeksLeft}`, "info");
 
     // ===== ФИНАНСЫ: работают и в ТО, а не только в regular =====
@@ -10960,13 +10963,13 @@ function playTransferWeek() {
     processWeeklyTrainings(); // тик индивидуальных тренировок (работает и в ТО)
 
     // Пассивный канал — клубы приходят (каждые 2-ю неделю ТО, 0–5 клубов за раз)
-    if (transferPhaseWeeksLeft % 2 === 0 && Math.random() < 0.15) tryPassiveTransferOffer();
+    if (transferPhaseWeeksLeft % 2 === 0 && simRandom() < 0.15) tryPassiveTransferOffer();
     simulateAITransfers(); // Живой мир: AI-клубы обмениваются игроками
     processPendingClubReturns();
     // NPC-кулдаун тикает и в ТО тоже
     if (npcCooldownWeeks > 0) npcCooldownWeeks--;
     // NPC-события
-    if (Math.random() < 0.08) tryNpcPoaching();
+    if (simRandom() < 0.08) tryNpcPoaching();
 
     // Проверка задач и событие
     checkActiveTasks();
@@ -11048,42 +11051,42 @@ function simulateWeekForPlayer(p) {
             maxInjuryWeeks = Math.max(2, maxInjuryWeeks - recBonus * 2);
         }
     }
-    if (Math.random() < injuryChance) {
-        p.injuryWeeks = randomInt(1, maxInjuryWeeks);
+    if (simRandom() < injuryChance) {
+        p.injuryWeeks = simInt(1, maxInjuryWeeks);
         addNews(`${p.name} травма (${p.injuryWeeks} нед.)`, "negative");
         return;
     }
     const power = Math.max(0.4, Math.min(1.0, (p.rating + p.form * 3) / 100));
-    const games = randomInt(1, 2);
+    const games = simInt(1, 2);
     p.stats.gp += games;
     for (let i = 0; i < games; i++) {
-        let gr = 5 + power * 4 + (Math.random() - 0.5);
+        let gr = 5 + power * 4 + (simRandom() - 0.5);
         gr = Math.max(4, Math.min(10, gr));
         p.stats.ratingSum += gr;
         if (p.position === 'G') {
             const gaReduction = Math.max(0, teamBonusPM);
-            const ga = Math.max(0, Math.round(randomInt(0, 5) - power * 2.5 - gaReduction * 0.5));
+            const ga = Math.max(0, Math.round(simInt(0, 5) - power * 2.5 - gaReduction * 0.5));
             p.stats.goalsAgainst += ga;
-            p.stats.pim += randomInt(0, 2);
+            p.stats.pim += simInt(0, 2);
             // В реальном хоккее вратарям +/- не считают. Оставляем plusMinus = 0.
         } else if (p.position === 'D') {
             const atkBoost = teamBonusPM * 0.03;
-            if (Math.random() < power * (0.15 + atkBoost)) p.stats.goals++;
-            if (Math.random() < power * (0.35 + atkBoost)) p.stats.assists++;
-            p.stats.pim += randomInt(0, 4);
-            p.stats.plusMinus += Math.max(-3, Math.min(3, randomInt(-2, 2) + teamBonusPM));
+            if (simRandom() < power * (0.15 + atkBoost)) p.stats.goals++;
+            if (simRandom() < power * (0.35 + atkBoost)) p.stats.assists++;
+            p.stats.pim += simInt(0, 4);
+            p.stats.plusMinus += Math.max(-3, Math.min(3, simInt(-2, 2) + teamBonusPM));
         } else {
             const atkBoost = teamBonusPM * 0.05;
-            if (Math.random() < power * (0.5 + atkBoost)) p.stats.goals++;
-            if (Math.random() < power * (0.6 + atkBoost)) p.stats.assists++;
-            p.stats.pim += randomInt(0, 2);
-            p.stats.plusMinus += Math.max(-3, Math.min(3, randomInt(-1, 2) + teamBonusPM));
+            if (simRandom() < power * (0.5 + atkBoost)) p.stats.goals++;
+            if (simRandom() < power * (0.6 + atkBoost)) p.stats.assists++;
+            p.stats.pim += simInt(0, 2);
+            p.stats.plusMinus += Math.max(-3, Math.min(3, simInt(-1, 2) + teamBonusPM));
         }
     }
-    p.form = randomInt(-1, 1);
+    p.form = simInt(-1, 1);
     // Лояльность медленно падает от рутины, но восстанавливается у успешных клиентов
     // (иначе NPC-переманивание становится неизбежным на длинной дистанции)
-    const loyaltyDrift = randomInt(-2, 1);
+    const loyaltyDrift = simInt(-2, 1);
     let loyaltyDelta = loyaltyDrift;
     if (loyaltyDrift >= 0 || p.loyalty < 50) {
         // хорошая форма/результативность даёт небольшой плюс
@@ -11103,11 +11106,11 @@ function simulateWeekForPlayer(p) {
             if (myTeam && totalTeams > 0) {
                 const positionPct = myPlace / totalTeams;
                 if (positionPct < 0.5) {
-                    p.clubLoyalty = Math.min(100, (p.clubLoyalty || 0) + randomInt(0, 2));
+                    p.clubLoyalty = Math.min(100, (p.clubLoyalty || 0) + simInt(0, 2));
                 } else if (positionPct > 0.75) {
-                    p.clubLoyalty = Math.max(0, (p.clubLoyalty || 0) - randomInt(0, 2));
+                    p.clubLoyalty = Math.max(0, (p.clubLoyalty || 0) - simInt(0, 2));
                 } else {
-                    p.clubLoyalty = Math.min(100, (p.clubLoyalty || 0) + (Math.random() < 0.5 ? 1 : 0));
+                    p.clubLoyalty = Math.min(100, (p.clubLoyalty || 0) + (simRandom() < 0.5 ? 1 : 0));
                 }
             }
         }
@@ -12118,7 +12121,7 @@ function isInHomeCountry(player) {
 // ============ СИСТЕМА ЗАДАЧ ============
 function createTask(config) {
     const task = {
-        id: 'task_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+        id: 'task_' + Date.now() + '_' + simRandom().toString(36).slice(2, 7),
         type: config.type || 'generic',
         playerName: config.playerName || null,
         createdWeek: currentWeek,
@@ -12236,8 +12239,8 @@ function checkActiveTasks() {
             } else if (weeksLeft <= 0) failTask(task);
         } else if (task.type === 'find_sponsor') {
             if (weeksLeft <= 0) {
-                if (Math.random() < 0.6) {
-                    const bonus = randomInt(20000, 50000);
+                if (simRandom() < 0.6) {
+                    const bonus = simInt(20000, 50000);
                     agentMoney += bonus;
                     completeTask(task, `✅ Спонсор найден! +$${bonus.toLocaleString()}`);
                 } else failTask(task);
@@ -12530,10 +12533,10 @@ function simulateAITransfers() {
     if (candidates.length === 0) return 0;
 
     let transfers = 0;
-    const maxTransfers = randomInt(1, 3); // не превращаем мир в биржу хаоса
+    const maxTransfers = simInt(1, 3); // не превращаем мир в биржу хаоса
 
     for (let i = 0; i < maxTransfers && candidates.length > 0; i++) {
-        const idx = Math.floor(Math.random() * candidates.length);
+        const idx = Math.floor(simRandom() * candidates.length);
         const p = candidates.splice(idx, 1)[0];
         const oldKey = p.league + "_" + p.club;
         const oldData = clubData[oldKey];
@@ -12552,7 +12555,7 @@ function simulateAITransfers() {
         const pool = better.length > 0 ? better : richClubs;
         if (pool.length === 0) continue;
 
-        const newClub = randomChoice(pool);
+        const newClub = simChoice(pool);
         // Имитация перехода: клуб платит, бюджет уменьшается (деньги сжигаются — уже учтены в экономике)
         newClub.budget = Math.max(0, newClub.budget - salaryBudget);
 
@@ -12560,9 +12563,9 @@ function simulateAITransfers() {
         p.club = newClub.club;
         p.league = newClub.league;
         p.lastTransferSeason = currentSeason;
-        p.contractYears = randomInt(2, 4);
+        p.contractYears = simInt(2, 4);
         p.salary = calculateSalary(p.rating, p.league); // ЗП по рынку нового клуба
-        p.clubLoyalty = randomInt(40, 60);
+        p.clubLoyalty = simInt(40, 60);
         transfers++;
 
         done.push({ player: p, oldClubName, newClub });
@@ -12593,7 +12596,7 @@ function tryWeeklyEvent() {
     if (lastEventWeek > 0 && weeksSinceLast < EVENT_MIN_COOLDOWN) return false;
     let chance = 0.20;
     if (weeksSinceLast >= EVENT_MAX_COOLDOWN) chance = 0.9;
-    if (Math.random() > chance) return false;
+    if (simRandom() > chance) return false;
     const nowKey = currentSeason * 100 + currentWeek;
     const available = EVENT_POOL.filter(e => {
         if ((eventCooldowns[e.id] || 0) > nowKey) return false;
@@ -12603,7 +12606,7 @@ function tryWeeklyEvent() {
     // Перебираем доступные события, пока не найдём то, у которого есть живой игрок.
     // Если getPlayer() вернул null (игрок уже ушёл из агентства) — кулдауним событие и пробуем следующее.
     while (available.length > 0) {
-        const idx = Math.floor(Math.random() * available.length);
+        const idx = Math.floor(simRandom() * available.length);
         const ev = available.splice(idx, 1)[0];
         let testPlayer = null;
         try { testPlayer = ev.getPlayer ? ev.getPlayer() : null; } catch (e) {}
@@ -12668,15 +12671,15 @@ function tryNpcPoaching() {
     if (npcCooldownWeeks > 0) return false;
     if (lostPlayerThisSeason) return false;
 
-    const target = randomChoice(myRoster);
+    const target = simChoice(myRoster);
     if (target.loyalty > 70) {
         addNews(`${target.name} отказал конкуренту (высокая лояльность)`, "positive");
         npcCooldownWeeks = 6;
         return false;
     }
 
-    const agent = randomChoice(npcAgencies);
-    const newSalary = Math.round(target.salary * (1.3 + Math.random() * 0.7));
+    const agent = simChoice(npcAgencies);
+    const newSalary = Math.round(target.salary * (1.3 + simRandom() * 0.7));
     const comp = Math.round(target.salary * 0.1);
     showPoachingEvent(target, agent, newSalary, comp);
     npcCooldownWeeks = 6;
@@ -12723,7 +12726,7 @@ function showPoachingEvent(player, agent, newSalary, compensation) {
     b3.addEventListener('click', () => {
         const mp = upgrades.reputation * 10, hp = agent.rep;
         const chance = Math.max(0.15, Math.min(0.85, mp / (mp + hp)));
-        if (Math.random() < chance) {
+        if (simRandom() < chance) {
             agent.rep = Math.max(5, agent.rep - 5);
             player.loyalty = Math.min(100, player.loyalty + 10);
             addNews(`Угроза удалась!`, "positive");
@@ -13358,7 +13361,7 @@ function tryContractRenewal() {
         !transferOffers[p.name] && p.lastTransferSeason !== currentSeason
     );
     if (expiring.length === 0) return false;
-    const player = randomChoice(expiring);
+    const player = simChoice(expiring);
     const offer = generateRenewalOffer(player);
     if (!offer) return false;
     showContractRenewalModal(player, offer, rollPlayerWantsToLeave(player));
@@ -15588,7 +15591,35 @@ if (import.meta.env.DEV) {
         simulateMatch: (lk = 'NHL') => {
             const clubs = getAllClubs(lk);
             return simulateMatchWithDetails({ home: clubs[0], away: clubs[1] }, lk, null);
-        }
+        },
+        // Тестовый клиент в ростер (dev/test only).
+        addClient: (name = 'Тест Клиент') => {
+            const lk = 'NHL';
+            const clubs = getAllClubs(lk);
+            const p = createPlayer(name, clubs[0], lk, 'C', 22, 75, null, 'RU');
+            players.push(p);
+            myRoster.push(p);
+            return p.name;
+        },
+        advanceWeek: () => playRegularWeek(),
+        weekSnapshot: () => JSON.stringify({
+            money: agentMoney,
+            season: currentSeason,
+            week: currentWeek,
+            phase: seasonPhase,
+            phaseWeeks: transferPhaseWeeksLeft,
+            standings,
+            teamStrengths,
+            clubs: Object.fromEntries(Object.entries(clubData).map(([k, c]) => [
+                k, [c.budget, c.stockPrice, c.weeklyIncome, c.weeklyExpenses, c.form]
+            ])),
+            roster: myRoster.map((p) => [p.name, p.stats, p.form, p.injuryWeeks, p.loyalty, p.clubLoyalty, p.salary, p.contractYears]),
+            news: newsFeed.slice(0, 10).map((n) => [n.text, n.week, n.season]),
+            tasks: activeTasks,
+            chains: activeChains,
+            counters: careerCounters,
+            npc: npcAgencies.map((a) => [a.name, a.reputation, a.money])
+        })
     };
 }
 
