@@ -5854,7 +5854,7 @@ function pickRandomClubs(clubs, maxCount) {
         // Вес = prestige + 20, чтобы слабые клубы тоже выпадали
         const weights = pool.map(c => (c.prestige || 40) + 20);
         const total = weights.reduce((s, w) => s + w, 0);
-        let roll = Math.random() * total;
+        let roll = simRandom() * total;
         let idx = 0;
         for (let j = 0; j < pool.length; j++) {
             roll -= weights[j];
@@ -5884,7 +5884,7 @@ function openClubPickModal(player) {
     }
 
     // Новая генерация: случайный спрос 1-5 клубов + взвешенный рандом выбора
-    const interested = pickRandomClubs(clubs, randomInt(1, 5));
+    const interested = pickRandomClubs(clubs, simInt(1, 5));
     if (interested.length === 0) { uiAlert(LANG.t('Нет подходящих клубов для переговоров')); return; }
 
     // Сразу создаём офферы с "шумом" в суммах — они сохраняются в entry.offers
@@ -6178,6 +6178,7 @@ function getNegotiationSuccessChance(player, kind) {
 function resolveNegotiationRound(player, kind) {
     const neg = activeNegotiation;
     if (!neg || neg.finished) return;
+    setSimulationSeed(matchSeed([agentName, agencyName, 'negotiation', currentSeason, currentWeek, player.name, kind, neg.roundsLeft]));
     const o = neg.offer;
     addAgentMsg(
         kind === 'money' ? LANG.t('Просить больше денег') :
@@ -6189,7 +6190,7 @@ function resolveNegotiationRound(player, kind) {
     neg.patience = Math.max(0, (neg.patience ?? 3) - 1); // каждое требование тратит 1 сердечко
     const chance = getNegotiationSuccessChance(player, kind);
 
-    if (Math.random() < chance) {
+    if (simRandom() < chance) {
         // ===== Успех: клуб улучшает оффер (мутирует сохранённый оффер) =====
         // Характер клуба: топ-клубы (80+) жадные, бедные (<60) сговорчивые
         const greedy = neg.prestige >= 80;
@@ -6200,7 +6201,7 @@ function resolveNegotiationRound(player, kind) {
             // Топ-клубы: максимум +10-15%. Обычные: +10-25%. Бедные: +15-30% (если есть деньги)
             let minRaise = generous ? 1.15 : 1.10;
             let maxRaise = greedy ? 1.15 : generous ? 1.30 : 1.25;
-            const raised = Math.min(cap, Math.round(o.newSalary * (minRaise + Math.random() * (maxRaise - minRaise))));
+            const raised = Math.min(cap, Math.round(o.newSalary * (minRaise + simRandom() * (maxRaise - minRaise))));
             o.newSalary = Math.max(o.newSalary + 1, raised); // торг никогда не понижает зарплату
             o.salaryBoost = o.newSalary / Math.max(1, player.salary);
             msg = `${LANG.t('Торг удался!')} ${LANG.t('Клуб улучшил зарплату до')} ${formatSalary(o.newSalary)}`;
@@ -6211,7 +6212,7 @@ function resolveNegotiationRound(player, kind) {
             o.years = Math.min(6, o.years + 1);
             msg = `${LANG.t('Торг удался!')} ${LANG.t('Клуб продлил срок до')} ${formatContractYears(o.years)}`;
         } else {
-            const bonusMult = greedy ? (0.03 + Math.random() * 0.06) : generous ? (0.08 + Math.random() * 0.14) : (0.05 + Math.random() * 0.10);
+            const bonusMult = greedy ? (0.03 + simRandom() * 0.06) : generous ? (0.08 + simRandom() * 0.14) : (0.05 + simRandom() * 0.10);
             o.signingBonus = Math.round(o.newSalary * 1000 * bonusMult);
             msg = `${LANG.t('Торг удался!')} ${LANG.t('Клуб добавил подписной бонус')} ${formatMoney(o.signingBonus)}`;
         }
@@ -10606,9 +10607,9 @@ function openPoachDialog(player, npcAgency) {
     const country = getPlayerCountry(player);
     const agencyFlag = npcAgency.country.split(' ')[0];
 
-    const isTruth = Math.random() < 0.8;
+    const isTruth = simRandom() < 0.8;
     const rumorKeys = ['ambitious', 'calm', 'pragmatic', 'capricious', 'loyal'];
-    const rumorChar = isTruth ? player.character : randomChoice(rumorKeys.filter(r => r !== player.character));
+    const rumorChar = isTruth ? player.character : simChoice(rumorKeys.filter(r => r !== player.character));
     const rumorMap = {ambitious:'очень амбициозный парень', calm:'спокойный и ценит стабильность', pragmatic:'прагматик до мозга костей', capricious:'характер у него — не сахар', loyal:'очень верный своему агенту'};
     const rumorText = LANG.t(rumorMap[rumorChar] || 'ничего не слышно');
 
@@ -10649,7 +10650,7 @@ function openPoachDialog(player, npcAgency) {
         pool.push({key: k, text: LANG.t(POACH_REPLIES[k]), type});
     });
     for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = Math.floor(simRandom() * (i + 1));
         [pool[i], pool[j]] = [pool[j], pool[i]];
     }
     const cont = document.getElementById('pd-replies');
@@ -10691,7 +10692,7 @@ function resolvePoach(player, npcAgency, reply) {
 
     if (reply.type === 'correct') chance += 30;
     else if (reply.type === 'wrong') chance -= 20;
-    if (player.character === 'capricious' && Math.random() < 0.3) chance += randomInt(-15, 15);
+    if (player.character === 'capricious' && simRandom() < 0.3) chance += simInt(-15, 15);
 
     // ЖЁСТКИЙ ПОТОЛОК: против сильного агентства шансов почти нет
     const rawDiff = myRep - npcAgency.rep;
@@ -10707,7 +10708,7 @@ function resolvePoach(player, npcAgency, reply) {
     else { minChance = 10; maxChance = 75; }
 
     chance = Math.max(minChance, Math.min(maxChance, chance));
-    let success = Math.random() * 100 < chance;
+    let success = simRandom() * 100 < chance;
 
     // СТРАХОВКА: если у топ-агентства репутация на 40+ выше твоей — никогда не переманить
     if (npcAgency.rep - myRep >= 40) success = false;
@@ -10722,7 +10723,7 @@ function resolvePoach(player, npcAgency, reply) {
         careerCounters.poachSuccess = (careerCounters.poachSuccess || 0) + 1;
         if (npcAgency.rep >= 85) careerCounters.poachTopSuccess = (careerCounters.poachTopSuccess || 0) + 1;
         const phrases = SUCCESS_PHRASES[player.character] || SUCCESS_PHRASES.calm;
-        body.innerHTML = `<div class="pd-result success"><div class="pd-result-icon">✅</div><div class="pd-player-line">${player.name}</div><div class="pd-phrase">${LANG.t(randomChoice(phrases))}</div><div class="pd-result-text">${LANG.t('Игрок стал твоим клиентом!')}</div></div>`;
+        body.innerHTML = `<div class="pd-result success"><div class="pd-result-icon">✅</div><div class="pd-player-line">${player.name}</div><div class="pd-phrase">${LANG.t(simChoice(phrases))}</div><div class="pd-result-text">${LANG.t('Игрок стал твоим клиентом!')}</div></div>`;
         addNews(`🎉 Вы переманили ${player.name}!`, "positive");
         addXP(player.rating * 5);
         updateAllDisplays();
@@ -10730,7 +10731,7 @@ function resolvePoach(player, npcAgency, reply) {
     } else {
         careerCounters.poachFails = (careerCounters.poachFails || 0) + 1;
         const phrases = FAIL_PHRASES[player.character] || FAIL_PHRASES.calm;
-        body.innerHTML = `<div class="pd-result fail"><div class="pd-result-icon">❌</div><div class="pd-player-line">${player.name}</div><div class="pd-phrase">${LANG.t(randomChoice(phrases))}</div><div class="pd-result-text">${LANG.t('До конца сезона к нему не подойти')}</div></div>`;
+        body.innerHTML = `<div class="pd-result fail"><div class="pd-result-icon">❌</div><div class="pd-player-line">${player.name}</div><div class="pd-phrase">${LANG.t(simChoice(phrases))}</div><div class="pd-result-text">${LANG.t('До конца сезона к нему не подойти')}</div></div>`;
         addNews(`❌ Не удалось переманить ${player.name}`, "negative");
         saveGame();
     }
@@ -12845,6 +12846,7 @@ function getClubsForPlayer(player, options) {
     return result;
 }
 function generateTransferOffer(player, clubInfo) {
+    setSimulationSeed(matchSeed([agentName, agencyName, 'offer', currentSeason, currentWeek, player.name, clubInfo.league, clubInfo.club]));
     const data = clubData[clubInfo.league + "_" + clubInfo.club];
     if (!data) return null;
     const pd = data.prestige - player.rating;
@@ -12857,10 +12859,10 @@ function generateTransferOffer(player, clubInfo) {
         ? player.salary
         : calculateSalary(player.rating, clubInfo.league);
     // "Шум" ±15%: два одинаковых клиента получают разные суммы от одного клуба
-    let newSalary = Math.round(base * (minM + Math.random() * (maxM - minM)) * (0.85 + Math.random() * 0.30));
-    if (newSalary > cap) newSalary = Math.round(cap * (1.0 + Math.random() * 0.05));
+    let newSalary = Math.round(base * (minM + simRandom() * (maxM - minM)) * (0.85 + simRandom() * 0.30));
+    if (newSalary > cap) newSalary = Math.round(cap * (1.0 + simRandom() * 0.05));
     newSalary = Math.max(1, newSalary);
-    const years = player.age < 25 ? randomInt(2, 4) : player.age < 30 ? randomInt(1, 3) : randomInt(1, 2);
+    const years = player.age < 25 ? simInt(2, 4) : player.age < 30 ? simInt(1, 3) : simInt(1, 2);
     const totalComm = Math.round(newSalary * 1000 * COMMISSION_RATE);
     const weeklyComm = Math.round(totalComm / 26);
     const salaryBoost = newSalary / Math.max(1, player.salary);
@@ -12926,14 +12928,15 @@ function generateTransferOffer(player, clubInfo) {
         newSalary, years, totalCommission: totalComm, weeklyCommission: weeklyComm,
         salaryBoost, tierBoost, prestigeBoost, interest,
         pros, cons, acceptChance, playingTime: playingTime.role,
-        id: clubInfo.league + "_" + clubInfo.club + "_" + Date.now() + "_" + Math.random()
+        id: clubInfo.league + "_" + clubInfo.club + "_" + Date.now() + "_" + simRandom()
     };
 }
 
 function generateOffersForPlayer(player, count, options) {
+    setSimulationSeed(matchSeed([agentName, agencyName, 'offers', currentSeason, currentWeek, player.name]));
     const clubs = getClubsForPlayer(player, options);
     if (clubs.length === 0) return [];
-    const shuffled = [...clubs].sort(() => Math.random() - 0.5);
+    const shuffled = [...clubs].sort(() => simRandom() - 0.5);
     const offers = [];
     shuffled.slice(0, count).forEach(c => {
         const o = generateTransferOffer(player, c);
@@ -12962,7 +12965,7 @@ function startActiveTransferSearch(player) {
         uiAlert(LANG.t('Этот игрок уже менял клуб в этом сезоне. Следующий трансфер — в следующем сезоне.'));
         return;
     }
-    const count = upgrades.reputation >= 15 ? randomInt(4, 6) : upgrades.reputation >= 8 ? randomInt(3, 5) : randomInt(2, 3);
+    const count = upgrades.reputation >= 15 ? simInt(4, 6) : upgrades.reputation >= 8 ? simInt(3, 5) : simInt(2, 3);
     // Если у игрока задача «вернуться домой» — ищем с ослабленными условиями
     const homeTask = activeTasks.find(t => t.playerName === player.name && t.type === 'find_club_home');
     const offers = generateOffersForPlayer(player, count, { forHomeReturn: !!homeTask });
@@ -12989,7 +12992,7 @@ function tickTransferOffers() {
 
 function acceptTransferOffer(player, offer) {    // Игрок может отказаться, если интерес низкий
     const acceptChance = offer.acceptChance ?? 100;
-    const roll = Math.random() * 100;
+    const roll = simRandom() * 100;
     if (roll > acceptChance) {
         const reason = (offer.cons && offer.cons.length > 0) ? offer.cons[0] : 'Игрок отказался переходить';
         addNews(`❌ ${player.name} отказался переходить в ${offer.club}: ${reason}`, "negative");
@@ -13051,10 +13054,10 @@ function declineTransferOffer(player, offer, permanent) {
     const e = transferOffers[player.name];
     if (!e) return;
     e.offers = e.offers.filter(o => o.id !== offer.id);
-    if (!permanent && e.returnCount < 2 && Math.random() < 0.5) {
+    if (!permanent && e.returnCount < 2 && simRandom() < 0.5) {
         pendingClubReturn.push({
             playerName: player.name, club: offer.club, league: offer.league,
-            weeksUntil: randomInt(1, 2), boost: 1.2, baseOffer: offer
+            weeksUntil: simInt(1, 2), boost: 1.2, baseOffer: offer
         });
         addNews(`⏳ ${offer.club} может вернуться с лучшим предложением`, "info");
     }
@@ -13182,8 +13185,8 @@ function openTransferOfferModal(player, offer) {
 function tryTradeOffer(player, offer) {
     const chance = Math.min(0.85, 0.25 + getTradeBonus());
     closeEventModal();
-    if (Math.random() < chance) {
-        const boost = 1.15 + Math.random() * 0.10;
+    if (simRandom() < chance) {
+        const boost = 1.15 + simRandom() * 0.10;
         const newSalary = Math.round(offer.newSalary * boost);
         const newComm = Math.round(newSalary * 1000 * COMMISSION_RATE / 52);
         const improved = {
@@ -13217,12 +13220,13 @@ function tryPassiveTransferOffer() {
     if (seasonPhase !== 'transfer_mid' && seasonPhase !== 'transfer_off') return false;
     if (upgrades.reputation < 8) return false;
     if (myRoster.length === 0) return false;
+    setSimulationSeed(matchSeed([agentName, agencyName, 'passive', currentSeason, currentWeek, seasonPhase]));
     let baseChance = 0.05;
     if (upgrades.reputation >= 20) baseChance = 0.20;
     else if (upgrades.reputation >= 15) baseChance = 0.13;
     else if (upgrades.reputation >= 10) baseChance = 0.08;
     baseChance *= getMediaMultiplier();
-    if (Math.random() > baseChance) return false;
+    if (simRandom() > baseChance) return false;
 
     const candidates = [...myRoster].map(p => ({
         player: p,
@@ -13230,16 +13234,16 @@ function tryPassiveTransferOffer() {
     })).filter(c => c.weight > 0 && c.player.club);
     if (candidates.length === 0) return false;
     candidates.sort((a, b) => b.weight - a.weight);
-    const player = candidates[Math.floor(Math.random() * Math.min(3, candidates.length))].player;
+    const player = candidates[Math.floor(simRandom() * Math.min(3, candidates.length))].player;
     if (transferOffers[player.name]) return false;
     if (player.lastTransferSeason === currentSeason) return false;
 
     const clubs = getClubsForPlayer(player);
     if (clubs.length === 0) return false;
-    const shuffled = [...clubs].sort(() => Math.random() - 0.5);
+    const shuffled = [...clubs].sort(() => simRandom() - 0.5);
     const offers = [];
     // Случайный спрос: 0-5 клубов за раз. 0 — на этой неделе спроса нет (это нормально)
-    const cnt = randomInt(0, 5);
+    const cnt = simInt(0, 5);
     if (cnt === 0) return false;
     for (let i = 0; i < cnt && i < shuffled.length; i++) {
         const o = generateTransferOffer(player, shuffled[i]);
@@ -13302,10 +13306,10 @@ function showPassiveOffer(player, bestOffer, allOffers) {
     b2.textContent = '❌ ' + LANG.t('Отклонить');
     b2.addEventListener('click', () => {
         closeEventModal();
-        if (Math.random() < 0.5) {
+        if (simRandom() < 0.5) {
             pendingClubReturn.push({
                 playerName: player.name, club: bestOffer.club, league: bestOffer.league,
-                weeksUntil: randomInt(1, 2), boost: 1.2, baseOffer: bestOffer
+                weeksUntil: simInt(1, 2), boost: 1.2, baseOffer: bestOffer
             });
         }
         updateAllDisplays();
@@ -13347,12 +13351,13 @@ function isRenewalWindow() {
 }
 
 function generateRenewalOffer(player) {
+    setSimulationSeed(matchSeed([agentName, agencyName, 'renewal', currentSeason, player.name]));
     const data = clubData[player.league + "_" + player.club];
     if (!data) return null;
     const cap = calculateSalaryCap(player.rating, player.league);
-    let newSalary = Math.round(player.salary * (1.0 + Math.random() * 0.25));
+    let newSalary = Math.round(player.salary * (1.0 + simRandom() * 0.25));
     if (newSalary > cap) newSalary = Math.round(cap);
-    const years = player.age < 25 ? randomInt(2, 4) : player.age < 30 ? randomInt(2, 3) : randomInt(1, 2);
+    const years = player.age < 25 ? simInt(2, 4) : player.age < 30 ? simInt(2, 3) : simInt(1, 2);
     const bonus = Math.round(newSalary * 1000 * 0.02);
     return {
         club: player.club, league: player.league, prestige: data.prestige,
@@ -13362,6 +13367,7 @@ function generateRenewalOffer(player) {
 }
 
 function rollPlayerWantsToLeave(player) {
+    setSimulationSeed(matchSeed([agentName, agencyName, 'leave', currentSeason, player.name]));
     let chance = 0.30;
     const loyalty = player.loyalty ?? 100;
     chance -= (loyalty - 50) * 0.006;
@@ -13369,7 +13375,7 @@ function rollPlayerWantsToLeave(player) {
     if (data && player.rating > data.prestige + 10) chance += 0.15;
     if (player.age < 25 && player.rating >= 85) chance += 0.10;
     if (player.age > 32) chance -= 0.15;
-    return Math.random() < Math.max(0.05, Math.min(0.85, chance));
+    return simRandom() < Math.max(0.05, Math.min(0.85, chance));
 }
 
 function tryContractRenewal() {
@@ -13492,8 +13498,8 @@ function applyContractRenewal(player, offer) {
 function tryTradeContract(player, offer) {
     const chance = Math.min(0.85, 0.25 + getTradeBonus());
     closeEventModal();
-    if (Math.random() < chance) {
-        const boost = 1.10 + Math.random() * 0.10;
+    if (simRandom() < chance) {
+        const boost = 1.10 + simRandom() * 0.10;
         const newSalary = Math.round(offer.newSalary * boost);
         const improved = {
             ...offer, newSalary,
@@ -15625,6 +15631,20 @@ if (import.meta.env.DEV) {
         startPlayoffsNow: () => startPlayoffs(),
         playoffTick: () => simulatePlayoffRound(),
         finishTournamentNow: () => finishTournament(),
+        // Трансферный зонд: оффер, продление, желание уйти, пакет предложений.
+        transferProbe: () => {
+            const p = myRoster[0] || players[0];
+            const lk = p.league || 'NHL';
+            const clubs = getAllClubs(lk);
+            const target = clubs.find((c) => c !== p.club) || clubs[0];
+            const strip = (o) => { if (!o) return o; const { id, ...rest } = o; return rest; };
+            return JSON.stringify({
+                offer: strip(generateTransferOffer(p, { league: lk, club: target })),
+                renewal: strip(generateRenewalOffer(p)),
+                wants: rollPlayerWantsToLeave(p),
+                offers: generateOffersForPlayer(p, 3).map(strip)
+            });
+        },
         playoffSnapshot: () => JSON.stringify({            phase: seasonPhase,
             round: playoffRound,
             state: playoffState,
