@@ -47,7 +47,8 @@ tests/                vitest: smoke (jsdom) + юнит-тесты ядра
 
 - [x] Фаза 0. git, baseline, Node
 - [x] Фаза 1. Vite + ESM-модули, SW только в prod, smoke-тесты
-- [ ] Фаза 2. Модель и сейвы: `types.ts` + `core/pack.ts` (сделано), далее вынести storage/migrations и добавить roundtrip тест полного сейва
+- [x] Фаза 2. Модель и сейвы: `types.ts`, `core/pack.ts`, `features/save/storage.ts`, roundtrip-тест сейва на fake-indexeddb
+- [ ] Фаза 2.5. Вынести `saveGame`/`loadGame` и миграции из `script.js` в `features/save/`
 - [ ] Фаза 3. Симуляция: RNG-сервис вместо `Math.random`, модули match/league/economy/draft/playoffs
 - [ ] Фаза 4. i18n на ключи, удаление regex-слоя и MutationObserver
 - [ ] Фаза 5. UI-экраны по одному: шаблоны + экранирование вместо `innerHTML`
