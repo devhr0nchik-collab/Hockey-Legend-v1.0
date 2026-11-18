@@ -15602,6 +15602,11 @@ if (import.meta.env.DEV) {
             return p.name;
         },
         advanceWeek: () => playRegularWeek(),
+        // Записать произвольный сейв и загрузить его (тесты детерминизма).
+        importSaveData: async (data) => {
+            await idbSet(SAVE_KEY, data);
+            return loadGame();
+        },
         weekSnapshot: () => JSON.stringify({
             money: agentMoney,
             season: currentSeason,

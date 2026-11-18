@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const INDEX_HTML = readFileSync(join(process.cwd(), 'index.html'), 'utf8');
+let BASE_SAVE = '';
 
 beforeAll(async () => {
     window.matchMedia = window.matchMedia || ((query) => ({
@@ -36,6 +37,8 @@ beforeAll(async () => {
     window.__HL.addClient('Клиент Недели');
     await window.__HL.saveGame();
     await new Promise((r) => setTimeout(r, 100));
+    BASE_SAVE = JSON.stringify(window._lastSaveData);
+    expect(BASE_SAVE.length).toBeGreaterThan(1000);
 });
 
 function captureMathRandom(run) {
@@ -81,5 +84,24 @@ describe('неделя детерминирована', () => {
         const second = window.__HL.advanceWeek();
 
         expect(second).toBe(first);
+    });
+
+    it('5 недель подряд воспроизводимы (включая AI-трансферы и события)', async () => {
+        const run = async () => {
+            const loaded = await window.__HL.importSaveData(JSON.parse(BASE_SAVE));
+            expect(loaded).toBe(true);
+            const snaps = [];
+            for (let i = 0; i < 5; i++) {
+                window.__HL.advanceWeek();
+                snaps.push(window.__HL.weekSnapshot());
+            }
+            return snaps;
+        };
+
+        const first = await run();
+        const second = await run();
+
+        expect(second.length).toBe(5);
+        expect(second).toEqual(first);
     });
 });
