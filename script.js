@@ -15631,6 +15631,24 @@ if (import.meta.env.DEV) {
         startPlayoffsNow: () => startPlayoffs(),
         playoffTick: () => simulatePlayoffRound(),
         finishTournamentNow: () => finishTournament(),
+        playPhaseTick: () => {
+            if (seasonPhase === 'playoffs') simulatePlayoffRound();
+            else if (seasonPhase === 'draft') {
+                startDraftChoices();
+                const ok = document.querySelector('#draft-choice-actions .btn-primary');
+                if (ok) ok.click();
+            }
+            else if (seasonPhase === 'world_champ') playTournamentWeek();
+            else if (seasonPhase === 'transfer_off' || seasonPhase === 'transfer_mid') playTransferWeek();
+            else playRegularWeek();
+        },
+        seasonSnapshot: () => JSON.stringify({
+            ...JSON.parse(window.__HL.weekSnapshot()),
+            championsHistory,
+            nationalHistory: nationalTournamentHistory,
+            worldCup: worldCupState,
+            tournament: nationalTournament
+        }),
         // Трансферный зонд: оффер, продление, желание уйти, пакет предложений.
         transferProbe: () => {
             const p = myRoster[0] || players[0];

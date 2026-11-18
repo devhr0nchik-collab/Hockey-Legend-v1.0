@@ -1,4 +1,4 @@
-﻿# Состояние этапа (трансферы)
-- Переведены на simRandom/simInt: generateTransferOffer, tryPassiveTransferOffer, resolveNegotiationRound, generateRenewalOffer, rollPlayerWantsToLeave, generateOffersForPlayer, tickTransferOffers, tryTradeOffer/Contract, poaching/transfer-флоу.
-- Добавлены seed'ы: оффер (игрок+клуб+неделя), пассивный оффер (сезон+неделя+фаза), продление и уход (игрок+сезон), переговоры (игрок+тип+раунд).
-- Новый tests/transfers-determinism.test.mjs: 2 прогона зонда (оффер/продление/уход/пакет) идентичны, 0 вызовов Math.random. Всего 56 тестов, tsc и build зелёные.
+﻿# Состояние этапа (полный сезон)
+- Добавлены dev-хуки playPhaseTick/seasonSnapshot; драфт-флоу проходится кликом OK в модалке.
+- Новый tests/season-determinism.test.mjs: полный сезон (~76 тиков) дважды из одного сейва; совпадают чемпионы, таблицы, статистика 4500+ игроков, бюджеты, турнир сборных.
+- Итоговая проверка: 57 тестов / 10 файлов, tsc 0, build 0. Осталась только косметика (анимации, снежинки) на Math.random.
