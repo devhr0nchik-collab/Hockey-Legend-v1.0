@@ -1,12 +1,13 @@
 import { LANG } from './i18n.js';
 import { REAL_ROSTERS } from './datapack_rosters.js';
 import { hashString, makeSeededRNG } from './src/core/rng';
-import { generateAttributes } from './src/core/attributes';
+import { generateAttributes, getPlayerArchetype } from './src/core/attributes';
 import { getLeagueSalaryCap, calculateSalary, calculateSalaryCap, formatSalary } from './src/core/salary';
 import { packPlayer, unpackPlayer, packClub, unpackClub } from './src/core/pack';
 import { createIdbStore } from './src/features/save/storage';
 import { isSaveData, normalizeLoadedSave } from './src/features/save/migrations';
 import { setSimulationSeed, simRandom, simInt, simChoice, matchSeed, getSimulationDraws } from './src/core/sim-random';
+import { cosmeticRandom } from './src/core/cosmetic-random';
 
 if (window.DEBUG) console.log("✅ script.js загружен");
 // ============ 1. ЭЛЕМЕНТЫ ============
@@ -25,6 +26,14 @@ const phoneChatName = document.getElementById('phone-chat-name');
 const phoneChatStatus = document.getElementById('phone-chat-status');
 const phoneChatBody = document.getElementById('phone-chat-body');
 const phoneInputBar = document.getElementById('phone-input-bar');
+// Split-screen переговоров: конструктор контракта + шкалы клуба
+const negotiationConsole = document.querySelector('#negotiation-modal .negotiation-console');
+const negBuilderPanel = document.getElementById('neg-builder-panel');
+const negBuilderBody = document.getElementById('neg-builder-body');
+const negBuilderActions = document.getElementById('neg-builder-actions');
+const negBuilderClient = document.getElementById('neg-builder-client');
+const negBuilderTitleText = document.getElementById('neg-builder-title-text');
+const negGauges = document.getElementById('neg-gauges');
 const btnNewGame = document.getElementById('btn-new-game');
 const btnLoadGame = document.getElementById('btn-load-game');
 const btnSettings = document.getElementById('btn-settings');
@@ -113,7 +122,8 @@ let careerCounters = {
     clientsEverSigned: 0,
     trophiesTotal: 0,
     cupsWon: 0,
-    newsCount: 0
+    newsCount: 0,
+    idSeq: 0
 };
 let clubRosterFilter = 'all';
 let seasonSchedule = {};
@@ -418,17 +428,53 @@ export function generateLogoSlug(club) {
 function getTeamLogoHTML(club, leagueKey) {
     // Датапак подменяет рендер логотипов (реальные PNG вместо SVG-щитов).
     if (typeof window.__teamLogoRenderer === 'function') return window.__teamLogoRenderer(club, leagueKey);
-    let hash = 0;
-    for (let i=0;i<club.length;i++){hash=club.charCodeAt(i)+((hash<<5)-hash);hash=hash&hash;}
-    const color = `hsl(${Math.abs(hash)%360},55%,32%)`;
-    const clean = club.replace(/[^\wА-Яа-яЁё\s-]/g,' ').trim();
-    const words = clean.split(/[\s-]+/).filter(w=>w.length>0);
-    const initials = words.length===1 ? words[0].substring(0,2).toUpperCase() : words.slice(0,3).map(w=>w[0]).join('').toUpperCase();
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 44"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}"/><stop offset="100%" stop-color="${color}" stop-opacity="0.65"/></linearGradient></defs><path d="M2 2 L38 2 L38 26 Q38 40 20 42 Q2 40 2 26 Z" fill="url(#g)" stroke="rgba(255,255,255,0.35)" stroke-width="1.5"/><text x="20" y="27" text-anchor="middle" font-family="Arial" font-weight="bold" font-size="13" fill="white">${initials}</text></svg>`;
-    const fallback = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-    // v1.0: единый источник логотипов — SVG-щит генерируется локально (быстро, без сети).
-    // Реальные PNG-логотипы (датапак) подключаются поверх в datapack.js.
-    return `<img class="team-logo-img" src="${fallback}" alt="${club}" />`;
+    // NEON RINK: гексагональный HUD-щит, inline SVG (детерминированный цвет по имени клуба).
+    return `<svg class="team-logo-img" viewBox="0 0 40 44" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${club}">${generateNeonShieldInner(club)}</svg>`;
+}
+
+// Детерминированная неоновая палитра клуба по имени (без Math.random).
+function getClubNeonColors(club) {
+    let h = 0;
+    for (let i = 0; i < club.length; i++) h = (h * 31 + club.charCodeAt(i)) | 0;
+    h = Math.abs(h);
+    const hue = h % 360;
+    return {
+        c1: `hsl(${hue}, 90%, 62%)`,
+        c2: `hsl(${(hue + 40) % 360}, 85%, 28%)`,
+        glow: `hsla(${hue}, 100%, 60%, 0.85)`
+    };
+}
+
+function getClubInitials(club) {
+    const clean = club.replace(/[^\wА-Яа-яЁё\s-]/g, ' ').trim();
+    const words = clean.split(/[\s-]+/).filter(w => w.length > 0);
+    if (words.length === 0) return '??';
+    if (words.length === 1) return words[0].substring(0, 3).toUpperCase();
+    return words.slice(0, 3).map(w => w[0]).join('').toUpperCase();
+}
+
+// Внутренности щита — общие для script.js (inline SVG) и datapack.js (data-uri fallback).
+export function generateNeonShieldInner(club) {
+    const { c1, c2, glow } = getClubNeonColors(club);
+    const abbr = getClubInitials(club);
+    const fs = abbr.length <= 2 ? 15 : abbr.length === 3 ? 13 : 11;
+    const gid = 'ng-' + Math.abs([...club].reduce((a, ch) => (a * 33 + ch.charCodeAt(0)) | 0, 7));
+    return `<defs>
+        <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${c2}"/>
+            <stop offset="100%" stop-color="#070b12"/>
+        </linearGradient>
+        <filter id="${gid}-f" x="-40%" y="-40%" width="180%" height="180%">
+            <feDropShadow dx="0" dy="0" stdDeviation="1.6" flood-color="${glow}"/>
+        </filter>
+    </defs>
+    <path d="M20 1 L38 8 L38 26 Q38 39 20 43 Q2 39 2 26 L2 8 Z"
+          fill="url(#${gid})" stroke="${c1}" stroke-width="1.6" filter="url(#${gid}-f)"/>
+    <path d="M20 4.5 L35 10 L35 25.5 Q35 36 20 39.5 Q5 36 5 25.5 L5 10 Z"
+          fill="none" stroke="${c1}" stroke-width="0.6" opacity="0.45"/>
+    <path d="M8 12 L32 12" stroke="${c1}" stroke-width="0.8" opacity="0.3"/>
+    <text x="20" y="27.5" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900"
+          font-size="${fs}" fill="${c1}" style="paint-order:stroke" stroke="#04070d" stroke-width="0.7">${abbr}</text>`;
 }
 
 // ============ 4. КОНСТАНТЫ ЭКОНОМИКИ ============
@@ -547,6 +593,550 @@ function getDiscountBonus() { return (upgrades.negotiator - 1) * 0.01; }
 function getSignRefusalChance() { return Math.max(0, 0.60 - (upgrades.reputation - 1) * 0.025); }
 function getMediaMultiplier() { return 1.0 + (upgrades.media - 1) * 0.08; }
 
+// ============ КОНТРАКТЫ, МОТИВАЦИЯ И ИНТРИГА ============
+const MOTIVATION_FROM_CHARACTER = Object.freeze({
+    ambitious: 'ambition',
+    calm: 'loyalty',
+    pragmatic: 'greed',
+    capricious: 'playtime',
+    loyal: 'loyalty'
+});
+const MOTIVATION_META = Object.freeze({
+    greed:    { icon: '💰', label: 'Жадность' },
+    ambition: { icon: '🚀', label: 'Амбиции' },
+    loyalty:  { icon: '🐺', label: 'Лояльность' },
+    playtime: { icon: '⏱', label: 'Игровое время' }
+});
+
+function getMotivationForCharacter(character) {
+    return MOTIVATION_FROM_CHARACTER[character] || 'loyalty';
+}
+
+function getPlayerMotivation(player) {
+    if (!player) return 'loyalty';
+    if (player.motivation && MOTIVATION_META[player.motivation]) return player.motivation;
+    player.motivation = getMotivationForCharacter(player.character);
+    return player.motivation;
+}
+
+// ============ БОНУСЫ ПО ПОЗИЦИИ ============
+// В хоккее ценность бонуса зависит от роли: вратарю не платят за голы,
+// защитнику важнее сухие матчи, нападающему — голы и передачи.
+function getPlayerPositionGroup(player) {
+    if (!player) return 'F';
+    if (player.position === 'G') return 'G';
+    if (player.position === 'D') return 'D';
+    return 'F';
+}
+
+const CONTRACT_BONUS_META = Object.freeze({
+    goalBonus:       { icon: '🥅', label: 'Бонус за голы',             unit: 'гол' },
+    assistBonus:     { icon: '🅰️', label: 'Бонус за передачи',         unit: 'передачу' },
+    cleanSheetBonus: { icon: '🧱', label: 'Бонус за сухие матчи',      unit: 'сухой матч' },
+    savesBonus:      { icon: '🧤', label: 'Бонус за отражённые броски', unit: 'сейв' },
+    gamesBonus:      { icon: '🏒', label: 'Бонус за игры',             unit: 'игру' }
+});
+
+const CONTRACT_BONUS_FIELD = Object.freeze({
+    goalBonus: 'goalBonus',
+    assistBonus: 'assistBonus',
+    cleanSheetBonus: 'cleanSheetBonus',
+    savesBonus: 'savesBonus',
+    gamesBonus: 'gamesPlayedBonus'
+});
+
+const POSITION_BONUS_KINDS = Object.freeze({
+    G: ['cleanSheetBonus', 'savesBonus'],
+    D: ['cleanSheetBonus', 'gamesBonus'],
+    F: ['goalBonus', 'assistBonus']
+});
+
+// Насколько бонус важен игроку и клубу при оценке требования.
+const BONUS_IMPORTANCE_BY_POSITION = Object.freeze({
+    G: { goalBonus: 0,    assistBonus: 0,    cleanSheetBonus: 0.90, savesBonus: 0.95, gamesBonus: 0.35, guarantee: 1.00 },
+    D: { goalBonus: 0.15, assistBonus: 0.35, cleanSheetBonus: 0.85, savesBonus: 0,    gamesBonus: 0.70, guarantee: 0.70 },
+    F: { goalBonus: 0.90, assistBonus: 0.85, cleanSheetBonus: 0.10, savesBonus: 0,    gamesBonus: 0.50, guarantee: 0.35 }
+});
+
+function getContractBonusKinds(player) {
+    return POSITION_BONUS_KINDS[getPlayerPositionGroup(player)].slice();
+}
+
+function getBonusField(kind) {
+    return CONTRACT_BONUS_FIELD[kind] || null;
+}
+
+function getContractBonusMeta(kind, player) {
+    const meta = CONTRACT_BONUS_META[kind] || CONTRACT_BONUS_META.goalBonus;
+    return { icon: meta.icon, label: LANG.t(meta.label), unit: LANG.t(meta.unit) };
+}
+
+function getBonusImportance(player, kind) {
+    const position = getPlayerPositionGroup(player);
+    let importance = (BONUS_IMPORTANCE_BY_POSITION[position] || {})[kind] ?? 0;
+    if (importance > 0 && player) {
+        const archetype = getPlayerArchetype(player.position, player.name);
+        if (kind === 'goalBonus' && archetype === 'sniper') importance += 0.10;
+        if (kind === 'assistBonus' && archetype === 'playmaker') importance += 0.10;
+        if (kind === 'cleanSheetBonus' && (archetype === 'defensive' || archetype === 'twoWay')) importance += 0.10;
+        if (kind === 'savesBonus' && position === 'G') importance += 0.05;
+    }
+    return Math.max(0, Math.min(1, importance));
+}
+
+function getBonusCapRatio(kind, player) {
+    const position = getPlayerPositionGroup(player);
+    if (kind === 'goalBonus') return 0.10;
+    if (kind === 'assistBonus') return 0.07;
+    if (kind === 'cleanSheetBonus') return position === 'G' ? 0.08 : 0.06;
+    if (kind === 'savesBonus') return 0.09;
+    if (kind === 'gamesBonus') return position === 'D' ? 0.035 : 0.03;
+    return 0.03;
+}
+
+// Приводит старые сейвы и новые офферы к единому виду.
+function normalizeContractData(player) {
+    if (!player) return player;
+    getPlayerMotivation(player);
+    const years = Math.max(0, Math.round(player.contractYears || 0));
+    player.contractYears = years;
+    player.goalBonus = Math.max(0, Math.round(player.goalBonus || 0));
+    player.assistBonus = Math.max(0, Math.round(player.assistBonus || 0));
+    player.cleanSheetBonus = Math.max(0, Math.round(player.cleanSheetBonus || 0));
+    player.savesBonus = Math.max(0, Math.round(player.savesBonus || 0));
+    player.gamesPlayedBonus = Math.max(0, Math.round(player.gamesPlayedBonus || 0));
+    player.guaranteedYears = Math.max(0, Math.min(years, Math.round(player.guaranteedYears || 0)));
+    return player;
+}
+
+function normalizeOfferContract(offer) {
+    if (!offer) return offer;
+    const years = Math.max(1, Math.round(offer.years || 1));
+    offer.years = years;
+    offer.goalBonus = Math.max(0, Math.round(offer.goalBonus || 0));
+    offer.assistBonus = Math.max(0, Math.round(offer.assistBonus || 0));
+    offer.cleanSheetBonus = Math.max(0, Math.round(offer.cleanSheetBonus || 0));
+    offer.savesBonus = Math.max(0, Math.round(offer.savesBonus || 0));
+    offer.gamesPlayedBonus = Math.max(0, Math.round(offer.gamesPlayedBonus || 0));
+    offer.guaranteedYears = Math.max(0, Math.min(years, Math.round(offer.guaranteedYears || 0)));
+    offer.agentCommissionRate = getOfferCommissionRate(offer);
+    if (offer.clubBudget === undefined || offer.clubBudget === null) {
+        const data = clubData[offer.league + '_' + offer.club];
+        if (data) offer.clubBudget = data.budget;
+    }
+    if (offer.trueInterest === undefined || offer.trueInterest === null) {
+        offer.trueInterest = offer.clubInterest ? offer.clubInterest.score : 0;
+    }
+    return offer;
+}
+
+// Комиссия агента: 10% от ГОДОВОЙ зарплаты (дефолт; в переговорах настраивается 5–20%)
+const COMMISSION_RATE = 0.10;
+
+function getOfferClubBudget(offer) {
+    if (offer && Number.isFinite(offer.clubBudget)) return offer.clubBudget;
+    const data = offer ? clubData[offer.league + '_' + offer.club] : null;
+    return data ? data.budget : Infinity;
+}
+
+// Комиссия агента: настраивается в переговорах (5–20%), дефолт — COMMISSION_RATE.
+function getOfferCommissionRate(offer) {
+    const rate = offer && Number.isFinite(offer.agentCommissionRate) ? offer.agentCommissionRate : COMMISSION_RATE;
+    return Math.max(0.05, Math.min(0.20, rate));
+}
+
+function clampNumber(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+function applyContractTerms(player, offer) {
+    normalizeOfferContract(offer);
+    player.salary = offer.newSalary;
+    player.contractYears = offer.years;
+    player.goalBonus = offer.goalBonus || 0;
+    player.assistBonus = offer.assistBonus || 0;
+    player.cleanSheetBonus = offer.cleanSheetBonus || 0;
+    player.savesBonus = offer.savesBonus || 0;
+    player.gamesPlayedBonus = offer.gamesPlayedBonus || 0;
+    player.guaranteedYears = Math.min(offer.years, offer.guaranteedYears || 0);
+    return normalizeContractData(player);
+}
+
+function getMotivationLabel(player, reveal = agentLevel >= 5) {
+    if (!reveal) return LANG.t('Скрыто');
+    const meta = MOTIVATION_META[getPlayerMotivation(player)];
+    return `${meta.icon} ${LANG.t(meta.label)}`;
+}
+
+// Уровень агента открывает клубу его скрытые лимиты постепенно.
+function getNegotiationInsight(player, offer) {
+    if (!offer) return { level: 1, reveal: 'hidden', budgetKnown: false, interestKnown: false, budgetText: '???', interestText: '???', motivationKnown: false, motivationText: LANG.t('Скрыто') };
+    normalizeOfferContract(offer);
+    const level = Math.max(1, agentLevel || 1);
+    const budget = getOfferClubBudget(offer);
+    const trueInterest = offer.trueInterest ?? (offer.clubInterest ? offer.clubInterest.score : 0);
+    const motivation = getPlayerMotivation(player);
+    let budgetText = '???';
+    let interestText = '???';
+    let budgetKnown = false;
+    let interestKnown = false;
+    if (level >= 10) {
+        budgetText = Number.isFinite(budget) ? formatMoney(budget) : '—';
+        interestText = `${trueInterest > 0 ? '+' : ''}${trueInterest}`;
+        budgetKnown = true;
+        interestKnown = true;
+    } else if (level >= 6) {
+        budgetText = Number.isFinite(budget) ? `${formatMoney(budget * 0.7)}–${formatMoney(budget * 1.3)}` : '—';
+        interestText = trueInterest >= 0 ? LANG.t('положительный') : LANG.t('низкий');
+    }
+    return {
+        level,
+        reveal: level >= 10 ? 'full' : level >= 6 ? 'partial' : 'hidden',
+        budgetKnown, interestKnown,
+        budgetText, interestText,
+        motivationKnown: level >= 5,
+        motivationText: level >= 5
+            ? `${MOTIVATION_META[motivation].icon} ${LANG.t(MOTIVATION_META[motivation].label)}`
+            : LANG.t('Скрыто')
+    };
+}
+
+// Чистая оценка требования: возвращает предложенные условия и hard-reject.
+function evaluateNegotiationDemand(player, offer, kind) {
+    const o = normalizeOfferContract({ ...(offer || {}) });
+    const annual = Math.max(1, (o.newSalary || 0) * 1000);
+    const cap = calculateSalaryCap(player.rating, o.league || player.league || 'NHL');
+    const budget = getOfferClubBudget(o);
+    const motivation = getPlayerMotivation(player);
+    const result = {
+        kind, hardReject: false, reason: '', patienceCost: 1,
+        budget, cap, motivation
+    };
+    if (kind === 'money') {
+        result.proposedSalary = Math.round((o.newSalary || 0) * (motivation === 'greed' ? 1.28 : 1.20));
+        if (result.proposedSalary * 1000 > budget) {
+            result.hardReject = true;
+            result.reason = 'budget';
+        } else if (result.proposedSalary > cap * 1.35) {
+            result.hardReject = true;
+            result.reason = 'cap';
+        }
+    } else if (kind === 'years') {
+        result.proposedYears = Math.min(6, (o.years || 1) + 1);
+        if ((o.years || 1) >= 6) {
+            result.hardReject = true;
+            result.reason = 'maxYears';
+        }
+    } else if (kind === 'bonus') {
+        result.proposedSigningBonus = Math.round((o.signingBonus || 0) + annual * 0.08);
+        if (result.proposedSigningBonus > annual * 0.25) {
+            result.hardReject = true;
+            result.reason = 'signingBonus';
+        }
+    } else if (kind === 'goalBonus' || kind === 'assistBonus' || kind === 'cleanSheetBonus' || kind === 'savesBonus') {
+        const importance = getBonusImportance(player, kind);
+        const field = getBonusField(kind);
+        const proposedKey = 'proposed' + kind.charAt(0).toUpperCase() + kind.slice(1);
+        const rate = kind === 'goalBonus' ? 0.008 : kind === 'assistBonus' ? 0.006 : kind === 'cleanSheetBonus' ? 0.006 : 0.007;
+        result.importance = importance;
+        if (importance <= 0) {
+            // Позиция не предполагает такой бонус: вратарь не требует голы.
+            result[proposedKey] = 0;
+            result.hardReject = true;
+            result.reason = 'positionBonus';
+        } else {
+            const current = Math.max(0, o[field] || 0);
+            result[proposedKey] = Math.round((current * 1.25 + annual * rate * importance) * (0.75 + importance * 0.35));
+            if (result[proposedKey] > annual * getBonusCapRatio(kind, player)) {
+                result.hardReject = true;
+                result.reason = kind;
+            }
+        }
+    } else if (kind === 'gamesBonus') {
+        result.importance = getBonusImportance(player, 'gamesBonus');
+        result.proposedGamesPlayedBonus = Math.round(((o.gamesPlayedBonus || 0) * 1.25 + annual * 0.004) * (0.75 + result.importance * 0.25));
+        if (result.proposedGamesPlayedBonus > annual * getBonusCapRatio('gamesBonus', player)) {
+            result.hardReject = true;
+            result.reason = 'gamesBonus';
+        }
+    } else if (kind === 'guarantee') {
+        result.importance = getBonusImportance(player, 'guarantee');
+        result.proposedGuaranteedYears = Math.min(o.years || 1, (o.guaranteedYears || 0) + 1);
+        if ((o.guaranteedYears || 0) >= (o.years || 1)) {
+            result.hardReject = true;
+            result.reason = 'guaranteedYears';
+        }
+    }
+    return result;
+}
+
+// ============ УНИВЕРСАЛЬНОЕ ЯДРО ОЦЕНКИ КОНТРАКТА ============
+// perspective: 'club' — оценивает клуб (дешевле = лучше), 'agent' — агент (дороже = лучше).
+// Одна математика для режима агента и будущего режима Президента. Чистая, без RNG.
+// anchor — исходный оффер клуба: контр-оффер никогда не опускается ниже него.
+function evaluateContractPackage(player, offer, perspective = 'club', anchor = null) {
+    const o = normalizeOfferContract({ ...(offer || {}) });
+    const base = anchor ? normalizeOfferContract({ ...anchor }) : null;
+    const league = o.league || player.league || 'NHL';
+    const cap = calculateSalaryCap(player.rating, league);
+    const budget = getOfferClubBudget(o);
+    const annual = Math.max(1, (o.newSalary || 0) * 1000);
+    const data = clubData[league + '_' + o.club];
+    const prestige = o.prestige ?? (data ? data.prestige : 50);
+    const greedy = prestige >= 80;
+    const generous = prestige < 60;
+    const motivation = getPlayerMotivation(player);
+    const fairSalary = Math.min(cap, Math.round(calculateSalary(player.rating, league) * (greedy ? 1.10 : generous ? 1.35 : 1.22)));
+    const salaryMax = Math.max(base ? base.newSalary : 1, Math.min(Math.round(cap * (greedy ? 1.05 : generous ? 1.30 : 1.18)), Math.floor(budget / 1000)));
+    const commissionMax = Math.max(base ? getOfferCommissionRate(base) : 0, generous ? 0.14 : greedy ? 0.10 : 0.12);
+    const signingMax = Math.max(base ? (base.signingBonus || 0) : 0, Math.round(annual * (generous ? 0.22 : 0.16)));
+    const yearsMax = Math.max(base ? base.years : 1, player.age < 25 ? 5 : player.age < 30 ? 4 : 2);
+    const guaranteeMax = Math.max(base ? (base.guaranteedYears || 0) : 0, Math.min(o.years || 1, motivation === 'loyalty' ? (o.years || 1) : (player.age >= 30 ? 1 : 2)));
+    const commission = getOfferCommissionRate(o);
+
+    const limits = { salaryMax, fairSalary, commissionMax, signingMax, yearsMax, guaranteeMax, cap, budget };
+    const reasons = [];
+    let hardReject = false, hardReason = '';
+
+    // Жёсткие ограничения клуба (нереальные условия обрывают диалог).
+    if ((o.newSalary || 0) * 1000 > budget) { hardReject = true; hardReason = 'budget'; }
+    else if ((o.newSalary || 0) > cap * 1.35) { hardReject = true; hardReason = 'cap'; }
+    else if ((o.signingBonus || 0) > annual * 0.25) { hardReject = true; hardReason = 'signingBonus'; }
+    else if ((o.guaranteedYears || 0) > (o.years || 1)) { hardReject = true; hardReason = 'guaranteedYears'; }
+    if (!hardReject) {
+        for (const kind of ['goalBonus', 'assistBonus', 'cleanSheetBonus', 'savesBonus', 'gamesBonus']) {
+            const field = getBonusField(kind);
+            const value = o[field] || 0;
+            if (value <= 0) continue;
+            if (getBonusImportance(player, kind) <= 0) { hardReject = true; hardReason = 'positionBonus'; break; }
+            if (value > annual * getBonusCapRatio(kind, player) * 1.5) { hardReject = true; hardReason = kind; break; }
+        }
+    }
+
+    const counter = { ...o };
+    if (perspective === 'club') {
+        if ((o.newSalary || 0) > salaryMax) reasons.push({ field: 'newSalary', reason: 'salary', asked: o.newSalary, max: salaryMax });
+        if (commission > commissionMax + 1e-9) reasons.push({ field: 'agentCommissionRate', reason: 'commission', asked: commission, max: commissionMax });
+        if ((o.signingBonus || 0) > signingMax) reasons.push({ field: 'signingBonus', reason: 'signingBonus', asked: o.signingBonus, max: signingMax });
+        if ((o.years || 1) > yearsMax) reasons.push({ field: 'years', reason: 'years', asked: o.years, max: yearsMax });
+        if ((o.guaranteedYears || 0) > guaranteeMax) reasons.push({ field: 'guaranteedYears', reason: 'guarantee', asked: o.guaranteedYears, max: guaranteeMax });
+        for (const kind of getContractBonusKinds(player)) {
+            const field = getBonusField(kind);
+            const floor = base ? (base[field] || 0) : 0;
+            const max = Math.max(floor, Math.round(annual * getBonusCapRatio(kind, player)));
+            if ((o[field] || 0) > max) reasons.push({ field, reason: kind, asked: o[field], max });
+        }
+        // Контр-оффер: тянем пакет к лимитам клуба, но не ниже исходного оффера.
+        const salaryFloor = base ? base.newSalary : 0;
+        counter.newSalary = (o.newSalary || 0) > salaryMax ? Math.max(salaryFloor, Math.round((fairSalary + salaryMax) / 2)) : (o.newSalary || 0);
+        counter.agentCommissionRate = Math.min(commission, commissionMax);
+        counter.signingBonus = Math.min(o.signingBonus || 0, signingMax);
+        counter.years = Math.max(1, Math.min(o.years || 1, yearsMax));
+        counter.guaranteedYears = Math.min(o.guaranteedYears || 0, guaranteeMax, counter.years);
+        for (const kind of ['goalBonus', 'assistBonus', 'cleanSheetBonus', 'savesBonus', 'gamesBonus']) {
+            const field = getBonusField(kind);
+            const floor = base ? (base[field] || 0) : 0;
+            const max = Math.max(floor, Math.round(annual * getBonusCapRatio(kind, player)));
+            counter[field] = Math.min(o[field] || 0, max);
+        }
+        let score = 70 - reasons.length * 12;
+        score += (o.newSalary || 0) <= fairSalary ? 10 : -Math.min(25, Math.round(((o.newSalary || 0) / Math.max(1, fairSalary) - 1) * 40));
+        score = clampNumber(Math.round(score), 0, 100);
+        const verdict = hardReject ? 'reject' : (reasons.length === 0 && score >= 60 ? 'accept' : 'counter');
+        return { perspective, score, verdict, reasons, hardReject, hardReason, counter: normalizeOfferContract(counter), limits };
+    }
+
+    // Перспектива агента: зеркальная полезность — выше условия = лучше клиенту.
+    const salaryFloor = Math.max(1, Math.round(calculateSalary(player.rating, league) * 0.95));
+    const commissionFloor = 0.08;
+    if ((o.newSalary || 0) < salaryFloor) reasons.push({ field: 'newSalary', reason: 'salary', asked: o.newSalary, min: salaryFloor });
+    if (commission < commissionFloor - 1e-9) reasons.push({ field: 'agentCommissionRate', reason: 'commission', asked: commission, min: commissionFloor });
+    if ((o.years || 1) < 2 && player.age < 30) reasons.push({ field: 'years', reason: 'years', asked: o.years, min: 2 });
+    if ((o.guaranteedYears || 0) < 1 && motivation === 'loyalty') reasons.push({ field: 'guaranteedYears', reason: 'guarantee', asked: o.guaranteedYears || 0, min: 1 });
+    counter.newSalary = Math.max(o.newSalary || 0, Math.min(cap, Math.round(salaryFloor * 1.15)));
+    counter.agentCommissionRate = Math.max(commission, commissionFloor);
+    counter.years = Math.max(o.years || 1, player.age < 30 ? 2 : 1);
+    counter.guaranteedYears = Math.max(o.guaranteedYears || 0, motivation === 'loyalty' ? Math.min(counter.years, 2) : (o.guaranteedYears || 0));
+    counter.signingBonus = Math.max(o.signingBonus || 0, Math.round(annual * 0.05));
+    for (const kind of getContractBonusKinds(player)) {
+        const field = getBonusField(kind);
+        const floor = Math.round(annual * getBonusCapRatio(kind, player) * 0.5 * getBonusImportance(player, kind));
+        counter[field] = Math.max(o[field] || 0, floor);
+    }
+    let score = 70 - reasons.length * 12;
+    score += (o.newSalary || 0) >= fairSalary ? 10 : -Math.min(25, Math.round((1 - (o.newSalary || 0) / Math.max(1, fairSalary)) * 40));
+    score = clampNumber(Math.round(score), 0, 100);
+    const verdict = reasons.length === 0 && score >= 60 ? 'accept' : 'counter';
+    return { perspective, score, verdict, reasons, hardReject: false, hardReason: '', counter: normalizeOfferContract(counter), limits: { ...limits, salaryFloor, commissionFloor } };
+}
+
+// Цвет неоновой шкалы: >=60 лайм, 30–59 янтарь, <30 красный.
+function getGaugeTone(value) {
+    const v = clampNumber(Math.round(value), 0, 100);
+    if (v >= 60) return 'green';
+    if (v >= 30) return 'amber';
+    return 'red';
+}
+
+// Терпение/интерес клуба в процентах для шкал HUD.
+function getNegotiationGauges(neg) {
+    const patience = clampNumber(Math.round(neg.patience ?? 100), 0, 100);
+    const interest = clampNumber(Math.round(neg.interest ?? 50), 0, 100);
+    return { patience, interest, patienceTone: getGaugeTone(patience), interestTone: getGaugeTone(interest) };
+}
+
+// Текстовая реакция клуба по причинам оценки (локализуемые шаблоны).
+function buildClubReactionText(player, evaluation) {
+    if (evaluation.hardReject) return LANG.t('Вы несерьёзны, мы нашли другого агента');
+    if (evaluation.verdict === 'accept') return LANG.t('Нас устраивают эти условия. Готовы подписать');
+    const parts = evaluation.reasons.slice(0, 3).map(r => {
+        if (r.reason === 'salary') return LANG.t('Зарплата {a} — перебор. Мы можем дать {m}').replace('{a}', formatSalary(r.asked)).replace('{m}', formatSalary(r.max));
+        if (r.reason === 'commission') return LANG.t('Комиссия {a}% слишком высока. Наш предел {m}%').replace('{a}', Math.round(r.asked * 100)).replace('{m}', Math.round(r.max * 100));
+        if (r.reason === 'signingBonus') return LANG.t('Подписной бонус {a} не впишется в бюджет. Максимум {m}').replace('{a}', formatMoney(r.asked)).replace('{m}', formatMoney(r.max));
+        if (r.reason === 'years') return LANG.t('Срок {a} для нас велик. Предложим {m}').replace('{a}', formatContractYears(r.asked)).replace('{m}', formatContractYears(r.max));
+        if (r.reason === 'guarantee') return LANG.t('Гарантии {a} — риск. Можем гарантировать {m}').replace('{a}', formatContractYears(r.asked)).replace('{m}', formatContractYears(r.max));
+        const meta = getContractBonusMeta(r.reason === 'gamesBonus' ? 'gamesBonus' : r.reason, player);
+        return LANG.t('{b}: {a} многовато. Наш максимум {m}').replace('{b}', meta.label).replace('{a}', formatMoney(r.asked)).replace('{m}', formatMoney(r.max));
+    });
+    const interest = evaluation.score >= 55 ? LANG.t('Игрок нам нравится, но') : LANG.t('Мы не уверены, что игрок нам подходит, и');
+    return `${interest} ${parts.join('. ')}. ${LANG.t('Вот наш контр-оффер')}`;
+}
+
+// ============ ДИАЛОГОВЫЕ ПЕРЕГОВОРЫ (раунды, шкалы, контр-оффер) ============
+// Сессия диалога хранится в playerNegotiations[name].sessions[clubKey] и переживает сейв.
+function getNegotiationSession(playerName, clubKey) {
+    const entry = getNegotiationEntry(playerName);
+    if (!entry.sessions) entry.sessions = {};
+    return entry.sessions[clubKey] || null;
+}
+
+function saveNegotiationSession(neg) {
+    if (!neg) return;
+    const entry = playerNegotiations[neg.playerName];
+    if (!entry) return;
+    if (!entry.sessions) entry.sessions = {};
+    entry.sessions[neg.clubKey] = {
+        v: 2, patience: neg.patience, interest: neg.interest, round: neg.round || 0,
+        phase: neg.phase, counterOffer: neg.counterOffer || null,
+        messages: neg.messages, finished: !!neg.finished, walkedAway: !!neg.walkedAway
+    };
+}
+
+function initNegotiationGauges(neg, offer) {
+    const trueInterest = offer.trueInterest ?? (offer.clubInterest ? offer.clubInterest.score : 0);
+    neg.patience = 100;
+    neg.interest = clampNumber(50 + trueInterest * 5, 5, 95);
+    neg.round = 0;
+    neg.phase = 'builder';
+    neg.counterOffer = null;
+}
+
+// Чистый контроллер раунда: мутирует neg, не трогает DOM. RNG — seeded.
+// action: 'offer' | 'press' | 'adjust'. Возвращает {walked, finished, accepted}.
+function resolveDialogueRound(player, neg, pkg, action) {
+    if (!neg || neg.finished) return { walked: false, finished: true, accepted: false };
+    setSimulationSeed(matchSeed([agentName, agencyName, 'negotiation', currentSeason, currentWeek, player.name, 'dialogue', neg.round || 0, action]));
+    const o = normalizeOfferContract(neg.offer);
+
+    if (action === 'adjust') {
+        // Возврат к ползункам из ответа клуба стоит немного терпения.
+        if (neg.phase === 'response') {
+            neg.patience = clampNumber((neg.patience ?? 100) - 5, 0, 100);
+            neg.round = (neg.round || 0) + 1; // новый раунд → новый seed для следующего оффера
+        }
+        neg.phase = 'builder';
+        return { walked: false, finished: false, accepted: false };
+    }
+
+    if (action === 'press') {
+        // Надавить: если терпение уже ниже 20% — клуб выходит из сделки.
+        if ((neg.patience ?? 100) < 20) {
+            walkAwayFromDialogue(player, neg);
+            return { walked: true, finished: true, accepted: false };
+        }
+        addAgentMsg(LANG.t('Надавить'), null, neg);
+        const base = pkg || neg.counterOffer || o;
+        let chance = getNegotiationSuccessChance(player, 'money');
+        chance += ((neg.interest ?? 50) - 50) * 0.003;
+        chance = clampNumber(chance, 0.05, 0.90);
+        const target = normalizeOfferContract({ ...base });
+        if (simRandom() < chance) {
+            const cap = calculateSalaryCap(player.rating, neg.league);
+            const current = target.newSalary || o.newSalary;
+            const raised = Math.min(cap, Math.round(current * (1.08 + simRandom() * 0.14)));
+            target.newSalary = Math.max(current + 1, raised);
+            target.salaryBoost = target.newSalary / Math.max(1, player.salary);
+            neg.counterOffer = normalizeOfferContract(target);
+            neg.patience = clampNumber((neg.patience ?? 100) - Math.round(25 + simRandom() * 10), 0, 100);
+            neg.interest = clampNumber((neg.interest ?? 50) + 2, 0, 100);
+            addClubMsg(`${LANG.t('Хорошо, мы подумаем. Можем поднять до')} ${formatSalary(target.newSalary)}`, neg.counterOffer, neg);
+        } else {
+            neg.patience = clampNumber((neg.patience ?? 100) - Math.round(30 + simRandom() * 10), 0, 100);
+            neg.interest = clampNumber((neg.interest ?? 50) - 3, 0, 100);
+            addClubMsg(LANG.t('Мы уже на пределе. Больше не двинемся'), neg.counterOffer || o, neg);
+        }
+        neg.round = (neg.round || 0) + 1;
+        neg.phase = 'response';
+        if ((neg.patience ?? 0) <= 0) {
+            addClubMsg(LANG.t('Наши условия окончательны'), neg.counterOffer || o, neg);
+            addSystemMsg(LANG.t('Клуб больше не намерен торговаться'), true, neg);
+            neg.finished = true;
+        }
+        return { walked: false, finished: !!neg.finished, accepted: false };
+    }
+
+    // action === 'offer': агент отправляет собранный пакет.
+    const submitted = normalizeOfferContract({ ...o, ...(pkg || {}) });
+    neg.lastSubmitted = { ...submitted };
+    addAgentMsg(LANG.t('Сделать предложение'), null, neg);
+    const evaluation = evaluateContractPackage(player, submitted, 'club', o);
+    if (evaluation.hardReject) {
+        addClubMsg(buildClubReactionText(player, evaluation), null, neg);
+        walkAwayFromDialogue(player, neg);
+        return { walked: true, finished: true, accepted: false };
+    }
+    const overCount = evaluation.reasons.length;
+    neg.patience = clampNumber((neg.patience ?? 100) - clampNumber(8 + overCount * 6, 8, 30), 0, 100);
+    neg.interest = clampNumber((neg.interest ?? 50) + Math.round((evaluation.score - 50) / 10), 0, 100);
+    neg.round = (neg.round || 0) + 1;
+    neg.phase = 'response';
+    if (evaluation.verdict === 'accept') {
+        neg.counterOffer = submitted;
+        addClubMsg(buildClubReactionText(player, evaluation), submitted, neg);
+    } else {
+        neg.counterOffer = evaluation.counter;
+        addClubMsg(buildClubReactionText(player, evaluation), evaluation.counter, neg);
+    }
+    if ((neg.patience ?? 0) <= 0) {
+        addClubMsg(LANG.t('Наши условия окончательны'), neg.counterOffer, neg);
+        addSystemMsg(LANG.t('Клуб больше не намерен торговаться'), true, neg);
+        neg.finished = true;
+    }
+    return { walked: false, finished: !!neg.finished, accepted: evaluation.verdict === 'accept' };
+}
+
+function walkAwayFromDialogue(player, neg) {
+    const entry = getNegotiationEntry(player.name);
+    const o = neg.offer;
+    entry.offers = entry.offers.filter(x => x !== o && x.id !== o.id);
+    entry.walkedClubs[neg.clubKey] = true;
+    if (entry.offers.length === 0) entry.exhausted = true;
+    if (entry.sessions) delete entry.sessions[neg.clubKey];
+    addSystemMsg(LANG.t('Клуб прервал переговоры'), true, neg);
+    neg.finished = true;
+    neg.walkedAway = true;
+}
+
+function getNegotiationDemandLabel(kind, player) {
+    return kind === 'money' ? LANG.t('Требовать больше денег') :
+        kind === 'years' ? LANG.t('Требовать больше лет') :
+        kind === 'bonus' ? LANG.t('Требовать бонус') :
+        kind === 'goalBonus' ? LANG.t('Требовать бонус за голы') :
+        kind === 'assistBonus' ? LANG.t('Требовать бонус за передачи') :
+        kind === 'cleanSheetBonus' ? LANG.t('Требовать бонус за сухие матчи') :
+        kind === 'savesBonus' ? LANG.t('Требовать бонус за отражённые броски') :
+        kind === 'gamesBonus' ? LANG.t('Требовать бонус за игры') :
+        LANG.t('Требовать гарантии');
+}
+
 // ============ ЛИЧНЫЙ ТРЕНЕР ============
 // Шанс успеха индивидуальной тренировки: ур.1 → 50%, ур.10 → 90%, ур.20+ → 100% (макс 95%)
 function getTrainerSuccessChance() {
@@ -560,8 +1150,9 @@ const TRAINING_COST = 50000;
 const TRAINING_WEEKS = 2;
 
 // ============ СКАУТИНГ: БАЗА ТАЛАНТОВ ============
-// Сколько игроков генерируют скауты за одно ТО: 1-7 ур. — 1, 8-15 — 2, 16-23 — 3 и т.д.
-function getScoutedPlayersPerWindow() { return 1 + Math.floor(upgrades.scouting / 8); }
+// Сколько уникальных свободных агентов приходит за одно ТО.
+// Зависит от уровня агента: N = 5 + agentLevel * 2 (потолок 60).
+function getScoutedPlayersPerWindow() { return Math.min(60, 5 + agentLevel * 2); }
 // Базовый рейтинг и потенциал генерируемых талантов зависят от уровня Скаутинга
 function getScoutingRatingRange() {
     const s = upgrades.scouting;
@@ -572,37 +1163,58 @@ function getScoutingRatingRange() {
 // Стартовая лояльность отсканенных игроков: ур.1 → 60, ур.25 → 95
 function getScoutedLoyalty() { return Math.min(95, 55 + Math.round(upgrades.scouting * 1.5)); }
 
-// Генерация талантов — вызывается автоматически при старте каждого ТО (бесплатно)
-function generateScoutedPlayers() {
-    const count = getScoutedPlayersPerWindow();
-    const range = getScoutingRatingRange();
-    const posTemplate = ["C","C","LW","RW","D","D","G"];
+// Новое ТО = свежий пул: убираем неподписанных агентов прошлого окна.
+function pruneScoutedFreeAgents() {
+    const before = players.length;
+    players = players.filter(p => !(p.isScouted && !p.club && p.agentId === null));
+    if (players.length !== before) myRoster = myRoster.filter(p => players.includes(p));
+}
+
+// Один уникальный свободный агент: позиция, архетип, скиллы и потенциал.
+function generateFreeAgentProfile(range, usedNames) {
+    const rating = Math.max(1, Math.min(99, simInt(range.min, range.max)));
+    // Лига подбирается под рейтинг: сильные таланты — сразу из взрослых лиг,
+    // иначе getClubsForPlayer не найдёт им ни одного клуба
+    let leagues;
+    if (rating >= 70) leagues = ['KHL','SHL','Liiga','Czech_Extraliga','DEL','NL_Switzerland','AHL','VHL','Belarus_Extraliga','ICE_HL'];
+    else if (rating >= 55) leagues = ['VHL','VHL','KHL','SHL','Liiga','Czech_Extraliga','DEL','Belarus_Extraliga','ICE_HL','AHL'];
+    else if (rating >= 38) leagues = ['MHL','VHL','Belarus_Vysshaya','Belarus_Extraliga','ICE_HL','Liiga','DEL'];
+    else leagues = ['MHL','MHL','Belarus_Vysshaya','VHL'];
+    const ln = simChoice(leagues);
+    const pos = simChoice(['C','C','LW','RW','D','D','G']);
+    // Потенциал выше рейтинга; на высоком скаутинге — звёзды с высоким потолком
+    const potMin = rating + Math.round(upgrades.scouting / 3);
+    const potential = Math.min(99, Math.max(rating, potMin + simInt(0, 20)));
+    const age = simInt(Math.max(16, getMinAge()), 21);
+    const generated = generatePlayerName(ln);
+    const name = makeUniqueName(generated.name, ln, usedNames);
+    const p = createPlayer(name, '', ln, pos, age, rating, potential, generated.nationality);
+    p.club = '';
+    p.isScouted = true;
+    p.loyalty = getScoutedLoyalty(); // повышенная лояльность — скауты наладили контакт
+    return p;
+}
+
+// Генерация пула свободных агентов на ТО. Только seeded-RNG.
+function generateFreeAgents(count) {
     const created = [];
+    // Имена зависят только от текущего состояния мира и seed, не от истории сессии.
+    rebuildGlobalUsedNames();
     const usedNames = new Set(players.map(p => p && p.name).filter(Boolean));
+    const range = getScoutingRatingRange();
     for (let i = 0; i < count; i++) {
-        const rating = Math.max(1, Math.min(99, simInt(range.min, range.max)));
-        // Лига подбирается под рейтинг: сильные таланты — сразу из взрослых лиг,
-        // иначе getClubsForPlayer не найдёт им ни одного клуба
-        let leagues;
-        if (rating >= 70) leagues = ['KHL','SHL','Liiga','Czech_Extraliga','DEL','NL_Switzerland','AHL','VHL','Belarus_Extraliga','ICE_HL'];
-        else if (rating >= 55) leagues = ['VHL','VHL','KHL','SHL','Liiga','Czech_Extraliga','DEL','Belarus_Extraliga','ICE_HL','AHL'];
-        else if (rating >= 38) leagues = ['MHL','VHL','Belarus_Vysshaya','Belarus_Extraliga','ICE_HL','Liiga','DEL'];
-        else leagues = ['MHL','MHL','Belarus_Vysshaya','VHL'];
-        const ln = simChoice(leagues);
-        const pos = simChoice(posTemplate);
-        // Потенциал выше рейтинга; на высоком скаутинге — звёзды с высоким потолком
-        const potMin = rating + Math.round(upgrades.scouting / 3);
-        const potential = Math.min(99, Math.max(rating, potMin + simInt(0, 20)));
-        const age = simInt(Math.max(16, getMinAge()), 21);
-        const { name, nationality } = generatePlayerName(ln);
-        const p = createPlayer(name, '', ln, pos, age, rating, potential, nationality);
-        p.name = makeUniqueName(p.name, ln, usedNames);
-        p.club = '';
-        p.isScouted = true;
-        p.loyalty = getScoutedLoyalty(); // повышенная лояльность — скауты наладили контакт
+        const p = generateFreeAgentProfile(range, usedNames);
         players.push(p);
         created.push(p);
     }
+    return created;
+}
+
+// Генерация талантов — вызывается автоматически при старте каждого ТО (бесплатно)
+function generateScoutedPlayers() {
+    pruneScoutedFreeAgents();
+    const count = getScoutedPlayersPerWindow();
+    const created = generateFreeAgents(count);
     if (created.length > 0) {
         const names = created.map(p => `${p.name} (${p.rating})`).join(', ');
         addNews(`🔍 ${LANG.t('Отчёт скаутов')}: ${names}`, "positive");
@@ -611,8 +1223,54 @@ function generateScoutedPlayers() {
 }
 
 // ============ 5. УТИЛИТЫ ============
-function randomInt(min,max){return Math.floor(Math.random()*(max-min+1))+min;}
-function randomChoice(arr){return arr[Math.floor(Math.random()*arr.length)];}
+// Генерирует окно свободных агентов под указанный уровень агента.
+// Вызывается в трансферные окна и при старте новой карьеры.
+function generateFreeAgentWindow(level = agentLevel) {
+    const prev = agentLevel;
+    agentLevel = level;
+    const created = generateScoutedPlayers();
+    agentLevel = prev;
+    return created;
+}
+
+function randomInt(min,max){return Math.floor(simRandom()*(max-min+1))+min;}
+function randomChoice(arr){return arr[Math.floor(simRandom()*arr.length)];}
+// Детерминированный идентификатор сущности: не зависит от системных часов.
+function nextEntityId(prefix){
+    careerCounters.idSeq = (careerCounters.idSeq || 0) + 1;
+    return prefix + '_S' + currentSeason + 'W' + currentWeek + '_' + careerCounters.idSeq.toString(36);
+}
+
+// Архетипы свободных агентов: стиль и сильные стороны.
+const ARCHETYPE_META = Object.freeze({
+    sniper:    { icon: '🎯', label: 'Снайпер',        skills: ['attack', 'speed'] },
+    playmaker: { icon: '🧠', label: 'Плеймейкер',     skills: ['technique', 'psyche'] },
+    twoWay:    { icon: '⚖️', label: 'Двусторонний',   skills: ['attack', 'defense'] },
+    defensive: { icon: '🛡️', label: 'Обороняющийся',  skills: ['defense', 'physics'] },
+    goalie:    { icon: '🧤', label: 'Вратарь',        skills: ['defense', 'psyche'] }
+});
+
+function getArchetypeInfo(player) {
+    const key = getPlayerArchetype(player.position, player.name);
+    return { key, ...ARCHETYPE_META[key] };
+}
+
+// Потенциал с учётом тумана войны (скаутинг/reveal).
+function getPotentialView(p) {
+    let text = '';
+    let num = null;
+    if (p.isScouted) {
+        const scoutRange = upgrades.reveal >= 25 ? 0 : Math.min(2, getRevealRange());
+        if (scoutRange === 0) { text = `${p.potential}`; num = p.potential; }
+        else text = `${Math.max(0, p.potential - scoutRange)}–${Math.min(100, p.potential + scoutRange)}`;
+    } else {
+        const range = getRevealRange();
+        if (range === 0) { text = `${p.potential}`; num = p.potential; }
+        else text = `${Math.max(0, p.potential - range)}–${Math.min(100, p.potential + range)}`;
+    }
+    const glow = num === null ? '' : num >= 80 ? ' pot-glow-high' : num >= 60 ? ' pot-glow-mid' : ' pot-glow-low';
+    return { text, num, glow };
+}
 function getAllClubs(lk){const a=[];LEAGUE_DATA[lk].divisions.forEach(d=>a.push(...d.clubs));return a;}
 // hashString, makeSeededRNG, generateAttributes, зарплаты и форматирование
 // вынесены в src/core/* (см. импорты в начале файла).
@@ -621,6 +1279,10 @@ function formatMoney(a){
     if(a>=1000000) return '$'+(a/1000000).toFixed(2)+'M';
     if(a>=1000) return '$'+(a/1000).toFixed(1)+'K';
     return '$'+Math.round(a);
+}
+// Форматирование целых без зависимости от локали (замена toLocaleString).
+function formatInt(a){
+    return String(Math.round(a)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 function formatContractYears(y){
     if(!y||y<=0) return '—';
@@ -839,319 +1501,54 @@ function guessNationalityByName(name, league) {
     return '🇨🇦';
 }
 
-// ============ АВАТАРЫ ИГРОКОВ — РЕАЛИСТИЧНЫЙ СТИЛЬ ============
-function getAvatarEthnicity(country) {
-    if (['🇸🇪','🇫🇮','🇳🇴','🇩🇰'].includes(country)) return 'north';
-    if (['🇷🇺','🇧🇾','🇺🇦'].includes(country)) return 'east';
-    if (['🇩🇪','🇨🇭','🇨🇿','🇸🇰','🇫🇷','🇬🇧','🇦🇹'].includes(country)) return 'west';
-    if (['🇨🇦','🇺🇸'].includes(country)) return 'na';
-    if (['🇯🇵','🇨🇳','🇰🇷','🇰🇿','🇺🇿'].includes(country)) return 'asia';
-    if (['🇬🇪','🇦🇲'].includes(country)) return 'caucasus';
-    if (['🇱🇻','🇱🇹','🇪🇪'].includes(country)) return 'baltic';
-    return 'east';
+// ============ АВАТАРЫ ИГРОКОВ — NEON RINK (2D-портреты) ============
+// Портреты лежат в public/faces/{players|goalies}/*.png и отдаются как faces/... (vite base './').
+const AVATAR_FOLDERS = { players: 'faces/players/', goalies: 'faces/goalies/' };
+// Количество файлов в каждой папке (детерминировано, без сетевых запросов).
+const AVATAR_COUNTS = { players: 8, goalies: 1 };
+
+function getAvatarFolder(position) {
+    return String(position || '').trim().toUpperCase() === 'G' ? 'goalies' : 'players';
 }
 
-function hexToRgb(hex) {
-    const num = parseInt(hex.replace('#',''), 16);
-    return { r: num >> 16, g: (num >> 8) & 0xFF, b: num & 0xFF };
-}
-function rgbToHex(r,g,b) {
-    return '#' + ((1 << 24) + (Math.max(0,Math.min(255,r)) << 16) + (Math.max(0,Math.min(255,g)) << 8) + Math.max(0,Math.min(255,b))).toString(16).slice(1);
-}
-function shadeColor(hex, percent) {
-    const { r, g, b } = hexToRgb(hex);
-    return rgbToHex(Math.round(r + percent * 2.55), Math.round(g + percent * 2.55), Math.round(b + percent * 2.55));
-}
-
-function getPlayerAvatarSVG(player) {
+// Основной API аватаров: <img class="player-avatar"> из папки players/goalies (хэш имени).
+export function getPlayerAvatar(player) {
+    if (!player || typeof player !== 'object') return getPlayerAvatarFallbackHTML('?', 'players');
     const name = player.name || 'Unknown';
-    const country = player.nationality || getPlayerCountry(player);
-    const h = hashString(name);
-    const ethnicity = getAvatarEthnicity(country);
-    const age = player.age || 25;
+    const folder = getAvatarFolder(player.position);
+    const count = Math.max(1, AVATAR_COUNTS[folder] || 1);
+    const idx = (hashString(name) % count) + 1;
+    const prefix = folder === 'goalies' ? 'g' : 'p';
+    const src = `${AVATAR_FOLDERS[folder]}${prefix}${idx}.png`;
+    const safeName = String(name).replace(/"/g, '&quot;');
+    return `<img class="player-avatar" src="${src}" alt="${safeName}" loading="lazy" decoding="async"`
+        + ` onerror="this.onerror=null;this.src=window.getPlayerAvatarFallbackSrc('${folder}');">`;
+}
 
-    // === КОЖА ===
-    const skinByEth = {
-        north:   ['#f3d5b8','#f0cfae','#ecc9a4'],
-        east:    ['#efcba3','#ecc49a','#e8bd90'],
-        west:    ['#e8c196','#e3ba8c','#deb280'],
-        baltic:  ['#f0d0b0','#ecc9a4','#e8c199'],
-        caucasus:['#e3b98c','#dcae80','#d5a374'],
-        asia:    ['#eecb9a','#eac490','#e5bd85'],
-        na:      ['#f3d5b8','#e8c099','#c99568','#a57850','#7a5233']
-    };
-    const skinArr = skinByEth[ethnicity] || skinByEth.east;
-    let skinI = (ethnicity === 'na') ? ((h % 8 === 0) ? 3 + (h % 2) : h % 3) : (h % skinArr.length);
-    const skin = skinArr[skinI];
+// data-uri заглушки — на случай, если PNG не загрузился.
+function getPlayerAvatarFallbackSrc(folder) {
+    return 'data:image/svg+xml;utf8,' + encodeURIComponent(getPlayerAvatarFallbackHTML('?', folder));
+}
+if (typeof window !== 'undefined') window.getPlayerAvatarFallbackSrc = getPlayerAvatarFallbackSrc;
 
-    // === ВОЛОСЫ ===
-    let hairArr;
-    if (ethnicity === 'north' || ethnicity === 'baltic') hairArr = ['#d8c49a','#b89b6d','#8f7550','#6b5540','#4a3a28'];
-    else if (ethnicity === 'east') hairArr = ['#b89b6d','#8f7550','#6b5540','#4a3a28','#3a2818'];
-    else if (ethnicity === 'west') hairArr = ['#7a5c3a','#5a3f28','#3a2818','#2a1a0e','#b89b6d'];
-    else if (ethnicity === 'na') hairArr = (skinI >= 3) ? ['#1a1410','#241a12'] : ['#3a2818','#2a1a0e','#5a3f28','#8a6a3a'];
-    else if (ethnicity === 'asia') hairArr = ['#0e0a08','#1a1410'];
-    else if (ethnicity === 'caucasus') hairArr = ['#1a1410','#2a1a0e','#3a2818'];
-    else hairArr = ['#3a2818','#4a3722','#5a3f28'];
+// Неоновый силуэт-заглушка (inline SVG).
+function getPlayerAvatarFallbackHTML(name, folder) {
+    const hue = folder === 'goalies' ? 55 : 190; // вратари — янтарь, полевые — циан
+    const initials = getClubInitials(String(name || '?'));
+    return `<svg class="player-avatar player-avatar-fallback" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${name}"><defs><radialGradient id="avg-${hue}" cx="50%" cy="32%" r="75%"><stop offset="0%" stop-color="hsl(${hue},90%,28%)"/><stop offset="100%" stop-color="#070b12"/></radialGradient></defs><circle cx="22" cy="22" r="21" fill="url(#avg-${hue})" stroke="hsl(${hue},100%,60%)" stroke-width="1.4"/><circle cx="22" cy="17" r="6.5" fill="none" stroke="hsl(${hue},100%,65%)" stroke-width="1.2" opacity="0.8"/><path d="M9 38 Q9 28 22 28 Q35 28 35 38" fill="none" stroke="hsl(${hue},100%,65%)" stroke-width="1.2" opacity="0.8"/><text x="22" y="26" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900" font-size="11" fill="hsl(${hue},100%,72%)">${initials}</text></svg>`;
+}
 
-    const isGrey = age >= 42 && (h >> 3) % 2 === 0;
-    let hair = hairArr[h % hairArr.length];
-    if (isGrey) hair = '#b0aaa0';
-
-    // === ГЛАЗА ===
-    const eyeArr = ['#5a3f28','#4a6a8a','#3a5a4a','#6b4a2a'];
-    const eyeColor = eyeArr[h % eyeArr.length];
-
-    // === ФОРМА ЛИЦА ===
-    const faceShape = (h >> 4) % 3;
-    const faceW = [29, 31, 30][faceShape];
-    const faceH = [34, 35, 34][faceShape];
-
-    // === СВИТЕР (яркий, сплошной) ===
-    let jerseyColor, jerseyDark, jerseyTrim;
-    if (player.club) {
-        const hue = hashString(player.club) % 360;
-        jerseyColor = `hsl(${hue}, 55%, 52%)`;
-        jerseyDark  = `hsl(${hue}, 60%, 32%)`;
-        jerseyTrim  = `hsl(${hue}, 65%, 68%)`;
-    } else {
-        const hue = hashString(name) % 360;
-        jerseyColor = `hsl(${hue}, 50%, 55%)`;
-        jerseyDark  = `hsl(${hue}, 55%, 35%)`;
-        jerseyTrim  = `hsl(${hue}, 60%, 70%)`;
-    }
-
-    // Фон
-    const bgHue = player.club ? (hashString(player.club) % 360) : 220;
-    const bg1 = `hsl(${bgHue}, 25%, 14%)`;
-    const bg2 = `hsl(${bgHue}, 30%, 6%)`;
-
-    // === ГЕОМЕТРИЯ (нормальные пропорции) ===
-    const cx = 60;
-    const faceCy = 38;
-    const eyeY = 34;
-    const eyeLX = 50;
-    const eyeRX = 70;
-    const noseY = 48;
-    const mouthY = 58;
-    const chinY = faceCy + faceH - 2;
-    const earY = 38;
-    const earXL = cx - faceW + 2;
-    const earXR = cx + faceW - 2;
-
-    // === ШЕЯ (короткая, спрятана под воротом) ===
-    const neckW = 14;
-    const neckSVG = `
-        <rect x="${cx-neckW/2}" y="${chinY-2}" width="${neckW}" height="18" fill="${shadeColor(skin,-12)}" rx="2"/>
-    `;
-
-    // === СВИТЕР — сбалансированные пропорции ===
-    const collarY = chinY + 6;
-    const shoulderW = 22;   // половина ширины плеч
-
-    const jerseySVG = `
-        <!-- Основной силуэт свитера -->
-        <path d="M${cx-shoulderW-24} ${collarY+6}
-                 L${cx-20} ${collarY}
-                 Q${cx-15} ${collarY+8} ${cx} ${collarY+8}
-                 Q${cx+15} ${collarY+8} ${cx+20} ${collarY}
-                 L${cx+shoulderW+24} ${collarY+6}
-                 L${cx+shoulderW+26} ${collarY+20}
-                 Q${cx+shoulderW+26} 100 ${cx+shoulderW+18} 112
-                 Q${cx+shoulderW+8} 120 60 120
-                 Q${cx-shoulderW-8} 120 ${cx-shoulderW-18} 112
-                 Q${cx-shoulderW-26} 100 ${cx-shoulderW-26} ${collarY+20}
-                 Z"
-              fill="${jerseyColor}"/>
-
-        <!-- Верхняя тень для объёма -->
-        <path d="M${cx-shoulderW-24} ${collarY+6}
-                 L${cx-20} ${collarY}
-                 Q${cx-15} ${collarY+8} ${cx} ${collarY+8}
-                 Q${cx+15} ${collarY+8} ${cx+20} ${collarY}
-                 L${cx+shoulderW+24} ${collarY+6}
-                 L${cx+shoulderW+25} ${collarY+12}
-                 L${cx+22} ${collarY+7}
-                 Q${cx+15} ${collarY+13} ${cx} ${collarY+13}
-                 Q${cx-15} ${collarY+13} ${cx-22} ${collarY+7}
-                 L${cx-shoulderW-25} ${collarY+12}
-                 Z"
-              fill="${jerseyDark}" opacity="0.55"/>
-
-        <!-- Яркий воротник -->
-        <path d="M${cx-20} ${collarY}
-                 Q${cx-15} ${collarY+8} ${cx} ${collarY+8}
-                 Q${cx+15} ${collarY+8} ${cx+20} ${collarY}
-                 L${cx+18} ${collarY-4}
-                 Q${cx+13} ${collarY+3} ${cx} ${collarY+3}
-                 Q${cx-13} ${collarY+3} ${cx-18} ${collarY-4}
-                 Z"
-              fill="${jerseyTrim}"/>
-
-        <!-- Глубина выреза -->
-        <path d="M${cx-18} ${collarY-3}
-                 Q${cx-13} ${collarY+3} ${cx} ${collarY+3}
-                 Q${cx+13} ${collarY+3} ${cx+18} ${collarY-3}
-                 L${cx+16} ${collarY-1.5}
-                 Q${cx+13} ${collarY+4} ${cx} ${collarY+4}
-                 Q${cx-13} ${collarY+4} ${cx-16} ${collarY-1.5}
-                 Z"
-              fill="#000000" opacity="0.4"/>
-    `;
-
-    // === УШИ ===
-    const earsSVG = `
-        <ellipse cx="${earXL}" cy="${earY}" rx="3.5" ry="5.5" fill="${skin}"/>
-        <ellipse cx="${earXL+0.8}" cy="${earY}" rx="2" ry="3.5" fill="${shadeColor(skin,-20)}" opacity="0.5"/>
-        <ellipse cx="${earXR}" cy="${earY}" rx="3.5" ry="5.5" fill="${skin}"/>
-        <ellipse cx="${earXR-0.8}" cy="${earY}" rx="2" ry="3.5" fill="${shadeColor(skin,-20)}" opacity="0.5"/>
-    `;
-
-    // === ГОЛОВА ===
-    let headSVG;
-    if (faceShape === 2) {
-        headSVG = `<path d="M${cx-faceW} ${faceCy-8}
-            Q${cx-faceW} ${faceCy-faceH} ${cx} ${faceCy-faceH}
-            Q${cx+faceW} ${faceCy-faceH} ${cx+faceW} ${faceCy-8}
-            L${cx+faceW-1} ${faceCy+8}
-            Q${cx+faceW-4} ${chinY-2} ${cx+10} ${chinY}
-            L${cx-10} ${chinY}
-            Q${cx-faceW+4} ${chinY-2} ${cx-faceW+1} ${faceCy+8} Z" fill="${skin}"/>`;
-    } else {
-        headSVG = `<ellipse cx="${cx}" cy="${faceCy}" rx="${faceW}" ry="${faceH}" fill="${skin}"/>`;
-    }
-
-    // === ГЛАЗА ===
-    function renderEye(ex) {
-        return `
-            <ellipse cx="${ex}" cy="${eyeY}" rx="4.5" ry="2.8" fill="#f5f2ea"/>
-            <circle cx="${ex}" cy="${eyeY}" r="2.6" fill="${eyeColor}"/>
-            <circle cx="${ex}" cy="${eyeY}" r="1.1" fill="#0a0808"/>
-            <circle cx="${ex-0.8}" cy="${eyeY-0.8}" r="0.5" fill="#ffffff" opacity="0.9"/>
-            <path d="M${ex-5} ${eyeY-1} Q${ex} ${eyeY-3} ${ex+5} ${eyeY-1}" stroke="${hair}" stroke-width="0.9" fill="none" opacity="0.85"/>
-            <path d="M${ex-4} ${eyeY+2} Q${ex} ${eyeY+3} ${ex+4} ${eyeY+2}" stroke="${hair}" stroke-width="0.4" fill="none" opacity="0.4"/>
-        `;
-    }
-
-    // === БРОВИ ===
-    const browY = eyeY - 6;
-    const browSVG = `
-        <path d="M${eyeLX-6} ${browY+0.5} Q${eyeLX-1} ${browY-2} ${eyeLX+5} ${browY+0.3}" stroke="${hair}" stroke-width="1.6" stroke-linecap="round" fill="none" opacity="0.9"/>
-        <path d="M${eyeRX-5} ${browY+0.3} Q${eyeRX+1} ${browY-2} ${eyeRX+6} ${browY+0.5}" stroke="${hair}" stroke-width="1.6" stroke-linecap="round" fill="none" opacity="0.9"/>
-    `;
-
-    // === НОС ===
-    const noseSVG = `
-        <path d="M${cx-1} ${eyeY+4} Q${cx-2.5} ${noseY-3} ${cx-2.5} ${noseY}" stroke="${shadeColor(skin,-30)}" stroke-width="0.8" fill="none" opacity="0.5" stroke-linecap="round"/>
-        <path d="M${cx+1} ${eyeY+4} Q${cx+2.5} ${noseY-3} ${cx+2.5} ${noseY}" stroke="${shadeColor(skin,-30)}" stroke-width="0.8" fill="none" opacity="0.5" stroke-linecap="round"/>
-        <path d="M${cx-2.5} ${noseY} Q${cx} ${noseY+1.5} ${cx+2.5} ${noseY}" stroke="${shadeColor(skin,-40)}" stroke-width="0.9" fill="none" opacity="0.6" stroke-linecap="round"/>
-        <ellipse cx="${cx-2}" cy="${noseY+0.2}" rx="0.5" ry="0.35" fill="${shadeColor(skin,-50)}" opacity="0.7"/>
-        <ellipse cx="${cx+2}" cy="${noseY+0.2}" rx="0.5" ry="0.35" fill="${shadeColor(skin,-50)}" opacity="0.7"/>
-    `;
-
-    // === РОТ ===
-    const mouthSVG = `
-        <path d="M${cx-4} ${mouthY} Q${cx-2} ${mouthY-1} ${cx} ${mouthY-0.5} Q${cx+2} ${mouthY-1} ${cx+4} ${mouthY}" stroke="${shadeColor(skin,-35)}" stroke-width="0.7" fill="none" opacity="0.7" stroke-linecap="round"/>
-        <path d="M${cx-3.5} ${mouthY+0.5} Q${cx} ${mouthY+2} ${cx+3.5} ${mouthY+0.5}" stroke="${shadeColor(skin,-35)}" stroke-width="0.9" fill="none" opacity="0.6" stroke-linecap="round"/>
-    `;
-
-    // === ВОЛОСЫ ===
-    const hairStyle = (h >> 8) % 5;
-    const hairTop = faceCy - faceH + 2;
-    const hairBottom = eyeY - 6;
-    const hairW = faceW + 1;
-    let hairSVG = '';
-
-    if (hairStyle === 0) {
-        hairSVG = `<path d="M${cx-hairW} ${hairBottom}
-            Q${cx-hairW} ${hairTop-2} ${cx-8} ${hairTop-1}
-            Q${cx} ${hairTop-4} ${cx+8} ${hairTop-1}
-            Q${cx+hairW} ${hairTop-2} ${cx+hairW} ${hairBottom}
-            Q${cx+hairW-3} ${hairBottom-2} ${cx+12} ${hairBottom-3}
-            Q${cx} ${hairBottom-5} ${cx-12} ${hairBottom-3}
-            Q${cx-hairW+3} ${hairBottom-2} ${cx-hairW} ${hairBottom} Z" fill="${hair}"/>`;
-    } else if (hairStyle === 1) {
-        hairSVG = `<path d="M${cx-hairW} ${hairBottom+2}
-            Q${cx-hairW} ${hairTop-3} ${cx} ${hairTop-4}
-            Q${cx+hairW} ${hairTop-3} ${cx+hairW} ${hairBottom+2}
-            Q${cx+hairW-2} ${hairBottom-1} ${cx+10} ${hairBottom-3}
-            Q${cx} ${hairBottom-6} ${cx-10} ${hairBottom-3}
-            Q${cx-hairW+2} ${hairBottom-1} ${cx-hairW} ${hairBottom+2} Z" fill="${hair}"/>`;
-    } else if (hairStyle === 2) {
-        hairSVG = `<path d="M${cx-hairW-1} ${hairBottom+4}
-            Q${cx-hairW-1} ${hairTop-4} ${cx} ${hairTop-5}
-            Q${cx+hairW+1} ${hairTop-4} ${cx+hairW+1} ${hairBottom+4}
-            L${cx+hairW-1} ${chinY-12}
-            L${cx+hairW-4} ${chinY-14}
-            L${cx+hairW-4} ${hairBottom}
-            Q${cx+hairW-2} ${hairBottom-3} ${cx+10} ${hairBottom-5}
-            Q${cx} ${hairBottom-8} ${cx-10} ${hairBottom-5}
-            Q${cx-hairW+2} ${hairBottom-3} ${cx-hairW+4} ${hairBottom}
-            L${cx-hairW+4} ${chinY-14}
-            L${cx-hairW+1} ${chinY-12} Z" fill="${hair}"/>`;
-    } else if (hairStyle === 3) {
-        hairSVG = `<path d="M${cx-hairW} ${hairBottom+1}
-            Q${cx-hairW} ${hairTop-1} ${cx} ${hairTop-2}
-            Q${cx+hairW} ${hairTop-1} ${cx+hairW} ${hairBottom+1}
-            Q${cx+hairW-4} ${hairBottom-2} ${cx+9} ${hairBottom-4}
-            Q${cx} ${hairBottom-6} ${cx-9} ${hairBottom-4}
-            Q${cx-hairW+4} ${hairBottom-2} ${cx-hairW} ${hairBottom+1} Z" fill="${hair}"/>`;
-    } else {
-        hairSVG = `<path d="M${cx-hairW} ${faceCy-8}
-            Q${cx-hairW-1} ${faceCy-14} ${cx-hairW+8} ${faceCy-16}
-            Q${cx-hairW+2} ${faceCy-4} ${cx-hairW+3} ${hairBottom+2}
-            L${cx-hairW+1} ${hairBottom+4} Z" fill="${hair}"/>
-            <path d="M${cx+hairW} ${faceCy-8}
-            Q${cx+hairW+1} ${faceCy-14} ${cx+hairW-8} ${faceCy-16}
-            Q${cx+hairW-2} ${faceCy-4} ${cx+hairW-3} ${hairBottom+2}
-            L${cx+hairW-1} ${hairBottom+4} Z" fill="${hair}"/>`;
-    }
-
-    // === БОРОДА ===
-    let beardSVG = '';
-    if (age >= 25) {
-        const bType = (h >> 12) % 6;
-        if (age >= 32 && bType < 3) {
-            beardSVG = `<path d="M${cx-faceW+6} ${mouthY-4} Q${cx-faceW+4} ${chinY-2} ${cx} ${chinY}
-                Q${cx+faceW-4} ${chinY-2} ${cx+faceW-6} ${mouthY-4}
-                Q${cx+faceW-8} ${chinY-6} ${cx} ${chinY-4}
-                Q${cx-faceW+8} ${chinY-6} ${cx-faceW+6} ${mouthY-4} Z" fill="${hair}" opacity="0.55"/>`;
-        } else if (age >= 28 && bType < 4) {
-            beardSVG = `<path d="M${cx-faceW+5} ${mouthY-2} Q${cx-faceW+4} ${chinY-3} ${cx} ${chinY-1}
-                Q${cx+faceW-4} ${chinY-3} ${cx+faceW-5} ${mouthY-2}
-                Q${cx+faceW-9} ${chinY-7} ${cx} ${chinY-5}
-                Q${cx-faceW+9} ${chinY-7} ${cx-faceW+5} ${mouthY-2} Z" fill="${hair}" opacity="0.25"/>`;
-        }
-    }
-
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
-        <defs>
-            <linearGradient id="bg_${h}" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="${bg1}"/>
-                <stop offset="100%" stop-color="${bg2}"/>
-            </linearGradient>
-            <linearGradient id="jersey_${h}" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="${jerseyTrim}"/>
-                <stop offset="25%" stop-color="${jerseyColor}"/>
-                <stop offset="100%" stop-color="${jerseyDark}"/>
-            </linearGradient>
-        </defs>
-
-        <rect width="120" height="120" fill="url(#bg_${h})"/>
-        <circle cx="60" cy="35" r="44" fill="#ffffff" opacity="0.03"/>
-
-        <!-- Слои: шея → свитер → уши → голова → лицо -->
-        ${neckSVG}
-        ${jerseySVG}
-        ${earsSVG}
-        ${headSVG}
-        ${browSVG}
-        ${renderEye(eyeLX)}
-        ${renderEye(eyeRX)}
-        ${noseSVG}
-        ${mouthSVG}
-        ${beardSVG}
-        ${hairSVG}
+// Аватар агента (персонажа игрока): неоновый HUD-силуэт в костюме, inline SVG вместо эмодзи.
+function getAgentAvatarHTML() {
+    return `<svg class="player-avatar agent-avatar-svg" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agent">
+        <defs><radialGradient id="agent-av-g" cx="50%" cy="30%" r="78%">
+            <stop offset="0%" stop-color="hsl(190,90%,26%)"/><stop offset="100%" stop-color="#070b12"/>
+        </radialGradient></defs>
+        <circle cx="22" cy="22" r="21" fill="url(#agent-av-g)" stroke="#00e5ff" stroke-width="1.4"/>
+        <circle cx="22" cy="16" r="6" fill="none" stroke="#9fe8ff" stroke-width="1.3"/>
+        <path d="M9 38 Q9 27 22 27 Q35 27 35 38" fill="none" stroke="#9fe8ff" stroke-width="1.3"/>
+        <path d="M19 28 L22 33 L25 28" fill="none" stroke="#c6ff00" stroke-width="1.3"/>
+        <path d="M22 33 L22 38" stroke="#c6ff00" stroke-width="1.3"/>
     </svg>`;
 }
 
@@ -1167,7 +1564,7 @@ function createPlayer(name, club, league, position, age, rating, potential, nati
     const draftYear = currentSeason - age + 18;
     const draftInfo = draftRound > 0 ? `R${draftRound} Pick ${draftPickNum}` : '';
 
-    return {name,nationality: nationality || null,club,league,position,age,rating,
+    const player = {name,nationality: nationality || null,club,league,position,age,rating,
         draftInfo, draftYear,
         clubLoyalty: club ? simInt(40, 70) : 0,
         potential: potential || Math.min(100, rating + simInt(5, 40)),
@@ -1176,6 +1573,12 @@ function createPlayer(name, club, league, position, age, rating, potential, nati
         attributes: generateAttributes(position, rating, name),
         form:0, injuryWeeks:0, loyalty:100,
         contractYears: simInt(1, 4),
+        goalBonus: 0,
+        assistBonus: 0,
+        cleanSheetBonus: 0,
+        savesBonus: 0,
+        gamesPlayedBonus: 0,
+        guaranteedYears: 0,
         lastTransferSeason: 0,
         declinedRenewal: false,
         trophies: [],
@@ -1184,6 +1587,7 @@ function createPlayer(name, club, league, position, age, rating, potential, nati
         agentId: null,
         stats:{gp:0,goals:0,assists:0,pim:0,plusMinus:0,ratingSum:0,goalsAgainst:0},
         seasonHistory:[]};
+    return normalizeContractData(player);
 }
 
 // ============ 7.5. СОЗДАНИЕ РЕАЛЬНОГО ИГРОКА (из REAL_ROSTERS) ============
@@ -1428,6 +1832,12 @@ function createRealPlayer(data, club, league) {
         attributes: generateAttributes(position, rating, name),
         form: 0, injuryWeeks: 0, loyalty: 100,
         contractYears: simInt(1, 4),
+        goalBonus: 0,
+        assistBonus: 0,
+        cleanSheetBonus: 0,
+        savesBonus: 0,
+        gamesPlayedBonus: 0,
+        guaranteedYears: 0,
         lastTransferSeason: 0,
         declinedRenewal: false,
         trophies: [],
@@ -1439,7 +1849,7 @@ function createRealPlayer(data, club, league) {
     };
 
     generateFakeCareerHistory(_player);
-    return _player;
+    return normalizeContractData(_player);
 }
 
 // ============ РАСПИСАНИЕ МАТЧЕЙ ============
@@ -2008,7 +2418,7 @@ function checkAllGoals() {
                         if (nextGoal.reward.money) {
                             const cut = Math.round(nextGoal.reward.money / 5);
                             agentMoney += cut;
-                            addNews(`💰 Награда за цель: +$${cut.toLocaleString()}`, "info");
+                            addNews(`💰 Награда за цель: +$${formatInt(cut)}`, "info");
                         }
                         if (nextGoal.reward.slot) upgrades.office = Math.min(25, upgrades.office + nextGoal.reward.slot);
                         if (nextGoal.reward.rep) upgrades.reputation = Math.min(25, upgrades.reputation + nextGoal.reward.rep);
@@ -2039,7 +2449,7 @@ function generateClubData() {
                 ? realData.prestige
                 : Math.max(20, Math.min(99, basePrestige + randomInt(-10, 10)));
             const bb = leagueBudgets[lk] || 1000000;
-            const budget = Math.round(bb * (0.6 + Math.random() * 0.8));
+            const budget = Math.round(bb * (0.6 + simRandom() * 0.8));
             const founded = randomInt(1940, 2005);
             const titles = randomInt(0, Math.max(1, Math.floor(prestige / 8)));
             const legends = [];
@@ -2050,7 +2460,7 @@ function generateClubData() {
             const stockPrice = Math.round(prestige * 1000 * getLeagueStockMultiplier(lk));
             const stockHistory = [];
             let temp = stockPrice;
-            for (let w = 0; w < 10; w++) { temp = Math.round(temp * (0.93 + Math.random() * 0.14)); stockHistory.push(temp); }
+            for (let w = 0; w < 10; w++) { temp = Math.round(temp * (0.93 + simRandom() * 0.14)); stockHistory.push(temp); }
             stockHistory.push(stockPrice);
             const upgrades = generateClubUpgrades(prestige);
             clubData[key] = {
@@ -2123,7 +2533,7 @@ function calculateDividends() {
             // Ур.1 = 1.5%, Ур.10 = 2.4%, Ур.20 = 3.3%
             const divPct = 0.015 + (agentLevel - 1) * 0.001;
             const d = Math.round(wr * (h.shares / 100) * divPct);
-            if (d > 0) { total += d; addNews(`👑 Дивиденды от ${data.club}: +$${d.toLocaleString()}`, "positive"); }
+            if (d > 0) { total += d; addNews(`👑 Дивиденды от ${data.club}: +$${formatInt(d)}`, "positive"); }
         }
     }
     if (total > 0) agentMoney += total;
@@ -2170,7 +2580,7 @@ function payTransferCommission(player, oldSalary, newSalary) {
         // Потолок на разовый трансфер: на низком уровне агента не больше $100K
         const cap = 50000 + agentLevel * 25000;
         if (comm > cap) comm = cap;
-        if (comm > 0) { agentMoney += comm; addNews(`💰 Комиссия за переход ${player.name}: +$${comm.toLocaleString()}`, "positive"); }
+        if (comm > 0) { agentMoney += comm; addNews(`💰 Комиссия за переход ${player.name}: +$${formatInt(comm)}`, "positive"); }
     }
 }
 
@@ -2220,7 +2630,7 @@ function generateCouncilTasks(club) {
         if (picked.length >= 3) break;
         if (pool[cat].length === 0) continue;
         const pick = simChoice(pool[cat]);
-        picked.push({ ...pick, type: cat, id: cat + '_' + Date.now() + '_' + simRandom(), startValue: null, progress: 0, done: false });
+        picked.push({ ...pick, type: cat, id: nextEntityId(cat), startValue: null, progress: 0, done: false });
     }
 
     // Фиксируем startValue
@@ -2395,7 +2805,7 @@ function initializeStandings() {
         ld.divisions.forEach(div => {
             div.clubs.forEach(club => {
                 standings[ln].push({club,division:div.name,gp:0,w:0,otW:0,sW:0,sL:0,otL:0,l:0,gf:0,ga:0,points:0});
-                teamStrengths[ln + "_" + club] = Math.max(0.35, Math.min(1.0, bs + (Math.random() - 0.5) * 0.35));
+                teamStrengths[ln + "_" + club] = Math.max(0.35, Math.min(1.0, bs + (simRandom() - 0.5) * 0.35));
             });
         });
     }
@@ -3591,7 +4001,7 @@ function saveGame() {
     for (const k of Object.keys(clubData)) packedClubs[k] = packClub(clubData[k]);
     const data = {
         v: 23,
-        t: Date.now(),
+        t: Date.now(), // метаданные сейва: в симуляцию и снапшоты не входят
         agentName, agencyName, agencyCountry, agencyFlag,
         money: agentMoney, s: currentSeason, w: currentWeek,
         upgrades, rosterNames: myRoster.map(p => p.name), news: newsFeed.slice(0, 150),
@@ -3600,6 +4010,18 @@ function saveGame() {
         agentXP, agentLevel,
         transferOffers, activeCommissions, pendingClubReturn,
         playerNegotiations,
+        contractExtras: Object.fromEntries(players.map(p => {
+            const years = Math.max(0, Math.round(p.contractYears || 0));
+            return [p.name, [
+                p.motivation || getMotivationForCharacter(p.character),
+                Math.max(0, Math.round(p.goalBonus || 0)),
+                Math.max(0, Math.round(p.gamesPlayedBonus || 0)),
+                Math.max(0, Math.min(years, Math.round(p.guaranteedYears || 0))),
+                Math.max(0, Math.round(p.assistBonus || 0)),
+                Math.max(0, Math.round(p.cleanSheetBonus || 0)),
+                Math.max(0, Math.round(p.savesBonus || 0))
+            ]];
+        })),
         poachedPlayersThisSeason, agencyPoachAttempts, closedAgencies,
         phase: seasonPhase, phaseWeeks: transferPhaseWeeksLeft,
         playoffState, playoffRound,
@@ -3718,6 +4140,32 @@ async function loadGame() {
         playoffRound = d.playoffRound;
         if (d.players && d.players.length > 0) players = d.players.map(unpackPlayer);
         else { players = generateAllPlayers(); assignPlayersToNpcAgencies(); seedFreeAgents(250); }
+
+        // Совместимость сейвов: новые поля контракта лежат отдельной картой.
+        if (d.contractExtras) {
+            players.forEach(p => {
+                const extra = d.contractExtras[p.name];
+                if (!Array.isArray(extra)) return;
+                p.motivation = extra[0] || getMotivationForCharacter(p.character);
+                p.goalBonus = extra[1] || 0;
+                p.gamesPlayedBonus = extra[2] || 0;
+                p.guaranteedYears = extra[3] || 0;
+                p.assistBonus = extra[4] || 0;
+                p.cleanSheetBonus = extra[5] || 0;
+                p.savesBonus = extra[6] || 0;
+            });
+        }
+        players.forEach(normalizeContractData);
+        Object.values(playerNegotiations || {}).forEach(entry => {
+            (entry.offers || []).forEach(normalizeOfferContract);
+            // Диалоговые сессии: контр-офферы тоже нормализуем (старые сейвы без sessions).
+            Object.values(entry.sessions || {}).forEach(s => {
+                if (s && s.counterOffer) normalizeOfferContract(s.counterOffer);
+            });
+        });
+        Object.values(transferOffers || {}).forEach(entry => {
+            (entry.offers || []).forEach(normalizeOfferContract);
+        });
 
         // Миграция: реальным игрокам без истории генерируем фейковую карьеру
         let migrated = 0;
@@ -3967,7 +4415,7 @@ function resetGame() {
     presidentClubKey = null;
     clubCouncil = null;
     careerGoals = {};
-    careerCounters = { poachSuccess: 0, poachFails: 0, clientsEverSigned: 0, trophiesTotal: 0, cupsWon: 0, newsCount: 0 };
+    careerCounters = { poachSuccess: 0, poachFails: 0, clientsEverSigned: 0, trophiesTotal: 0, cupsWon: 0, newsCount: 0, idSeq: 0 };
     activeTasks = [];
     eventCooldowns = {};
     eventHistory = [];
@@ -3984,6 +4432,7 @@ function resetGame() {
     matchQueueIdx = 0;
     pendingEvent = null;
     matchViewState = null;
+    matchPlayback.reset();
 
     // Транслитерируем все имена в латиницу (реальные игроки из REAL_ROSTERS)
     players.forEach(p => { if (p.name) p.name = toLatin(p.name); });
@@ -4117,7 +4566,7 @@ function renderOffice() {
     const rEl = document.getElementById('office-agent-rank');
     const htEl = document.getElementById('office-header-title');
 
-    if (mEl) mEl.textContent = '$' + agentMoney.toLocaleString();
+    if (mEl) mEl.textContent = '$' + formatInt(agentMoney);
     if (sEl) sEl.textContent = currentSeason + '/' + (currentSeason + 1);
     if (wEl) wEl.textContent = (seasonPhase === 'transfer_mid' || seasonPhase === 'transfer_off') ? 'ТО' :
         seasonPhase === 'draft' ? '🎯' :
@@ -4126,6 +4575,9 @@ function renderOffice() {
     if (nEl) nEl.textContent = agentName;
     if (rEl) rEl.textContent = getAgentRank(Math.floor(agentLevel / 2));
     if (htEl) htEl.textContent = agencyName;
+    // Аватар агента: неоновый inline-SVG (без эмодзи-заглушек)
+    const avEl = document.getElementById('office-agent-avatar');
+    if (avEl && !avEl.dataset.filled) { avEl.innerHTML = getAgentAvatarHTML(); avEl.dataset.filled = '1'; }
 
     const banner = document.getElementById('office-window-banner');
     if (banner) {
@@ -4174,7 +4626,7 @@ function renderOffice() {
     const xpT = document.getElementById('office-xp-text');
     const xpF = document.getElementById('office-xp-fill');
     if (xpL) xpL.textContent = agentLevel;
-    if (xpT) xpT.textContent = xp.isMax ? 'MAX' : xp.current.toLocaleString() + ' / ' + xp.next.toLocaleString() + ' XP';
+    if (xpT) xpT.textContent = xp.isMax ? 'MAX' : formatInt(xp.current) + ' / ' + formatInt(xp.next) + ' XP';
     if (xpF) xpF.style.width = xp.percent + '%';
 
     const infraTile = document.getElementById('tile-infrastructure');
@@ -4388,14 +4840,14 @@ function buildClubPositionGraph(clubKey) {
         const x = (i / (data.length - 1)) * W;
         const y = ((p.place - 1) / (maxPlace - 1)) * (H - 12) + 6;
         const isTop = p.place <= 3;
-        const color = isTop ? '#00ff88' : p.place <= Math.ceil(maxPlace / 2) ? '#00d4ff' : '#ffaa00';
+        const color = isTop ? '#c6ff00' : p.place <= Math.ceil(maxPlace / 2) ? '#00e5ff' : '#ffb300';
         return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${color}"/>`;
     }).join('');
 
     const first = data[0].place;
     const last = data[data.length - 1].place;
     const improving = last < first;
-    const color = improving ? '#00ff88' : last > first ? '#ff2d55' : '#00d4ff';
+    const color = improving ? '#c6ff00' : last > first ? '#ff2e55' : '#00e5ff';
 
     return `
         <div class="infra-position-graph">
@@ -4905,7 +5357,7 @@ function buildRosterRow(p) {
     const contractEnd = p.contractYears === 1 ? '🔴' : '📝';
     const posIcon = p.position === 'G' ? '🥅' : p.position === 'D' ? '🛡' : '⚡';
     row.innerHTML = `
-        <div class="rr-avatar">${getPlayerAvatarSVG(p)}</div>
+        <div class="rr-avatar">${getPlayerAvatar(p)}</div>
         <div class="rr-info">
             <div class="rr-name-line">
                 <span class="rr-pos-icon">${posIcon}</span>
@@ -5324,7 +5776,7 @@ function getCardEffects(cardKey, lvl) {
 }
 
 function formatEffectVal(cardKey, idx, val) {
-    if (cardKey === 'stadium') return idx === 0 ? Math.round(val).toLocaleString() + ' мест' : '+' + (val * 100).toFixed(2) + '%';
+    if (cardKey === 'stadium') return idx === 0 ? formatInt(Math.round(val)) + ' мест' : '+' + (val * 100).toFixed(2) + '%';
     if (cardKey === 'marketing') return idx === 0 ? val : '×' + val.toFixed(2);
     if (cardKey === 'medical') return idx === 0 ? '−' + Math.round(val * 100) + '%' : '−' + val + ' нед.';
     if (cardKey === 'training') return '+' + Math.round((val - 1) * 100) + '%';
@@ -5514,8 +5966,8 @@ function renderMyClients(c) {
 let talentFilter = 'all';   // all | G | D | F
 let talentSort = 'rating';  // rating | potential | age
 
-// Показываем ВСЕХ свободных агентов. У отсканенных — точный/узкий потенциал,
-// у остальных — широкий диапазон через getRevealRange().
+// Показываем пул текущего ТО (isScouted) + сильных свободных агентов.
+// У отсканенных — точный/узкий потенциал, у остальных — широкий диапазон.
 function renderSearchClients(c) {
     c.innerHTML = ''; // сброс перед перерисовкой (фильтры/сортировка вызывают ререндер)
     const frag = document.createDocumentFragment();
@@ -5544,6 +5996,7 @@ function renderSearchClients(c) {
     let available = players.filter(p =>
         p.agentId === null &&
         !p.club &&
+        (p.isScouted || p.rating >= 40) &&
         (talentFilter === 'all' ||
          (talentFilter === 'F' ? ['C','LW','RW'].includes(p.position) : p.position === talentFilter))
     );
@@ -5557,6 +6010,11 @@ function renderSearchClients(c) {
         hidePagination();
         return;
     }
+
+    const poolHead = document.createElement('div');
+    poolHead.className = 'talent-window-head';
+    poolHead.innerHTML = `<span>${LANG.t('Текущее ТО')}</span><b>${available.length} ${LANG.t('игроков')}</b>`;
+    frag.appendChild(poolHead);
 
     // ===== Сортировка =====
     const potKnown = (p) => p.isScouted || getRevealRange() === 0;
@@ -5572,11 +6030,11 @@ function renderSearchClients(c) {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     const data = sorted.slice(start, start + ITEMS_PER_PAGE);
     data.forEach(p => {
-        const row = document.createElement('div');
-        row.className = 'player-row';
-        row.innerHTML = buildPlayerRow(p);
-        row.addEventListener('click', () => openPlayerScreen(p, 'search'));
-        frag.appendChild(row);
+        const card = document.createElement('div');
+        card.className = 'talent-card-wrap';
+        card.innerHTML = buildTalentCard(p);
+        card.addEventListener('click', () => openPlayerScreen(p, 'search'));
+        frag.appendChild(card);
     });
     c.appendChild(frag);
     showPagination(Math.min(sorted.length, 300), () => { c.innerHTML = ''; renderSearchClients(c); });
@@ -5617,34 +6075,50 @@ function buildPlayerRow(p) {
     const rc = p.rating >= 80 ? 'high' : p.rating >= 65 ? 'mid' : 'low';
     const ls = p.league ? getLeagueName(p.league) : ''; 
     const isFA = !p.club;
-    
-    // Вычисляем диапазон потенциала: отсканенные скаутами — точное значение (или узкий диапазон ±2),
-    // остальные — широкий диапазон по уровню reveal
-    let potStr = '';
-    let potNum = null; // известен ли потенциал точно (для подсветки)
-    if (p.isScouted) {
-        const scoutRange = upgrades.reveal >= 25 ? 0 : Math.min(2, getRevealRange());
-        if (scoutRange === 0) { potStr = `${p.potential}`; potNum = p.potential; }
-        else potStr = `${Math.max(0, p.potential - scoutRange)}–${Math.min(100, p.potential + scoutRange)}`;
-    } else {
-        const range = getRevealRange();
-        if (range === 0) { potStr = `${p.potential}`; potNum = p.potential; }
-        else {
-            const minPot = Math.max(0, p.potential - range);
-            const maxPot = Math.min(100, p.potential + range);
-            potStr = `${minPot}–${maxPot}`;
-        }
-    }
-    // Подсветка: известный потенциал >=80 зелёный, >=60 жёлтый, ниже — красный
-    const potGlowClass = potNum === null ? '' : potNum >= 80 ? ' pot-glow-high' : potNum >= 60 ? ' pot-glow-mid' : ' pot-glow-low';
+    const pot = getPotentialView(p);
 
-    return `<div class="p-avatar">${getPlayerAvatarSVG(p)}</div>
+    return `<div class="p-avatar">${getPlayerAvatar(p)}</div>
     <div class="p-info">
-        <div class="p-name-line"><span class="p-name${potGlowClass}">${p.name}</span><span class="p-pos">${p.position}</span></div>
+        <div class="p-name-line"><span class="p-name${pot.glow}">${p.name}</span><span class="p-pos">${p.position}</span></div>
         <div class="p-club-line"><span class="p-flag">${flag}</span><span>${isFA ? LANG.t('Свободный агент') : p.club + ' (' + ls + ')'}</span></div>
-        <div class="p-pot-line">📈 ${LANG.t('Потенциал')}: <b>${potStr}</b>${p.isScouted ? ' <span style="color:var(--neon-green);font-size:10px;">✓ ' + LANG.t('Отсканирован') + '</span>' : ''}</div>
+        <div class="p-pot-line">📈 ${LANG.t('Потенциал')}: <b>${pot.text}</b>${p.isScouted ? ' <span style="color:var(--neon-green);font-size:10px;">✓ ' + LANG.t('Отсканирован') + '</span>' : ''}</div>
     </div>
     <div class="p-right"><div class="p-age">${LANG.t('Возраст')} <b>${p.age}</b></div><div class="p-rating ${rc}">${p.rating}</div></div>`;
+}
+
+// Структурированная карточка свободного агента для базы талантов.
+function buildTalentCard(p) {
+    const flag = getPlayerCountry(p);
+    const rc = p.rating >= 80 ? 'high' : p.rating >= 65 ? 'mid' : 'low';
+    const a = p.attributes || generateAttributes(p.position, p.rating, p.name);
+    const arch = getArchetypeInfo(p);
+    const pot = getPotentialView(p);
+    const potBar = pot.num === null ? parseInt(pot.text, 10) || 0 : pot.num;
+    const bar = (label, value) => `<div class="talent-stat">
+        <div class="talent-stat-head"><span>${label}</span><b>${value}</b></div>
+        <div class="talent-stat-bar"><i style="width:${Math.max(0, Math.min(100, value))}%"></i></div>
+    </div>`;
+    return `<div class="talent-card" data-player="${p.name}">
+        <div class="talent-card-head">
+            <div class="p-avatar">${getPlayerAvatar(p)}</div>
+            <div class="talent-id">
+                <div class="talent-name-line"><span class="p-name${pot.glow}">${p.name}</span><span class="p-flag">${flag}</span></div>
+                <div class="talent-tags">
+                    <span class="p-pos">${p.position}</span>
+                    <span class="talent-arch">${arch.icon} ${LANG.t(arch.label)}</span>
+                    <span class="talent-age">${p.age} ${LANG.t('лет')}</span>
+                </div>
+            </div>
+            <div class="talent-rating ${rc}"><b>${p.rating}</b><span>${LANG.t('Рейтинг')}</span></div>
+        </div>
+        <div class="talent-skills-head"><span>${LANG.t('Скиллы')}</span><span>${p.isScouted ? '✓ ' + LANG.t('Отсканирован') : ''}</span></div>
+        <div class="talent-stats">
+            ${bar(LANG.t('Атака'), a.attack)}
+            ${bar(LANG.t('Защита'), a.defense)}
+            ${bar(LANG.t('Потенциал'), potBar)}
+        </div>
+        <div class="talent-card-foot"><span>📈 ${LANG.t('Потенциал')}: <b>${pot.text}</b></span><span>${arch.icon} ${LANG.t(arch.label)}</span></div>
+    </div>`;
 }
 
 // ============ 18. ЭКРАН ИГРОКА ============
@@ -5681,6 +6155,7 @@ function renderPlayerScreen() {
 }
 
 function renderPlayerInfo(c, p) {
+    normalizeContractData(p);
     const flag = getPlayerCountry(p);
     const a = p.attributes || {};
     const s = p.stats || {gp:0,goals:0,assists:0,pim:0,plusMinus:0,goalsAgainst:0,ratingSum:0};
@@ -5701,6 +6176,7 @@ function renderPlayerInfo(c, p) {
     }
     const charMap = {ambitious:'🚀 ' + LANG.t('Амбициозный'), calm:'😌 ' + LANG.t('Спокойный'), pragmatic:'💼 ' + LANG.t('Прагматик'), capricious:'🎭 ' + LANG.t('Капризный'), loyal:'🐺 ' + LANG.t('Лояльный')};
     const charName = charMap[p.character] || '';
+    const motivationName = getMotivationLabel(p);
 
     // Лояльность клубу
     const clubLoyalty = p.clubLoyalty ?? 0;
@@ -5727,7 +6203,7 @@ function renderPlayerInfo(c, p) {
 
     c.innerHTML = `
         <div class="pp-hero">
-            <div class="pp-avatar">${getPlayerAvatarSVG(p)}</div>
+            <div class="pp-avatar">${getPlayerAvatar(p)}</div>
             <div class="pp-hero-right">
                 <div class="pp-pos">${p.position}</div>
                 <div class="pp-loyalty ${lc}">${LANG.t('Отношение')} ${loyalty}%</div>
@@ -5757,6 +6233,8 @@ function renderPlayerInfo(c, p) {
         <div class="pp-row-2">
             <div class="pp-cell"><span class="lbl">${LANG.t('Страна')}</span><span class="val">${flag}</span></div>
             <div class="pp-cell"><span class="lbl">${LANG.t('Возраст')}</span><span class="val">${p.age} ${LANG.t('лет')}</span></div>
+            <div class="pp-cell"><span class="lbl">${LANG.t('Архетип')}</span><span class="val">${getArchetypeInfo(p).icon} ${LANG.t(getArchetypeInfo(p).label)}</span></div>
+            <div class="pp-cell"><span class="lbl">${LANG.t('Мотивация')}</span><span class="val">${motivationName}</span></div>
             <div class="pp-cell"><span class="lbl">${LANG.t('Клуб')}</span><span class="val pp-club-val">${isFA ? LANG.t('Свободный агент') : `${p.club ? getTeamLogoHTML(p.club, p.league) : ''}<span>${p.club}</span>`}</span></div>
             <div class="pp-cell"><span class="lbl">${LANG.t('Лига')}</span><span class="val">${isFA ? '—' : ls}</span></div>
         </div>
@@ -5777,6 +6255,12 @@ function renderPlayerInfo(c, p) {
         <div class="pp-row-2">
             <div class="pp-cell"><span class="lbl">${LANG.t('Зарплата')}</span><span class="val">${formatSalary(p.salary)}</span></div>
             <div class="pp-cell"><span class="lbl">${LANG.t('Срок')}</span><span class="val">${isFA ? '—' : formatContractYears(p.contractYears)}</span></div>
+            ${getContractBonusKinds(p).map(kind => {
+                const field = getBonusField(kind);
+                const meta = getContractBonusMeta(kind, p);
+                return `<div class="pp-cell"><span class="lbl">${meta.label}</span><span class="val">${p[field] ? formatMoney(p[field]) + ' / ' + meta.unit : '—'}</span></div>`;
+            }).join('')}
+            <div class="pp-cell"><span class="lbl">${LANG.t('Гарантированные годы')}</span><span class="val">${p.guaranteedYears ? formatContractYears(p.guaranteedYears) : '—'}</span></div>
         </div>
         <div class="pp-section-title">📊 ${LANG.t('Статистика')}</div>
         ${p.position === 'G' ? buildGoalieStatsHTML(s) : buildSkaterStatsHTML(s, pts)}
@@ -5897,6 +6381,8 @@ function openClubPickModal(player) {
 
 // Список уже сохранённых предложений клуба в "телефоне"
 function renderSavedOffersInPhone(player, entry) {
+    setNegotiationConsoleMode('list');
+    if (negGauges) negGauges.innerHTML = '';
     // Шапка телефона
     phoneChatAvatar.innerHTML = `<span style="font-size:26px;">📥</span>`;
     phoneChatName.textContent = player.name;
@@ -5950,12 +6436,12 @@ function closeNegotiationModal() {
     negotiationModal.style.display = 'none';
 }
 
-// v1.0: тап вне phone-mockup закрывает переговоры (и сбрасывает активную сессию торга)
+// v1.0: тап вне модалки закрывает переговоры; сессия сохраняется и продолжается позже
 document.getElementById('negotiation-modal')?.addEventListener('click', (e) => {
     if (e.target.id !== 'negotiation-modal') return; // клик по фону
     closeNegotiationModal();
-    if (activeNegotiation && !activeNegotiation.finished) {
-        // незавершённые переговоры можно продолжить позже из списка офферов
+    if (activeNegotiation) {
+        saveNegotiationSession(activeNegotiation);
         activeNegotiation = null;
         saveGame();
     }
@@ -5964,37 +6450,80 @@ document.getElementById('negotiation-modal')?.addEventListener('click', (e) => {
 
 // Переговоры по конкретному сохранённому офферу (создаются один раз при генерации)
 function startNegotiationFromSaved(player, savedOffer) {
+    normalizeOfferContract(savedOffer);
+    const clubKey = savedOffer.league + '_' + savedOffer.club;
+    const session = getNegotiationSession(player.name, clubKey);
     activeNegotiation = {
         playerName: player.name,
-        clubKey: savedOffer.league + '_' + savedOffer.club,
+        clubKey,
         club: savedOffer.club,
         league: savedOffer.league,
         prestige: savedOffer.prestige,
         offer: savedOffer,           // оффер мутируется при успешном торге и остаётся в entry.offers
         roundsLeft: 3,
-        patience: 3,                 // шкала терпения: каждое "сердечко" — 1 попытка торга
+        patience: 100,
+        interest: 50,
+        round: 0,
+        phase: 'builder',
+        counterOffer: null,
         messages: [],
         finished: false,
         walkedAway: false
     };
-    addClubMsg(LANG.t('Готов предложить контракт'), savedOffer);
+    if (session && !session.walkedAway) {
+        // Продолжаем сохранённый диалог: шкалы, фаза, контр-оффер и лента.
+        activeNegotiation.patience = clampNumber(session.patience ?? 100, 0, 100);
+        activeNegotiation.interest = clampNumber(session.interest ?? 50, 0, 100);
+        activeNegotiation.round = session.round || 0;
+        activeNegotiation.phase = session.phase || 'builder';
+        activeNegotiation.counterOffer = session.counterOffer ? normalizeOfferContract(session.counterOffer) : null;
+        activeNegotiation.messages = Array.isArray(session.messages) ? session.messages : [];
+        activeNegotiation.finished = !!session.finished;
+        if (activeNegotiation.messages.length === 0) addClubMsg(LANG.t('Готов предложить контракт'), savedOffer);
+    } else {
+        initNegotiationGauges(activeNegotiation, savedOffer);
+        addClubMsg(LANG.t('Готов предложить контракт'), savedOffer);
+    }
     renderNegotiationModal(player);
 }
 
-function addClubMsg(text, offerSnapshot) {
-    activeNegotiation.messages.push({ from: 'club', text, offer: offerSnapshot ? JSON.parse(JSON.stringify(offerSnapshot)) : null });
+function addClubMsg(text, offerSnapshot, neg = activeNegotiation) {
+    if (!neg) return;
+    neg.messages.push({ from: 'club', text, offer: offerSnapshot ? JSON.parse(JSON.stringify(offerSnapshot)) : null });
 }
 
-function addAgentMsg(text) {
-    activeNegotiation.messages.push({ from: 'agent', text });
+function addAgentMsg(text, offerSnapshot, neg = activeNegotiation) {
+    if (!neg) return;
+    neg.messages.push({ from: 'agent', text, offer: offerSnapshot ? JSON.parse(JSON.stringify(offerSnapshot)) : null });
 }
 
-function addSystemMsg(text, isError) {
-    activeNegotiation.messages.push({ from: 'system', text, isError: !!isError });
+function addSystemMsg(text, isError, neg = activeNegotiation) {
+    if (!neg) return;
+    neg.messages.push({ from: 'system', text, isError: !!isError });
+}
+
+function getActiveNegotiationPlayer() {
+    if (!activeNegotiation) return currentPlayerScreen;
+    return players.find(p => p.name === activeNegotiation.playerName) || currentPlayerScreen;
+}
+
+// Строки бонусов в карточке оффера: подписи и единицы зависят от позиции.
+function buildOfferBonusRows(offer, player) {
+    if (!offer) return '';
+    return ['goalBonus', 'assistBonus', 'cleanSheetBonus', 'savesBonus', 'gamesPlayedBonus']
+        .filter(kind => {
+            const field = getBonusField(kind === 'gamesPlayedBonus' ? 'gamesBonus' : kind) || kind;
+            return (offer[field] || 0) > 0;
+        })
+        .map(kind => {
+            const meta = getContractBonusMeta(kind === 'gamesPlayedBonus' ? 'gamesBonus' : kind, player);
+            return `<div class="neg-offer-row neg-bonus"><span>${meta.icon} ${meta.label}</span><b>${formatMoney(offer[kind])} / ${meta.unit}</b></div>`;
+        }).join('');
 }
 
 function buildPhoneChatHTML() {
     const neg = activeNegotiation;
+    const negPlayer = getActiveNegotiationPlayer();
     return neg.messages.map(m => {
         if (m.from === 'system') {
             return `<div class="neg-msg neg-msg-system"><div class="neg-bubble ${m.isError ? '' : 'neutral'}">${m.text}</div></div>`;
@@ -6008,7 +6537,9 @@ function buildPhoneChatHTML() {
                 <div class="neg-offer-row"><span>💰 ${LANG.t('Зарплата')}</span><b>${formatSalary(m.offer.newSalary)}</b></div>
                 <div class="neg-offer-row"><span>📅 ${LANG.t('Срок')}</span><b>${formatContractYears(m.offer.years)}</b></div>
                 ${m.offer.signingBonus ? `<div class="neg-offer-row neg-bonus"><span>🎁 ${LANG.t('Подписной бонус')}</span><b>${formatMoney(m.offer.signingBonus)}</b></div>` : ''}
-                <div class="neg-offer-row"><span>💼 ${LANG.t('Комиссия агента')}</span><b>${formatMoney(Math.round(m.offer.newSalary * 1000 * COMMISSION_RATE))}</b></div>
+                ${buildOfferBonusRows(m.offer, negPlayer)}
+                ${m.offer.guaranteedYears ? `<div class="neg-offer-row neg-guarantee"><span>🛡 ${LANG.t('Гарантированные годы')}</span><b>${formatContractYears(m.offer.guaranteedYears)}</b></div>` : ''}
+                <div class="neg-offer-row"><span>💼 ${LANG.t('Комиссия агента')}</span><b>${formatMoney(Math.round(m.offer.newSalary * 1000 * getOfferCommissionRate(m.offer)))} (${Math.round(getOfferCommissionRate(m.offer) * 100)}%)</b></div>
             </div>` : ''}
         </div>`;
     }).join('');
@@ -6027,28 +6558,36 @@ function renderPhoneActions(player) {
     const neg = activeNegotiation;
     if (!neg) return;
     phoneInputBar.innerHTML = '';
+    const addBtn = (cls, text, onClick, opts = {}) => {
+        const b = document.createElement('button');
+        b.className = cls;
+        b.textContent = text;
+        if (opts.title) b.title = opts.title;
+        if (opts.disabled) b.disabled = true;
+        b.addEventListener('click', onClick);
+        phoneInputBar.appendChild(b);
+        return b;
+    };
 
     if (neg.finished) {
         // Переговоры завершены — только "Закрыть"
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'phone-btn-close';
-        closeBtn.textContent = LANG.t('Закрыть');
-        closeBtn.addEventListener('click', () => {
+        addBtn('phone-btn-close', LANG.t('Закрыть'), () => {
             closeNegotiationModal();
             activeNegotiation = null;
             renderPlayerScreen();
             saveGame();
         });
-        phoneInputBar.appendChild(closeBtn);
         return;
     }
 
-    // ===== Принять =====
-    const acceptBtn = document.createElement('button');
-    acceptBtn.className = 'phone-btn-accept';
-    acceptBtn.textContent = `✅ ${LANG.t('Принять')}`;
-    acceptBtn.addEventListener('click', () => acceptNegotiation(player));
-    phoneInputBar.appendChild(acceptBtn);
+    // ===== Фаза ответа клуба: Принять контр-оффер / Надавить / Скорректировать =====
+    if (neg.phase === 'response') {
+        addBtn('phone-btn-accept', `✅ ${LANG.t('Принять контр-оффер')}`, () => acceptNegotiation(player, neg.counterOffer || neg.offer));
+        addBtn('phone-btn-press', `💢 ${LANG.t('Надавить')}`, () => pressNegotiation(player), {
+            title: LANG.t('Попытаться выбить больше. Если терпение ниже 20%, клуб выйдет из сделки')
+        });
+        addBtn('phone-btn-trade', `🎚 ${LANG.t('Скорректировать')}`, () => adjustNegotiation(player));
+    }
 
     // ===== Отправить в Мой Клуб (только для президента клуба) =====
     const presidentAvailable = presidentClubKey && (() => {
@@ -6057,33 +6596,22 @@ function renderPhoneActions(player) {
     })();
     if (presidentAvailable) {
         const club = clubData[presidentClubKey];
+        const terms = neg.counterOffer || neg.offer;
         // v1.0: бюджет клуба должен покрыть ЗП минус подписной бонус (бонус платит агентству клуб)
-        const bonusOffset = neg.offer.signingBonus ? Math.round(neg.offer.signingBonus / 1000) : 0;
-        const canAfford = club && club.budget > Math.max(0, (neg.offer.newSalary - bonusOffset)) * 1000;
-        const myClubBtn = document.createElement('button');
-        myClubBtn.className = 'phone-btn-myclub';
-        myClubBtn.textContent = `🏛️ ${LANG.t('Отправить в Мой Клуб')}`;
-        myClubBtn.disabled = !canAfford;
-        myClubBtn.title = canAfford ? LANG.t('Отправить в мой клуб (за бюджет клуба, −2 репутации)') : LANG.t('У клуба нет бюджета');
-        myClubBtn.addEventListener('click', () => signPlayerToMyClub(player, neg.offer));
-        phoneInputBar.appendChild(myClubBtn);
+        const bonusOffset = terms.signingBonus ? Math.round(terms.signingBonus / 1000) : 0;
+        const canAfford = club && club.budget > Math.max(0, (terms.newSalary - bonusOffset)) * 1000;
+        addBtn('phone-btn-myclub', `🏛️ ${LANG.t('Отправить в Мой Клуб')}`, () => signPlayerToMyClub(player, terms), {
+            disabled: !canAfford,
+            title: canAfford ? LANG.t('Отправить в мой клуб (за бюджет клуба, −2 репутации)') : LANG.t('У клуба нет бюджета')
+        });
     }
 
-    // ===== Торговаться =====
-    const tradeBtn = document.createElement('button');
-    tradeBtn.className = 'phone-btn-trade';
-    tradeBtn.textContent = `🤝 ${LANG.t('Торговаться')}`;
-    tradeBtn.addEventListener('click', () => renderTradeOptionsMenu(player));
-    phoneInputBar.appendChild(tradeBtn);
-
     // ===== Отклонить (удаляет ТОЛЬКО этот оффер из списка) =====
-    const declineBtn = document.createElement('button');
-    declineBtn.className = 'phone-btn-decline';
-    declineBtn.textContent = `❌ ${LANG.t('Отклонить')}`;
-    declineBtn.addEventListener('click', () => {
+    addBtn('phone-btn-decline', `❌ ${LANG.t('Отклонить')}`, () => {
         const entry = getNegotiationEntry(player.name);
         entry.offers = entry.offers.filter(o => o !== neg.offer && o.id !== neg.offer.id);
         entry.walkedClubs[neg.clubKey] = true; // этот клуб больше не вернётся в текущей генерации
+        if (entry.sessions) delete entry.sessions[neg.clubKey];
         if (entry.offers.length === 0) entry.exhausted = true; // все предложения отклонены
         addSystemMsg(LANG.t('Предложение отклонено'), false);
         neg.finished = true;
@@ -6091,161 +6619,299 @@ function renderPhoneActions(player) {
         renderPhoneActions(player);
         saveGame();
     });
-    phoneInputBar.appendChild(declineBtn);
 
-    // ===== Закрыть (вернуться к списку, переговоры можно продолжить) =====
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'phone-btn-close';
-    closeBtn.textContent = LANG.t('Закрыть');
-    closeBtn.addEventListener('click', () => { closeNegotiationModal(); renderPlayerScreen(); });
-    phoneInputBar.appendChild(closeBtn);
+    // ===== Закрыть (сессия сохраняется, переговоры можно продолжить) =====
+    addBtn('phone-btn-close', LANG.t('Закрыть'), () => {
+        saveNegotiationSession(neg);
+        closeNegotiationModal();
+        activeNegotiation = null;
+        renderPlayerScreen();
+        saveGame();
+    });
+}
+
+function buildNegotiationInsightHTML(player, offer) {
+    const insight = getNegotiationInsight(player, offer);
+    const hidden = (known) => known ? '' : ' locked';
+    return `
+        <div class="neg-insight">
+            <span>🧠 ${LANG.t('Уровень агента')}: <b>${insight.level}</b></span>
+            <span>💰 ${LANG.t('Бюджет клуба')}: <b class="${hidden(insight.budgetKnown)}">${insight.budgetText}</b></span>
+            <span>🎯 ${LANG.t('Истинный интерес')}: <b class="${hidden(insight.interestKnown)}">${insight.interestText}</b></span>
+            <span>🧬 ${LANG.t('Мотивация')}: <b class="${hidden(insight.motivationKnown)}">${insight.motivationText}</b></span>
+        </div>`;
+}
+
+function renderNegotiationChatBody(player) {
+    if (!activeNegotiation) return;
+    phoneChatBody.innerHTML = buildNegotiationInsightHTML(player, activeNegotiation.offer) + buildPhoneChatHTML();
+    scrollChatToBottom();
+}
+
+function setNegotiationConsoleMode(mode) {
+    if (!negotiationConsole) return;
+    negotiationConsole.classList.toggle('mode-list', mode === 'list');
+    negotiationConsole.classList.toggle('mode-dialogue', mode === 'dialogue');
 }
 
 function renderNegotiationModal(player) {
     const neg = activeNegotiation;
     if (!neg) return;
+    setNegotiationConsoleMode('dialogue');
 
-    // Шапка телефона: логотип, название клуба, статус + шкала терпения (сердечки)
+    // Шапка: логотип, название клуба, статус (шкалы вынесены в отдельный блок)
     phoneChatAvatar.innerHTML = getTeamLogoHTML(neg.club, neg.league);
     phoneChatName.textContent = neg.club;
-    const hearts = '❤️'.repeat(Math.max(0, neg.patience ?? 3)) + '🖤'.repeat(3 - Math.max(0, neg.patience ?? 3));
-    const heartsHTML = `<span class="neg-patience" title="${LANG.t('Терпение клуба')}">${hearts}</span>`;
     if (neg.finished) {
-        phoneChatStatus.innerHTML = (neg.walkedAway ? LANG.t('Переговоры провалены') : LANG.t('Переговоры завершены')) + ' ' + heartsHTML;
+        phoneChatStatus.textContent = neg.walkedAway ? LANG.t('Переговоры провалены') : LANG.t('Переговоры завершены');
         phoneChatStatus.classList.toggle('busy', !!neg.walkedAway);
     } else {
-        phoneChatStatus.innerHTML = LANG.t('ведет переговоры') + ' ' + heartsHTML;
+        phoneChatStatus.textContent = LANG.t('ведет переговоры');
         phoneChatStatus.classList.remove('busy');
     }
 
-    phoneChatBody.innerHTML = buildPhoneChatHTML();
+    if (!neg.draft) neg.draft = normalizeOfferContract({ ...(neg.counterOffer || neg.offer) });
+    renderNegotiationBuilder(player);
+    renderNegotiationGauges(player);
+    renderNegotiationChatBody(player);
     renderPhoneActions(player);
     eventModal.style.display = 'none';
     negotiationModal.style.display = 'flex';
     scrollChatToBottom();
 }
 
-// Добавление новых сообщений без пересборки шапки: чат догружается и плавно скроллится вниз
+// Добавление новых сообщений: чат, шкалы, конструктор и кнопки обновляются точечно
 function appendNewMessages() {
     if (!activeNegotiation) return;
-    phoneChatBody.innerHTML = buildPhoneChatHTML();
-    scrollChatToBottom();
+    const player = players.find(p => p.name === activeNegotiation.playerName) || currentPlayerScreen;
+    renderNegotiationChatBody(player);
+    renderNegotiationGauges(player);
+    renderNegotiationBuilder(player);
+    renderPhoneActions(player);
 }
 
-function renderTradeOptionsMenu(player) {
+// ============ КОНСТРУКТОР КОНТРАКТА (левая панель переговоров) ============
+// Ползунки: зарплата, срок, комиссия агента, подписной бонус, позиционные бонусы, гарантии.
+function buildNegotiationSliderSpecs(player, offer) {
+    const league = offer.league || player.league || 'NHL';
+    const cap = calculateSalaryCap(player.rating, league);
+    const annual = Math.max(1, (offer.newSalary || 0) * 1000);
+    const specs = [
+        { key: 'newSalary', icon: '💰', label: LANG.t('Зарплата'), min: 1, max: Math.max(10, Math.round(cap * 1.6)), step: 5, fmt: formatSalary },
+        { key: 'years', icon: '📅', label: LANG.t('Срок'), min: 1, max: 6, step: 1, fmt: formatContractYears },
+        { key: 'agentCommissionRate', icon: '💼', label: LANG.t('Комиссия агента'), min: 5, max: 20, step: 1, fmt: v => v + '%' },
+        { key: 'signingBonus', icon: '🎁', label: LANG.t('Подписной бонус'), min: 0, max: Math.max(1000, Math.round(annual * 0.35)), step: 1000, fmt: formatMoney }
+    ];
+    getContractBonusKinds(player).forEach(kind => {
+        const field = getBonusField(kind);
+        const meta = getContractBonusMeta(kind, player);
+        const max = Math.max(100, Math.round(annual * getBonusCapRatio(kind, player) * 2.2 / 100) * 100);
+        specs.push({ key: field, icon: meta.icon, label: `${meta.label} (${meta.unit})`, min: 0, max, step: 100, fmt: formatMoney });
+    });
+    specs.push({ key: 'guaranteedYears', icon: '🛡', label: LANG.t('Гарантированные годы'), min: 0, max: Math.max(1, offer.years || 1), step: 1, fmt: v => v ? formatContractYears(v) : '—' });
+    return specs;
+}
+
+// Значение ползунка из черновика пакета (комиссия хранится долей, показывается %).
+function getDraftSliderValue(draft, key) {
+    if (key === 'agentCommissionRate') return Math.round(getOfferCommissionRate(draft) * 100);
+    return Math.round(draft[key] || 0);
+}
+
+function applyDraftSliderValue(draft, key, rawValue) {
+    if (key === 'agentCommissionRate') draft.agentCommissionRate = clampNumber(rawValue, 5, 20) / 100;
+    else draft[key] = rawValue;
+}
+
+function formatNegotiationSliderValue(spec, value) {
+    return spec.fmt(value);
+}
+
+function renderNegotiationBuilder(player) {
+    const neg = activeNegotiation;
+    if (!neg || !negBuilderBody) return;
+    if (!neg.draft) neg.draft = normalizeOfferContract({ ...(neg.counterOffer || neg.offer) });
+    if (negBuilderTitleText) negBuilderTitleText.textContent = LANG.t('Конструктор контракта');
+    if (negBuilderClient) negBuilderClient.textContent = `${player.name} • ${player.position} • ⭐ ${player.rating}`;
+    const locked = neg.finished || neg.phase === 'response';
+    const draft = neg.draft;
+    const counter = neg.counterOffer;
+    // Диапазоны бонусов/гарантий масштабируются от черновика, а не от исходного оффера.
+    const specBase = { ...neg.offer, years: draft.years || neg.offer.years, newSalary: draft.newSalary || neg.offer.newSalary };
+    const specs = buildNegotiationSliderSpecs(player, specBase);
+
+    negBuilderBody.innerHTML = specs.map(spec => {
+        const value = clampNumber(getDraftSliderValue(draft, spec.key), spec.min, spec.max);
+        const fill = spec.max > spec.min ? ((value - spec.min) / (spec.max - spec.min)) * 100 : 0;
+        // Подсветка: контр-оффер клуба изменил условие относительно отправленного пакета.
+        const ref = neg.lastSubmitted || neg.offer;
+        const changed = counter && ref && getDraftSliderValue(counter, spec.key) !== getDraftSliderValue(ref, spec.key);
+        return `
+        <div class="neg-slider ${locked ? 'locked' : ''} ${changed ? 'counter-changed' : ''}" data-key="${spec.key}">
+            <div class="neg-slider-head">
+                <span class="neg-slider-label">${spec.icon} ${spec.label}</span>
+                <span class="neg-slider-value" id="neg-val-${spec.key}">${formatNegotiationSliderValue(spec, value)}</span>
+            </div>
+            <input type="range" class="neg-range" id="neg-range-${spec.key}" data-key="${spec.key}"
+                min="${spec.min}" max="${spec.max}" step="${spec.step}" value="${value}" style="--fill:${fill.toFixed(1)}%" ${locked ? 'disabled' : ''}>
+            <div class="neg-slider-scale"><span>${formatNegotiationSliderValue(spec, spec.min)}</span><span>${formatNegotiationSliderValue(spec, spec.max)}</span></div>
+        </div>`;
+    }).join('');
+
+    // Живое обновление значения без пересборки DOM (не сбрасывает перетаскивание).
+    negBuilderBody.querySelectorAll('.neg-range').forEach(input => {
+        input.addEventListener('input', () => {
+            const key = input.getAttribute('data-key');
+            const liveBase = { ...neg.offer, years: neg.draft.years || neg.offer.years, newSalary: neg.draft.newSalary || neg.offer.newSalary };
+            const spec = buildNegotiationSliderSpecs(player, liveBase).find(s => s.key === key);
+            const raw = Number(input.value);
+            applyDraftSliderValue(neg.draft, key, raw);
+            const min = Number(input.min), max = Number(input.max);
+            input.style.setProperty('--fill', (max > min ? ((raw - min) / (max - min)) * 100 : 0).toFixed(1) + '%');
+            if (key === 'years') {
+                const g = negBuilderBody.querySelector('#neg-range-guaranteedYears');
+                if (g) {
+                    g.max = String(Math.max(1, neg.draft.years || 1));
+                    if (Number(g.value) > Number(g.max)) {
+                        g.value = g.max;
+                        neg.draft.guaranteedYears = Number(g.max);
+                        const gv = negBuilderBody.querySelector('#neg-val-guaranteedYears');
+                        if (gv) gv.textContent = formatContractYears(Number(g.max));
+                    }
+                    g.style.setProperty('--fill', ((Number(g.value) / Number(g.max)) * 100).toFixed(1) + '%');
+                }
+            }
+            const valEl = negBuilderBody.querySelector(`#neg-val-${key}`);
+            if (valEl && spec) valEl.textContent = formatNegotiationSliderValue(spec, raw);
+            updateBuilderCommissionTotal();
+        });
+    });
+
+    // Итоговая комиссия агента за год — под ползунками.
+    negBuilderBody.insertAdjacentHTML('beforeend', `<div class="neg-builder-total" id="neg-builder-total"></div>`);
+    updateBuilderCommissionTotal();
+
+    // Кнопка «Сделать предложение» активна только в фазе конструктора.
+    negBuilderActions.innerHTML = '';
+    if (!neg.finished && neg.phase === 'builder') {
+        const submitBtn = document.createElement('button');
+        submitBtn.className = 'neg-submit-btn';
+        submitBtn.innerHTML = `📨 ${LANG.t('Сделать предложение')}`;
+        submitBtn.addEventListener('click', () => submitNegotiationOffer(player));
+        negBuilderActions.appendChild(submitBtn);
+    } else if (!neg.finished && neg.phase === 'response') {
+        const hint = document.createElement('div');
+        hint.className = 'neg-builder-hint';
+        hint.textContent = LANG.t('Клуб ответил. Выберите действие справа');
+        negBuilderActions.appendChild(hint);
+    }
+}
+
+function updateBuilderCommissionTotal() {
+    const neg = activeNegotiation;
+    const el = document.getElementById('neg-builder-total');
+    if (!neg || !el) return;
+    const rate = getOfferCommissionRate(neg.draft);
+    const annual = Math.round((neg.draft.newSalary || 0) * 1000 * rate);
+    el.innerHTML = `<span>💼 ${LANG.t('Комиссия агента')}</span><b>${formatMoney(annual)} / ${LANG.t('год')} (${Math.round(rate * 100)}%)</b>`;
+}
+
+// Отправка собранного пакета: клуб оценивает и отвечает текстом + контр-оффером.
+function submitNegotiationOffer(player) {
+    const neg = activeNegotiation;
+    if (!neg || neg.finished || neg.phase !== 'builder') return;
+    const pkg = normalizeOfferContract({ ...neg.draft });
+    resolveDialogueRound(player, neg, pkg, 'offer');
+    // Контр-оффер автоматически подставляется в ползунки.
+    if (neg.counterOffer) neg.draft = normalizeOfferContract({ ...neg.counterOffer });
+    finishDialogueUiUpdate(player);
+}
+
+// Надавить: попытка выбить больше; при терпении < 20% клуб выходит.
+function pressNegotiation(player) {
     const neg = activeNegotiation;
     if (!neg || neg.finished) return;
-    const o = neg.offer;
-    phoneInputBar.innerHTML = '';
-
-    const moneyBtn = document.createElement('button');
-    moneyBtn.className = 'phone-btn-trade';
-    moneyBtn.textContent = `💰 ${LANG.t('Просить больше денег')}`;
-    moneyBtn.addEventListener('click', () => resolveNegotiationRound(player, 'money'));
-    phoneInputBar.appendChild(moneyBtn);
-
-    const yearsBtn = document.createElement('button');
-    yearsBtn.className = 'phone-btn-trade';
-    yearsBtn.textContent = `📅 ${LANG.t('Просить больше лет')}`;
-    yearsBtn.disabled = o.years >= 6;
-    yearsBtn.addEventListener('click', () => resolveNegotiationRound(player, 'years'));
-    phoneInputBar.appendChild(yearsBtn);
-
-    const bonusBtn = document.createElement('button');
-    bonusBtn.className = 'phone-btn-trade';
-    bonusBtn.textContent = `🎁 ${LANG.t('Просить бонус')}`;
-    bonusBtn.disabled = !!o.signingBonus;
-    bonusBtn.addEventListener('click', () => resolveNegotiationRound(player, 'bonus'));
-    phoneInputBar.appendChild(bonusBtn);
-
-    const backBtn = document.createElement('button');
-    backBtn.className = 'phone-btn-close';
-    backBtn.textContent = LANG.t('Назад');
-    backBtn.addEventListener('click', () => renderPhoneActions(player));
-    phoneInputBar.appendChild(backBtn);
+    resolveDialogueRound(player, neg, null, 'press');
+    if (neg.counterOffer) neg.draft = normalizeOfferContract({ ...neg.counterOffer });
+    finishDialogueUiUpdate(player);
 }
 
-// Шанс успеха торга: переговорщик + репутация + лояльность игрока
+// Скорректировать: возврат к ползункам (небольшая цена терпения).
+function adjustNegotiation(player) {
+    const neg = activeNegotiation;
+    if (!neg || neg.finished) return;
+    resolveDialogueRound(player, neg, null, 'adjust');
+    finishDialogueUiUpdate(player);
+}
+
+function finishDialogueUiUpdate(player) {
+    const neg = activeNegotiation;
+    if (!neg) return;
+    // Сессия сохраняется всегда (включая ультиматум), чтобы диалог продолжался после закрытия.
+    saveNegotiationSession(neg);
+    appendNewMessages();
+    saveGame();
+    if (neg.finished) renderPlayerScreen();
+}
+
+// Шкалы Interest/Patience в стиле NEON RINK (цвет зависит от значения).
+function buildNegotiationGaugesHTML(player, neg) {
+    const gauges = getNegotiationGauges(neg);
+    const insight = getNegotiationInsight(player, neg.offer);
+    // На низком уровне агента точный интерес скрыт — виден только цвет шкалы.
+    const interestLabel = insight.interestKnown ? `${gauges.interest}%` : '???';
+    const gauge = (label, value, tone, display) => `
+        <div class="neg-gauge neg-gauge-${tone}">
+            <div class="neg-gauge-head"><span>${label}</span><b>${display}</b></div>
+            <div class="neg-gauge-track"><i style="width:${value}%"></i></div>
+        </div>`;
+    return gauge(`🎯 ${LANG.t('Интерес к игроку')}`, gauges.interest, gauges.interestTone, interestLabel)
+        + gauge(`⏳ ${LANG.t('Терпение')}`, gauges.patience, gauges.patienceTone, `${gauges.patience}%`);
+}
+
+function renderNegotiationGauges(player) {
+    if (!negGauges || !activeNegotiation) return;
+    negGauges.innerHTML = buildNegotiationGaugesHTML(player, activeNegotiation);
+}
+
+// Шанс успеха торга: переговорщик + репутация + лояльность игрока + уровень агента
 function getNegotiationSuccessChance(player, kind) {
     let chance = 0.30; // базовый шанс
     chance += getTradeBonus();                       // upgrades.negotiator (до +0.72)
     chance += Math.min(0.15, (getMyAgentReputation() - 10) * 0.005); // репутация
     chance += ((player.loyalty ?? 100) - 50) * 0.002; // лояльность игрока
-    if (kind === 'bonus') chance += 0.10;             // клубам проще дать разовый бонус
+    chance += Math.min(0.10, Math.max(0, (agentLevel - 1) * 0.01)); // опыт агента
+    const bonusKind = kind === 'goalBonus' || kind === 'assistBonus' || kind === 'cleanSheetBonus' || kind === 'savesBonus' || kind === 'gamesBonus';
+    if (bonusKind) chance += 0.06 + getBonusImportance(player, kind) * 0.08;
+    const motivation = getPlayerMotivation(player);
+    if (motivation === 'greed' && (kind === 'money' || kind === 'bonus' || bonusKind)) chance += 0.04;
+    if (motivation === 'loyalty' && (kind === 'years' || kind === 'guarantee')) chance += 0.06;
+    if (motivation === 'playtime' && kind === 'guarantee') chance += 0.04;
+    if (getPlayerPositionGroup(player) === 'G' && kind === 'guarantee') chance += 0.06;
     return Math.max(0.05, Math.min(0.90, chance));
 }
 
+// Совместимость: одиночное требование теперь проходит через диалоговый движок.
+// kind 'money' усиливает пакет перед отправкой, остальные — отправляют текущий черновик.
 function resolveNegotiationRound(player, kind) {
     const neg = activeNegotiation;
     if (!neg || neg.finished) return;
-    setSimulationSeed(matchSeed([agentName, agencyName, 'negotiation', currentSeason, currentWeek, player.name, kind, neg.roundsLeft]));
-    const o = neg.offer;
-    addAgentMsg(
-        kind === 'money' ? LANG.t('Просить больше денег') :
-        kind === 'years' ? LANG.t('Просить больше лет') :
-        LANG.t('Просить бонус')
-    );
-
-    neg.roundsLeft--;
-    neg.patience = Math.max(0, (neg.patience ?? 3) - 1); // каждое требование тратит 1 сердечко
-    const chance = getNegotiationSuccessChance(player, kind);
-
-    if (simRandom() < chance) {
-        // ===== Успех: клуб улучшает оффер (мутирует сохранённый оффер) =====
-        // Характер клуба: топ-клубы (80+) жадные, бедные (<60) сговорчивые
-        const greedy = neg.prestige >= 80;
-        const generous = neg.prestige < 60;
-        let msg;
-        if (kind === 'money') {
-            const cap = calculateSalaryCap(player.rating, neg.league);
-            // Топ-клубы: максимум +10-15%. Обычные: +10-25%. Бедные: +15-30% (если есть деньги)
-            let minRaise = generous ? 1.15 : 1.10;
-            let maxRaise = greedy ? 1.15 : generous ? 1.30 : 1.25;
-            const raised = Math.min(cap, Math.round(o.newSalary * (minRaise + simRandom() * (maxRaise - minRaise))));
-            o.newSalary = Math.max(o.newSalary + 1, raised); // торг никогда не понижает зарплату
-            o.salaryBoost = o.newSalary / Math.max(1, player.salary);
-            msg = `${LANG.t('Торг удался!')} ${LANG.t('Клуб улучшил зарплату до')} ${formatSalary(o.newSalary)}`;
-            if (greedy && o.newSalary >= Math.round(o.newSalary / (1 + (maxRaise - 1)) * maxRaise * 0.999)) {
-                addClubMsg(LANG.t('Это почти наш предел'), o);
-            }
-        } else if (kind === 'years') {
-            o.years = Math.min(6, o.years + 1);
-            msg = `${LANG.t('Торг удался!')} ${LANG.t('Клуб продлил срок до')} ${formatContractYears(o.years)}`;
-        } else {
-            const bonusMult = greedy ? (0.03 + simRandom() * 0.06) : generous ? (0.08 + simRandom() * 0.14) : (0.05 + simRandom() * 0.10);
-            o.signingBonus = Math.round(o.newSalary * 1000 * bonusMult);
-            msg = `${LANG.t('Торг удался!')} ${LANG.t('Клуб добавил подписной бонус')} ${formatMoney(o.signingBonus)}`;
-        }
-        addClubMsg(msg, o);
-        addNews(`🤝 ${LANG.t('Торг удался!')} ${neg.club}: ${player.name}`, "positive");
-    } else {
-        // ===== Провал: клуб отзывает ТОЛЬКО своё предложение =====
-        const entry = getNegotiationEntry(player.name);
-        entry.offers = entry.offers.filter(x => x !== o && x.id !== o.id);
-        entry.walkedClubs[neg.clubKey] = true;
-        if (entry.offers.length === 0) entry.exhausted = true; // все отклонены
-        addClubMsg(LANG.t('Требования слишком высоки'), null);
-        addSystemMsg(LANG.t('Переговоры провалены. Клуб отозвал предложение.'), true);
-        endNegotiation(player, false, true, true); // keepOpen=true — модалка НЕ закрывается
-        return;
+    const pkg = normalizeOfferContract({ ...(neg.draft || neg.offer) });
+    const demand = evaluateNegotiationDemand(player, pkg, kind);
+    if (kind === 'money' && demand.proposedSalary) pkg.newSalary = demand.proposedSalary;
+    else if (kind === 'years' && demand.proposedYears) pkg.years = demand.proposedYears;
+    else if (kind === 'bonus' && demand.proposedSigningBonus !== undefined) pkg.signingBonus = demand.proposedSigningBonus;
+    else if (kind === 'guarantee' && demand.proposedGuaranteedYears !== undefined) pkg.guaranteedYears = demand.proposedGuaranteedYears;
+    else if (kind === 'gamesBonus' && demand.proposedGamesPlayedBonus !== undefined) pkg.gamesPlayedBonus = demand.proposedGamesPlayedBonus;
+    else {
+        const field = getBonusField(kind);
+        const proposedKey = 'proposed' + kind.charAt(0).toUpperCase() + kind.slice(1);
+        if (field && demand[proposedKey] !== undefined) pkg[field] = demand[proposedKey];
     }
-
-    // ===== Терпение кончилось: клуб ставит ультиматум и закрывает переговоры =====
-    if ((neg.patience ?? 0) <= 0) {
-        addClubMsg(LANG.t('Наши условия окончательны'), o);
-        addSystemMsg(LANG.t('Клуб больше не намерен торговаться'), true);
-        neg.finished = true; // оффер ОСТАЁТСЯ в списке — можно вернуться и принять позже
-        appendNewMessages();
-        renderPhoneActions(player);
-        phoneChatStatus.innerHTML = LANG.t('Переговоры завершены') + ' 🖤🖤🖤';
-        phoneChatStatus.classList.add('busy');
-        saveGame();
-        renderPlayerScreen();
-        return;
-    }
-    saveGame();
-    appendNewMessages();
-    renderPhoneActions(player);
+    neg.draft = pkg;
+    resolveDialogueRound(player, neg, pkg, 'offer');
+    if (neg.counterOffer) neg.draft = normalizeOfferContract({ ...neg.counterOffer });
+    finishDialogueUiUpdate(player);
 }
 
 /**
@@ -6258,10 +6924,10 @@ function endNegotiation(player, accepted, clubWalkedAway, keepOpen) {
     const neg = activeNegotiation;
     if (!neg) return;
     neg.finished = true;
+    if (clubWalkedAway) neg.walkedAway = true;
 
     if (keepOpen) {
-        // Модалка остаётся открытой: видно отказ, в статусе "провалены",
-        // кнопки Принять/Торговаться скрыты — остаётся только "Закрыть"
+        // Модалка остаётся открытой: видно отказ, кнопки действий скрыты — остаётся "Закрыть"
         appendNewMessages();
         renderPhoneActions(player);
         phoneChatStatus.textContent = LANG.t('Переговоры провалены');
@@ -6276,19 +6942,15 @@ function endNegotiation(player, accepted, clubWalkedAway, keepOpen) {
     renderPlayerScreen();
 }
 
-// Комиссия агента: 10% от ГОДОВОЙ зарплаты
-const COMMISSION_RATE = 0.10;
-
-function acceptNegotiation(player) {
+function acceptNegotiation(player, termsOverride) {
     const neg = activeNegotiation;
     if (!neg) return;
-    const o = neg.offer;
+    const o = normalizeOfferContract(termsOverride || neg.counterOffer || neg.offer);
 
     player.club = neg.club;
     player.league = neg.league;
-    player.salary = o.newSalary;
+    applyContractTerms(player, o);
     player.clubLoyalty = 50;
-    player.contractYears = o.years;
     player.lastTransferSeason = currentSeason;
     player.loyalty = Math.max(0, Math.min(100, (player.loyalty ?? 100) + 10));
 
@@ -6298,12 +6960,13 @@ function acceptNegotiation(player) {
         addNews(`🎁 ${LANG.t('Подписной бонус')}: +${formatMoney(o.signingBonus)}`, "positive");
     }
 
-    // Комиссия агента: 10% от годовой зарплаты, выплачивается 26 недель
-    const annualCommission = Math.round(o.newSalary * 1000 * COMMISSION_RATE);
+    // Комиссия агента: negotiated rate от годовой зарплаты, выплачивается 26 недель
+    const commissionRate = getOfferCommissionRate(o);
+    const annualCommission = Math.round(o.newSalary * 1000 * commissionRate);
     const weeklyAmount = Math.round(annualCommission / 26);
     activeCommissions.push({
         playerName: player.name, club: neg.club, league: neg.league,
-        weeklyAmount, weeksLeft: 26, totalWeeks: 26, newSalary: o.newSalary
+        weeklyAmount, weeksLeft: 26, totalWeeks: 26, newSalary: o.newSalary, commissionRate
     });
 
     // ВАЖНО: игрок ОСТАЁТСЯ в myRoster — агент продолжает вести дела клиента.
@@ -6313,7 +6976,7 @@ function acceptNegotiation(player) {
     delete transferOffers[player.name];
 
     careerCounters.transfersDone = (careerCounters.transfersDone || 0) + 1;
-    addNews(`🏒 ${player.name} ${LANG.t('переходит в')} ${neg.club}! ${LANG.t('Комиссия: {c} (10% от годовой зарплаты)').replace('{c}', formatMoney(annualCommission))}`, "positive");
+    addNews(`🏒 ${player.name} ${LANG.t('переходит в')} ${neg.club}! ${LANG.t('Комиссия: {c} ({p}% от годовой зарплаты)').replace('{c}', formatMoney(annualCommission)).replace('{p}', Math.round(commissionRate * 100))}`, "positive");
 
     neg.finished = true;
     addSystemMsg(LANG.t('Контракт подписан!'), false);
@@ -6346,9 +7009,8 @@ function signPlayerToMyClub(player, offer) {
 
     player.club = club.club;
     player.league = club.league;
-    player.salary = offer.newSalary;
+    applyContractTerms(player, offer);
     player.clubLoyalty = 70;
-    player.contractYears = offer.years;
     player.lastTransferSeason = currentSeason;
     player.loyalty = Math.max(0, Math.min(100, (player.loyalty ?? 100) + 15));
 
@@ -6577,7 +7239,7 @@ function renderPlayerTransfer(c, p) {
                     <div class="pt-offer-stats">
                         <span>📅 ${o.years} ${LANG.t('лет')}</span>
                         ${o.signingBonus ? `<span>🎁 ${formatMoney(o.signingBonus)}</span>` : ''}
-                        <span>💼 ${formatMoney(Math.round(o.newSalary * 1000 * COMMISSION_RATE))}</span>
+                        <span>💼 ${formatMoney(Math.round(o.newSalary * 1000 * getOfferCommissionRate(o)))}</span>
                     </div>
                 </div>
             `);
@@ -6900,7 +7562,7 @@ function buildCareerGraph(hist) {
         </g>`;
     }).join('');
     const up = data[data.length - 1].rating >= data[0].rating;
-    const color = up ? '#00ff88' : '#ffcc00';
+    const color = up ? '#c6ff00' : '#ffb300';
 
     return `
         <div class="career-graph">
@@ -7050,7 +7712,7 @@ function renderLeaderboard() {
         const ptsStr = pts(p) > 0 ? `${pts(p)} ${LANG.t('очк.')}` : `${(p.stats ? p.stats.gp || 0 : 0)} ${LANG.t('И')}`;
         row.innerHTML = `
             <div class="lb-place">${medalFor(i)}</div>
-            <div class="lb-avatar">${getPlayerAvatarSVG(p)}</div>
+            <div class="lb-avatar">${getPlayerAvatar(p)}</div>
             <div class="lb-info">
                 <div class="lb-name">${p.name} <span class="lb-pos">${p.position}</span>${myRoster.some(x => x.name === p.name) ? ` <span class="lb-mine-badge">⭐</span>` : ''}</div>
                 <div class="lb-club">${p.club ? `${getTeamLogoHTML(p.club, p.league)} ${p.club}` : '🕊️ ' + LANG.t('Свободный агент')}</div>
@@ -7174,7 +7836,7 @@ function openClubInfoModal(clubName, lk, parentScreenId) {
         const isMine = (p.agentId === -1);
         return `
             <div class="roster-row${isMine ? ' my-client' : ''}" data-club-player="${p.name}" style="cursor:pointer;">
-                <div class="rr-avatar">${getPlayerAvatarSVG(p)}</div>
+                <div class="rr-avatar">${getPlayerAvatar(p)}</div>
                 <div class="rr-info">
                     <div class="rr-name-line">
                         <span class="rr-pos-icon">${posIcon}</span>
@@ -7415,7 +8077,7 @@ function renderPCHOverview(c, data, lk) {
             <div class="pch-stadium-icon">🏟️</div>
             <div class="pch-stadium-info">
                 <div class="pch-stadium-name">${stadiumName}</div>
-                <div class="pch-stadium-cap">👥 ${capacity.toLocaleString()} ${LANG.t('мест')}</div>
+                <div class="pch-stadium-cap">👥 ${formatInt(capacity)} ${LANG.t('мест')}</div>
             </div>
         </div>
     `;
@@ -7433,7 +8095,7 @@ function renderPCHRoster(c, clubName, lk) {
         const isMine = p.agentId === -1;
         return `
             <div class="roster-row${isMine ? ' my-client' : ''}" data-pch-player="${p.name}" style="cursor:pointer;">
-                <div class="rr-avatar">${getPlayerAvatarSVG(p)}</div>
+                <div class="rr-avatar">${getPlayerAvatar(p)}</div>
                 <div class="rr-info">
                     <div class="rr-name-line">
                         <span class="rr-pos-icon">${posIcon}</span>
@@ -8146,12 +8808,9 @@ function openMatchView(match, lk) {
     const modal = document.getElementById('match-modal');
     if (modal) modal.style.display = 'none';
 
-    // Генерируем сценарий матча
+    // Детерминированный сценарий матча + свежий контроллер воспроизведения.
     matchViewState = buildMatchScript(match, lk);
-    matchViewState.visibleCount = 0;
-    matchViewState.isPlaying = false;
-    matchViewState.timer = null;
-    matchViewState.lastAnimatedIdx = 0;
+    matchPlayback.reset();
 
     document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
     const screen = document.getElementById('match-view-screen');
@@ -8168,371 +8827,679 @@ function openMatchView(match, lk) {
     renderMatchView();
 }
 
+// ============ СЦЕНАРИЙ МАТЧА: PLAY-BY-PLAY (NEON RINK) ============
+// Принципы:
+//  1) Вся случайность рождается ЗДЕСЬ и один раз — локальный seeded-RNG от matchSeed.
+//     Глобальный sim-RNG не сдвигается, поэтому детерминизм недели/сезона не страдает.
+//  2) Каждое событие хранит накопительный снимок счёта и статистики (`after`),
+//     так что рендер ничего не пересчитывает и цифры не «дрожат» между кадрами.
+//  3) `isClient` считается по множеству имён клиентов (O(1)), а не поиском подстроки в тексте.
+
+const MV_MINOR_EVENTS = 30;   // минорных событий в ленте (броски/сейвы/хиты/вбрасывания/удаления)
+const MV_DELAY = { start: 900, minor: 1300, goal: 2600, period: 1700, ot: 1500, end: 1400 };
+// Порядок внутри одной минуты: игровые события → голы → границы периодов → ОТ → финал.
+const MV_ORDER = { start: 0, faceoff: 1, shot: 1, save: 1, hit: 1, penalty: 1, goal: 2, period: 3, ot: 4, end: 5 };
+const MV_MINOR_TYPES = ['shot', 'shot', 'shot', 'save', 'save', 'hit', 'faceoff', 'penalty'];
+const MV_EMPTY_STATS = { shotsH: 0, shotsA: 0, savesH: 0, savesA: 0, hitsH: 0, hitsA: 0, faceoffsH: 0, faceoffsA: 0, pimH: 0, pimA: 0 };
+
+// Компактные inline-SVG иконки событий (без внешних картинок, красятся через currentColor).
+const MV_ICONS = {
+    start:   '<svg class="mv-ico" viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="9.4" rx="5.6" ry="2.6" fill="none" stroke="currentColor" stroke-width="1.2"/><ellipse cx="8" cy="8.2" rx="5.6" ry="2.6" fill="currentColor" opacity="0.4"/></svg>',
+    goal:    '<svg class="mv-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 12.5V4.5h12v8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2 12.5h12M5.5 4.5v8M8 4.5v8M10.5 4.5v8" stroke="currentColor" stroke-width="0.8" opacity="0.7"/><circle cx="8" cy="10.4" r="1.5" fill="currentColor"/></svg>',
+    shot:    '<svg class="mv-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 12.5 11 4" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/><path d="M7.5 3.2h5.2v5.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    save:    '<svg class="mv-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6 14 4v4.3c0 3.3-2.5 5.6-6 6.6-3.5-1-6-3.3-6-6.6V4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M5.6 8.1 7.3 9.8l3.2-3.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    hit:     '<svg class="mv-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 4.2 13.4 11.8M13.4 4.2 2.6 11.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    penalty: '<svg class="mv-ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.4" y="3.4" width="11.2" height="9.2" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M2.4 7h11.2" stroke="currentColor" stroke-width="1"/><path d="M6 10h4" stroke="currentColor" stroke-width="1" opacity="0.7"/></svg>',
+    faceoff: '<svg class="mv-ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="8" cy="8" r="1.7" fill="currentColor"/></svg>',
+    period:  '<svg class="mv-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 6.4a3.8 3.8 0 0 1 7.6 0c0 3.8 1.4 4.8 1.4 4.8H2.8s1.4-1 1.4-4.8z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6.6 13.2a1.5 1.5 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>',
+    ot:      '<svg class="mv-ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8.6" r="5.4" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 5.6v3.2l2.1 1.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    end:     '<svg class="mv-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.8v12.4M4 2.8h8.4l-2.2 3.1 2.2 3.1H4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>'
+};
+
+function mvPeriodOf(minute) { return minute <= 20 ? 1 : minute <= 40 ? 2 : 3; }
+
 function buildMatchScript(match, lk) {
     const r = match.result;
-    const dataH = clubData[lk + "_" + match.home];
-    const dataA = clubData[lk + "_" + match.away];
+    const dataH = clubData[lk + '_' + match.home];
     const homeCap = dataH ? getStadiumCapacity(dataH.upgrades.stadium || 1) : 5000;
-    const attendance = Math.round(homeCap * (0.75 + Math.random() * 0.22));
 
-    const events = [];
-    events.push({ minute: 0, period: 1, type: 'start', text: '🏒 ' + LANG.t('Матч начался!') });
+    // Локальный поток: те же входы → тот же сценарий. Глобальный sim-RNG не трогаем.
+    const rng = makeSeededRNG(matchSeed([
+        'mv', lk, match.home, match.away, match.week, currentSeason,
+        r.homeScore, r.awayScore, r.isOT ? 1 : 0, r.isSO ? 1 : 0
+    ]));
+    const ri = (min, max) => Math.floor(rng() * (max - min + 1)) + min;
+    const pick = (arr) => arr[Math.floor(rng() * arr.length)];
 
-    // Голы из результата
-    (r.goals || []).forEach(g => {
-        events.push({
-            minute: g.minute,
-            period: g.period,
-            type: 'goal',
-            scorer: g.scorer,
-            assists: g.assists,
-            team: g.team,
-            scoreHome: null, // посчитаем ниже
-            scoreAway: null,
-            text: null
-        });
-    });
+    const attendance = Math.round(homeCap * (0.75 + rng() * 0.22));
+    const clients = new Set(myRoster.map(p => p.name));
 
-    // Сортируем по минуте
-    events.sort((a, b) => a.minute - b.minute);
-
-    // Считаем счёт нарастающим итогом
-    let h = 0, a = 0;
-    events.forEach(e => {
-        if (e.type === 'goal') {
-            if (e.team === 'home') h++; else a++;
-            e.scoreHome = h;
-            e.scoreAway = a;
-            const teamName = e.team === 'home' ? match.home : match.away;
-            const assistStr = e.assists.length > 0 ? ` (${LANG.t('пас:')} ` + e.assists.join(', ') + ')' : '';
-            e.text = `<b>${LANG.t('ГОЛ!')}</b> ${e.scorer} (${teamName})${assistStr} — <b>${h}:${a}</b>`;
+    // Пул имён. Для клубных матчей — состав из players[]; для сборных club-фильтр пуст,
+    // поэтому берём имена из уже посчитанного результата.
+    const namePool = (club, team) => {
+        const sk = [];
+        for (let i = 0; i < players.length; i++) {
+            const p = players[i];
+            if (p.club === club && p.league === lk && p.position !== 'G') sk.push(p.name);
         }
+        if (sk.length) return sk;
+        const fromResult = [];
+        (r.goals || []).forEach(g => {
+            if (g.team !== team) return;
+            fromResult.push(g.scorer);
+            (g.assists || []).forEach(a => fromResult.push(a));
+        });
+        (r.playerRatings || []).forEach(x => fromResult.push(x.name));
+        const uniq = [...new Set(fromResult.filter(Boolean))];
+        return uniq.length ? uniq : [team === 'home' ? match.home : match.away];
+    };
+    const goalieName = (club) => {
+        for (let i = 0; i < players.length; i++) {
+            const p = players[i];
+            if (p.club === club && p.league === lk && p.position === 'G') return p.name;
+        }
+        return null;
+    };
+    const poolH = namePool(match.home, 'home');
+    const poolA = namePool(match.away, 'away');
+    const goalieH = goalieName(match.home);
+    const goalieA = goalieName(match.away);
+
+    const raw = [];
+    let seq = 0;
+    const push = (e) => { e.id = ++seq; raw.push(e); };
+
+    push({ minute: 0, period: 1, type: 'start', team: null, actor: null, assists: [], delta: null });
+
+    // --- минорные события: равномерный «шум» матча по всем 60 минутам ---
+    for (let i = 0; i < MV_MINOR_EVENTS; i++) {
+        const minute = ri(1, 60);
+        const team = rng() < 0.5 ? 'home' : 'away';
+        const type = pick(MV_MINOR_TYPES);
+        const sfx = team === 'home' ? 'H' : 'A';
+        const otherSfx = team === 'home' ? 'A' : 'H';
+        const pool = team === 'home' ? poolH : poolA;
+        let actor = pick(pool);
+        const delta = {};
+        let dv = 0;
+        if (type === 'shot') {
+            dv = ri(1, 2);
+            delta['shots' + sfx] = dv;
+        } else if (type === 'save') {
+            // Сейв делает вратарь команды, по воротам которой бросали.
+            dv = ri(1, 2);
+            delta['saves' + otherSfx] = dv;
+            actor = (team === 'home' ? goalieA : goalieH) || actor;
+        } else if (type === 'hit') {
+            dv = ri(1, 2);
+            delta['hits' + sfx] = dv;
+        } else if (type === 'faceoff') {
+            dv = ri(2, 4);
+            delta['faceoffs' + sfx] = dv;
+        } else if (type === 'penalty') {
+            dv = rng() < 0.25 ? 4 : 2;
+            delta['pim' + sfx] = dv;
+        }
+        push({ minute, period: mvPeriodOf(minute), type, team, actor, assists: [], delta, dv });
+    }
+
+    // --- голы берутся из уже посчитанного результата (симуляция не меняется) ---
+    (r.goals || []).forEach(g => {
+        push({ minute: g.minute, period: g.period || mvPeriodOf(g.minute), type: 'goal', team: g.team, actor: g.scorer, assists: g.assists || [], delta: null });
     });
 
-    // Добавляем концы периодов
-    const p1End = { minute: 20, period: 1, type: 'period', text: '🔔 ' + LANG.t('Конец 1-го периода') };
-    const p2End = { minute: 40, period: 2, type: 'period', text: '🔔 ' + LANG.t('Конец 2-го периода') };
-    const p3End = { minute: 60, period: 3, type: 'period', text: '🏁 ' + LANG.t('Матч завершён!') };
+    // --- границы периодов, овертайм/буллиты, финальная сирена ---
+    push({ minute: 20, period: 1, type: 'period', team: null, actor: null, assists: [], delta: null, label: 1 });
+    push({ minute: 40, period: 2, type: 'period', team: null, actor: null, assists: [], delta: null, label: 2 });
+    push({ minute: 60, period: 3, type: 'period', team: null, actor: null, assists: [], delta: null, label: 3 });
+    if (r.isOT) push({ minute: 60, period: 3, type: 'ot', team: null, actor: null, assists: [], delta: null, label: 'ot' });
+    if (r.isSO) push({ minute: 60, period: 3, type: 'ot', team: null, actor: null, assists: [], delta: null, label: 'so' });
+    push({ minute: 60, period: 3, type: 'end', team: null, actor: null, assists: [], delta: null });
 
-    // Расставляем периоды по своим местам
-    const allEvents = [];
-    events.forEach(e => {
-        if (e.minute <= 20) allEvents.push(e);
+    // Стабильная сортировка: минута → тип → порядок генерации.
+    raw.sort((a, b) => (a.minute - b.minute)
+        || ((MV_ORDER[a.type] === undefined ? 9 : MV_ORDER[a.type]) - (MV_ORDER[b.type] === undefined ? 9 : MV_ORDER[b.type]))
+        || (a.id - b.id));
+
+    // Накопительные итоги: гол считает и бросок, минорные события добавляют свои дельты.
+    const acc = { h: 0, a: 0, ...MV_EMPTY_STATS };
+    const events = raw.map(e => {
+        if (e.type === 'goal') {
+            if (e.team === 'home') { acc.h++; acc.shotsH++; } else { acc.a++; acc.shotsA++; }
+        }
+        if (e.delta) { for (const k of Object.keys(e.delta)) acc[k] += e.delta[k]; }
+        const actorIsClient = !!e.actor && clients.has(e.actor);
+        const assistIsClient = (e.assists || []).some(n => clients.has(n));
+        return {
+            id: e.id, minute: e.minute, period: e.period, type: e.type, team: e.team,
+            actor: e.actor, assists: e.assists || [], label: e.label, dv: e.dv || 0,
+            scoreHome: acc.h, scoreAway: acc.a,
+            after: { ...acc },
+            isClient: actorIsClient || assistIsClient,
+            delay: MV_DELAY[e.type] || MV_DELAY.minor
+        };
     });
-    allEvents.push(p1End);
-    events.forEach(e => {
-        if (e.minute > 20 && e.minute <= 40) allEvents.push(e);
-    });
-    allEvents.push(p2End);
-    events.forEach(e => {
-        if (e.minute > 40) allEvents.push(e);
-    });
-    allEvents.push(p3End);
+
+    const totals = { ...MV_EMPTY_STATS };
+    Object.keys(totals).forEach(k => { totals[k] = acc[k]; });
 
     return {
-        match, lk,
-        events: allEvents,
+        match, lk, events, totals,
         homeScore: r.homeScore,
         awayScore: r.awayScore,
-        isOT: r.isOT,
-        isSO: r.isSO,
+        isOT: !!r.isOT,
+        isSO: !!r.isSO,
         attendance,
+        clients,
+        clientName: mvPickClientName(events, clients),
+        mounted: false,
+        renderedCount: 0,
         rink: true
     };
 }
 
+// Первый клиент агента, который реально участвует в этом матче.
+function mvPickClientName(events, clients) {
+    if (!clients || clients.size === 0) return null;
+    for (let i = 0; i < events.length; i++) {
+        const e = events[i];
+        if (e.actor && clients.has(e.actor)) return e.actor;
+        const a = (e.assists || []).find(n => clients.has(n));
+        if (a) return a;
+    }
+    return null;
+}
+
+// ============ ТЕКСТ И СТРОКА ЛЕНТЫ (i18n на рендере, не в сценарии) ============
+function mvEventText(st, e) {
+    const t = (k) => LANG.t(k);
+    switch (e.type) {
+        case 'start':
+            return t('Матч начался!');
+        case 'goal': {
+            const teamName = e.team === 'home' ? st.match.home : st.match.away;
+            const assistStr = e.assists.length ? ` (${t('пас:')} ${e.assists.join(', ')})` : '';
+            return `<b>${t('ГОЛ!')}</b> ${e.actor} (${teamName})${assistStr} — <b>${e.scoreHome}:${e.scoreAway}</b>`;
+        }
+        case 'shot':     return `${t('Бросок по воротам')} — ${e.actor}`;
+        case 'save':     return `${t('Сейв')} — ${e.actor}`;
+        case 'hit':      return `${t('Силовой приём')} — ${e.actor}`;
+        case 'faceoff':  return `${t('Вбрасывание выиграл')} ${e.actor}`;
+        case 'penalty':
+            return `${t('Удаление')} ${e.dv || 2} ${t('мин')} — ${e.actor}`;
+        case 'period':   return t('Конец ' + e.label + '-го периода');
+        case 'ot':       return e.label === 'so' ? t('Серия буллитов') : t('Овертайм');
+        case 'end':      return t('Матч завершён!');
+        default:         return '';
+    }
+}
+
+function mvEventRow(st, e) {
+    const cls = ['mv-event'];
+    if (e.type === 'goal') cls.push('mv-event-goal');
+    else if (e.type === 'period' || e.type === 'ot' || e.type === 'end') cls.push('mv-event-period');
+    else if (e.type === 'start') cls.push('mv-event-start');
+    else cls.push('mv-event-minor');
+    if (e.isClient) cls.push('mv-event-client');
+    const badge = e.isClient ? `<span class="mv-my-client-badge">★ ${LANG.t('Мой клиент')}</span>` : '';
+    const time = e.type === 'start' ? '00\'' : String(e.minute).padStart(2, '0') + '\'';
+    return `<div class="${cls.join(' ')}" id="mv-ev-${e.id}">
+        <span class="mv-ev-time">${time}</span>
+        <span class="mv-ev-icon">${MV_ICONS[e.type] || MV_ICONS.start}</span>
+        <span class="mv-ev-text">${mvEventText(st, e)}${badge}</span>
+    </div>`;
+}
+
+// ============ КОНТРОЛЛЕР ВОСПРОИЗВЕДЕНИЯ (чистая логика, DOM не трогает) ============
+const matchPlayback = {
+    idx: 0,          // сколько событий уже «показано»
+    playing: false,
+    speed: 1,        // 1 | 2
+    timer: null,
+    _tick: null,
+
+    reset() { this.clearTimer(); this.idx = 0; this.playing = false; this.speed = 1; this._tick = null; },
+    clearTimer() { if (this.timer) { clearTimeout(this.timer); this.timer = null; } },
+    total() { return matchViewState ? matchViewState.events.length : 0; },
+    isFinished() { return !!matchViewState && this.idx >= matchViewState.events.length; },
+
+    // Задержка зависит от важности события и текущей скорости.
+    delayFor() {
+        const st = matchViewState;
+        if (!st || st.events.length === 0) return MV_DELAY.minor;
+        const ev = st.events[Math.max(0, Math.min(this.idx, st.events.length - 1))];
+        const base = ev && ev.delay ? ev.delay : MV_DELAY.minor;
+        return Math.max(200, Math.round(base / this.speed));
+    },
+
+    // Один шаг вперёд. Возвращает false, если показывать больше нечего.
+    stepOnce() {
+        if (!matchViewState) return false;
+        if (this.idx >= matchViewState.events.length) return false;
+        this.idx++;
+        return true;
+    },
+
+    play() {
+        if (!matchViewState || this.playing) return;
+        this.playing = true;
+        const tick = () => {
+            this.timer = null;
+            if (!matchViewState || !this.playing) return;
+            if (!this.stepOnce()) { this.playing = false; this.clearTimer(); mvAfterFinish(false); return; }
+            mvSyncAll(false);
+            this.timer = setTimeout(tick, this.delayFor());
+        };
+        this._tick = tick;
+        if (this.idx === 0) this.stepOnce();
+        mvSyncAll(false);
+        if (this.isFinished()) { this.playing = false; this.clearTimer(); mvAfterFinish(false); return; }
+        this.timer = setTimeout(tick, this.delayFor());
+    },
+
+    pause() {
+        if (!matchViewState || !this.playing) return;
+        this.playing = false;
+        this.clearTimer();
+        mvSyncAll(true);
+    },
+
+    toggleSpeed() {
+        this.speed = this.speed === 1 ? 2 : 1;
+        // На воспроизведении — переставляем таймер под новую скорость.
+        if (this.playing && this._tick) {
+            this.clearTimer();
+            this.timer = setTimeout(this._tick, this.delayFor());
+        }
+        mvSyncAll(true);
+    },
+
+    skip() {
+        if (!matchViewState) return;
+        this.playing = false;
+        this.clearTimer();
+        this.idx = matchViewState.events.length;
+        mvAfterFinish(true);
+    },
+
+    stepBack() {
+        if (!matchViewState || this.idx === 0) return;
+        this.playing = false;
+        this.clearTimer();
+        this.idx--;
+        mvSyncAll(true);
+    }
+};
+
+function mvAfterFinish(silent) {
+    if (matchViewState && matchViewState.match) matchViewState.match.viewed = true;
+    mvSyncAll(!!silent);
+}
+
+// ============ РЕНДЕР: скелет один раз, события дописываются инкрементально ============
 function renderMatchView() {
     const c = document.getElementById('mv-content');
     if (!c || !matchViewState) return;
+    if (!matchViewState.mounted) mvMountSkeleton(c);
+    mvSyncAll(true);
+}
+
+// Пересборка скелета (нужна при смене языка: статические подписи baked в HTML).
+function mvRemount() {
+    if (!matchViewState) return;
+    matchViewState.mounted = false;
+    matchViewState.renderedCount = 0;
+    renderMatchView();
+}
+
+function mvMountSkeleton(c) {
     const st = matchViewState;
     const m = st.match;
     const r = m.result;
 
-    // Текущее состояние (по видимым событиям)
-    let curH = 0, curA = 0, curPeriod = 1, curTime = 0;
-    const visible = st.events.slice(0, st.visibleCount);
-    visible.forEach(e => {
-        if (e.type === 'goal') {
-            if (e.team === 'home') curH++; else curA++;
-        }
-        if (e.type === 'period') {
-            curPeriod = Math.min(3, e.period + 1);
-            curTime = e.period * 20;
-        } else {
-            curTime = e.minute;
-        }
-    });
-    if (st.visibleCount >= st.events.length) {
-        curH = st.homeScore;
-        curA = st.awayScore;
-        curPeriod = 3;
-        curTime = 60;
-    }
-    const isFinished = st.visibleCount >= st.events.length;
-
-    // Формат времени
-    const minuteStr = String(Math.min(20, Math.floor(curTime) - (curPeriod - 1) * 20)).padStart(2, '0');
-    const timeStr = minuteStr + ':00';
-
-    // Прогресс статистики (броски и владение растут)
-    const progress = Math.min(1, st.visibleCount / Math.max(1, st.events.length));
-    const totalShotsH = 20 + Math.floor(Math.random() * 15) + st.homeScore * 2;
-    const totalShotsA = 20 + Math.floor(Math.random() * 15) + st.awayScore * 2;
-    const curShotsH = Math.round(totalShotsH * progress);
-    const curShotsA = Math.round(totalShotsA * progress);
-    const totalShots = curShotsH + curShotsA;
-    const possH = totalShots > 0 ? Math.round((curShotsH / totalShots) * 100) : 50;
-    const possA = 100 - possH;
-    const pimH = Math.round(Math.min(12, progress * 10) + (Math.random() * 2));
-    const pimA = Math.round(Math.min(12, progress * 10) + (Math.random() * 2));
-
-    // События — показываем только видимые, от последнего к первому
-    const eventRows = visible.slice().reverse().map(e => {
-        const cls = e.type === 'goal' ? 'mv-event-goal' : e.type === 'period' ? 'mv-event-period' : 'mv-event-start';
-        const icon = e.type === 'goal' ? '⚽' : e.type === 'period' ? '🔔' : '🏒';
-        // Ярлык "Мой клиент", если автор события — наш клиент
-        const author = myRoster.find(p => e.text && e.text.includes(p.name));
-        const badge = author ? ` <span class="mv-my-client-badge">⭐ ${LANG.t('Мой клиент')}</span>` : '';
-        return `<div class="mv-event ${cls}">
-            <span class="mv-ev-time">${e.minute}'</span>
-            <span class="mv-ev-icon">${icon}</span>
-            <span class="mv-ev-text">${e.text}${badge}</span>
-        </div>`;
-    }).join('');
-
-    // Кнопки
-    let controlsHTML = '';
-    if (!isFinished) {
-        if (st.isPlaying) {
-            controlsHTML = `
-                <button class="mv-btn mv-btn-pause" id="mv-pause">⏸ ${LANG.t('Пауза')}</button>
-                <button class="mv-btn mv-btn-skip" id="mv-skip">⏩ ${LANG.t('Пропустить')}</button>
-            `;
-        } else if (st.visibleCount === 0) {
-            controlsHTML = `
-                <button class="mv-btn mv-btn-play" id="mv-play">▶ ${LANG.t('Начать матч')}</button>
-                <button class="mv-btn mv-btn-skip" id="mv-skip">⏩ ${LANG.t('Пропустить')}</button>
-            `;
-        } else {
-            controlsHTML = `
-                <button class="mv-btn mv-btn-play" id="mv-play">▶ ${LANG.t('Продолжить')}</button>
-                <button class="mv-btn mv-btn-skip" id="mv-skip">⏩ ${LANG.t('Пропустить')}</button>
-            `;
-        }
-    } else {
-        controlsHTML = `
-            <button class="mv-btn mv-btn-skip" id="mv-close">✕ ${LANG.t('Закрыть')}</button>
-        `;
-    }
-
-    // Финальные блоки
-    let finalHTML = '';
-    if (isFinished) {
-        const isMyClient = (name) => myRoster.some(p => p.name === name);
-        // Оценки
-        const ratings = (r.playerRatings || []).map((p, i) => {
-            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
-            const mine = isMyClient(p.name);
-            const pts = p.goals + p.assists;
-            const ptsStr = pts > 0 ? ` • ${p.goals}+${p.assists}` : '';
-            const rtClass = p.rating >= 8 ? 'rt-high' : p.rating >= 6.5 ? 'rt-mid' : 'rt-low';
-            return `<div class="match-rating-row ${mine ? 'my-client' : ''}">
-                <span class="mr-medal">${medal}</span>
-                <span class="mr-name">${p.name}</span>
-                <span class="mr-pts">${ptsStr}</span>
-                <span class="mr-rating ${rtClass}">${p.rating.toFixed(1)}</span>
-            </div>`;
-        }).join('');
-
-        finalHTML = `
-            <div class="mv-final-section">
-                <div class="mv-final-title">📊 ${LANG.t('Оценки игроков')}</div>
-                <div class="match-ratings">${ratings || '<div class="match-empty">—</div>'}</div>
+    const seriesHTML = r.seriesInfo ? `<div class="mv-series-block">
+        <div class="mvs-title">🎯 ${LANG.t('Счёт в серии')} • ${getRoundShortName(r.seriesInfo.roundNum, r.seriesInfo.totalRounds)}</div>
+        <div class="mvs-row">
+            <div class="mvs-team">
+                <div class="mvs-logo">${getTeamLogoHTML(r.seriesInfo.teamA, st.lk)}</div>
+                <span class="mvs-name">${r.seriesInfo.teamA}</span>
             </div>
-        `;
-    }
-
-    const finalScoreH = isFinished ? st.homeScore : curH;
-    const finalScoreA = isFinished ? st.awayScore : curA;
+            <div class="mvs-score-big">
+                <span class="${r.seriesInfo.winsA > r.seriesInfo.winsB ? 'w' : ''}">${r.seriesInfo.winsA}</span>
+                <span class="mvs-sep">:</span>
+                <span class="${r.seriesInfo.winsB > r.seriesInfo.winsA ? 'w' : ''}">${r.seriesInfo.winsB}</span>
+            </div>
+            <div class="mvs-team mvs-team-right">
+                <span class="mvs-name">${r.seriesInfo.teamB}</span>
+                <div class="mvs-logo">${getTeamLogoHTML(r.seriesInfo.teamB, st.lk)}</div>
+            </div>
+        </div>
+        <div class="mvs-progress">${LANG.t('До')} ${r.seriesInfo.maxWins} ${LANG.t('побед в серии')}</div>
+    </div>` : '';
 
     c.innerHTML = `
-        <div class="mv-scoreboard">
+        <div class="mv-scoreboard" id="mv-scoreboard">
             <div class="mv-period-line">
-                <span class="mv-period-label">${isFinished ? '🏁 ' + LANG.t('Финал') : curPeriod + '-' + LANG.t('й период')}</span>
-                <span class="mv-time">${isFinished ? 'FIN' : timeStr}</span>
+                <span class="mv-period-label" id="mv-period-label">—</span>
+                <span class="mv-time" id="mv-time">00:00</span>
+                <span class="mv-live" id="mv-live" style="display:none;">● LIVE</span>
             </div>
             <div class="mv-score-line">
-                <span class="mv-score-num ${finalScoreH > finalScoreA ? 'active' : ''}">${finalScoreH}</span>
+                <span class="mv-score-num" id="mv-score-h">0</span>
                 <span class="mv-score-sep">:</span>
-                <span class="mv-score-num ${finalScoreA > finalScoreH ? 'active' : ''}">${finalScoreA}</span>
+                <span class="mv-score-num" id="mv-score-a">0</span>
             </div>
             <div class="mv-team-line">
                 <div class="mv-team">${m.isNational ? `<span class="mv-flag">${m.homeFlag || '🏒'}</span>` : getTeamLogoHTML(m.home, st.lk)}<span>${m.home}</span></div>
-                <div class="mv-arena-badge">👥 ${st.attendance.toLocaleString()}</div>
+                <div class="mv-arena-badge">👥 ${formatInt(st.attendance)}</div>
                 <div class="mv-team right"><span>${m.away}</span>${m.isNational ? `<span class="mv-flag">${m.awayFlag || '🏒'}</span>` : getTeamLogoHTML(m.away, st.lk)}</div>
             </div>
             <div class="mv-meta">${getLeagueName(st.lk)} • ${LANG.t('Неделя')} ${m.week}${m.isPlayoff ? ' • 🏆 ' + LANG.t('ПЛЕЙ-ОФФ') : ''}</div>
         </div>
 
-        ${r.seriesInfo ? `<div class="mv-series-block">
-            <div class="mvs-title">🎯 Счёт в серии • ${getRoundShortName(r.seriesInfo.roundNum, r.seriesInfo.totalRounds)}</div>
-            <div class="mvs-row">
-                <div class="mvs-team">
-                    <div class="mvs-logo">${getTeamLogoHTML(r.seriesInfo.teamA, st.lk)}</div>
-                    <span class="mvs-name">${r.seriesInfo.teamA}</span>
-                </div>
-                <div class="mvs-score-big">
-                    <span class="${r.seriesInfo.winsA > r.seriesInfo.winsB ? 'w' : ''}">${r.seriesInfo.winsA}</span>
-                    <span class="mvs-sep">:</span>
-                    <span class="${r.seriesInfo.winsB > r.seriesInfo.winsA ? 'w' : ''}">${r.seriesInfo.winsB}</span>
-                </div>
-                <div class="mvs-team mvs-team-right">
-                    <span class="mvs-name">${r.seriesInfo.teamB}</span>
-                    <div class="mvs-logo">${getTeamLogoHTML(r.seriesInfo.teamB, st.lk)}</div>
-                </div>
-            </div>
-            <div class="mvs-progress">${LANG.t('До')} ${r.seriesInfo.maxWins} ${LANG.t('побед в серии')}</div>
-        </div>` : ''}
+        ${seriesHTML}
+
+        <div class="mv-client-line" id="mv-client-line" style="display:none;"></div>
 
         <div class="mv-rink-wrap">
-            <svg class="mv-rink" viewBox="0 0 300 160" preserveAspectRatio="xMidYMid meet">
+            <svg class="mv-rink" viewBox="0 0 300 160" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
                 <defs>
-                    <linearGradient id="rinkBg" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stop-color="#e8f4f8" stop-opacity="0.9"/>
-                        <stop offset="100%" stop-color="#c8e0ea" stop-opacity="0.7"/>
+                    <linearGradient id="mvRinkIce" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#0d1a26"/>
+                        <stop offset="100%" stop-color="#05070c"/>
                     </linearGradient>
                 </defs>
-                <rect x="10" y="10" width="280" height="140" rx="50" fill="url(#rinkBg)" stroke="#8ab0c0" stroke-width="1.5"/>
-                <line x1="150" y1="10" x2="150" y2="150" stroke="#ff4444" stroke-width="1.5" opacity="0.6"/>
-                <circle cx="150" cy="80" r="22" fill="none" stroke="#4488cc" stroke-width="1.5" opacity="0.6"/>
-                <circle cx="150" cy="80" r="3" fill="#4488cc" opacity="0.8"/>
-                <line x1="60" y1="10" x2="60" y2="150" stroke="#4488cc" stroke-width="1.2" opacity="0.5"/>
-                <line x1="240" y1="10" x2="240" y2="150" stroke="#4488cc" stroke-width="1.2" opacity="0.5"/>
-                <circle cx="60" cy="45" r="14" fill="none" stroke="#ff4444" stroke-width="1.2" opacity="0.5"/>
-                <circle cx="60" cy="115" r="14" fill="none" stroke="#ff4444" stroke-width="1.2" opacity="0.5"/>
-                <circle cx="240" cy="45" r="14" fill="none" stroke="#ff4444" stroke-width="1.2" opacity="0.5"/>
-                <circle cx="240" cy="115" r="14" fill="none" stroke="#ff4444" stroke-width="1.2" opacity="0.5"/>
-                <rect x="10" y="60" width="6" height="40" fill="none" stroke="#4488cc" stroke-width="1.2" opacity="0.7"/>
-                <rect x="284" y="60" width="6" height="40" fill="none" stroke="#4488cc" stroke-width="1.2" opacity="0.7"/>
+                <rect x="10" y="10" width="280" height="140" rx="50" fill="url(#mvRinkIce)" stroke="#00e5ff" stroke-width="1.4" opacity="0.95"/>
+                <line x1="150" y1="10" x2="150" y2="150" stroke="#ff2e55" stroke-width="1.6" opacity="0.55"/>
+                <circle cx="150" cy="80" r="22" fill="none" stroke="#00e5ff" stroke-width="1.3" opacity="0.55"/>
+                <circle cx="150" cy="80" r="3" fill="#00e5ff" opacity="0.8"/>
+                <line x1="60" y1="10" x2="60" y2="150" stroke="#00e5ff" stroke-width="1.1" opacity="0.4"/>
+                <line x1="240" y1="10" x2="240" y2="150" stroke="#00e5ff" stroke-width="1.1" opacity="0.4"/>
+                <circle cx="60" cy="45" r="14" fill="none" stroke="#ff2e55" stroke-width="1.1" opacity="0.45"/>
+                <circle cx="60" cy="115" r="14" fill="none" stroke="#ff2e55" stroke-width="1.1" opacity="0.45"/>
+                <circle cx="240" cy="45" r="14" fill="none" stroke="#ff2e55" stroke-width="1.1" opacity="0.45"/>
+                <circle cx="240" cy="115" r="14" fill="none" stroke="#ff2e55" stroke-width="1.1" opacity="0.45"/>
+                <rect x="10" y="60" width="6" height="40" fill="none" stroke="#c6ff00" stroke-width="1.2" opacity="0.6"/>
+                <rect x="284" y="60" width="6" height="40" fill="none" stroke="#c6ff00" stroke-width="1.2" opacity="0.6"/>
             </svg>
-            <div class="mv-puck ${st.isPlaying && !isFinished ? 'active' : ''}"></div>
+            <div class="mv-puck" id="mv-puck"></div>
         </div>
 
-        <div class="mv-stats">
+        <div class="mv-stats" id="mv-stats">
             <div class="mv-stats-title">📊 ${LANG.t('СТАТИСТИКА МАТЧА')}</div>
-            <div class="mv-stat-row">
-                <span class="mv-stat-val">${curShotsH}</span>
-                <span class="mv-stat-lbl">${LANG.t('Броски')}</span>
-                <span class="mv-stat-val">${curShotsA}</span>
-            </div>
-            <div class="mv-stat-row">
-                <span class="mv-stat-val">${possH}%</span>
-                <span class="mv-stat-lbl">${LANG.t('Владение')}</span>
-                <span class="mv-stat-val">${possA}%</span>
-            </div>
-            <div class="mv-stat-row">
-                <span class="mv-stat-val">${pimH}</span>
-                <span class="mv-stat-lbl">${LANG.t('Штраф (мин)')}</span>
-                <span class="mv-stat-val">${pimA}</span>
-            </div>
+            <div class="mv-stat-row"><span class="mv-stat-val" id="mv-sh-h">0</span><span class="mv-stat-lbl">${LANG.t('Броски')}</span><span class="mv-stat-val" id="mv-sh-a">0</span></div>
+            <div class="mv-stat-row"><span class="mv-stat-val" id="mv-poss-h">50%</span><span class="mv-stat-lbl">${LANG.t('Владение')}</span><span class="mv-stat-val" id="mv-poss-a">50%</span></div>
+            <div class="mv-stat-row"><span class="mv-stat-val" id="mv-pim-h">0</span><span class="mv-stat-lbl">${LANG.t('Штраф (мин)')}</span><span class="mv-stat-val" id="mv-pim-a">0</span></div>
         </div>
 
         <div class="mv-feed">
             <div class="mv-feed-title">🎬 ${LANG.t('ЛЕНТА СОБЫТИЙ')}</div>
-            ${eventRows || `<div class="match-empty">${LANG.t('Матч ещё не начался')}</div>`}
+            <div class="mv-feed-list" id="mv-feed-list"></div>
         </div>
 
-        ${finalHTML}
+        <div class="mv-final-section" id="mv-final" style="display:none;"></div>
 
-        <div class="mv-controls">${controlsHTML}</div>
+        <div class="mv-controls" id="mv-controls" data-mv-bound="1"></div>
     `;
 
-    // Обработчики кнопок
-    const playBtn = document.getElementById('mv-play');
-    const pauseBtn = document.getElementById('mv-pause');
-    const skipBtn = document.getElementById('mv-skip');
-    const closeBtn = document.getElementById('mv-close');
+    st.mounted = true;
+    st.renderedCount = 0;
 
-        // Проверка гол-события для анимации шайбы
-    if (st.visibleCount > 0 && st.visibleCount !== st.lastAnimatedIdx) {
-        const lastEv = st.events[st.visibleCount - 1];
-        if (lastEv && lastEv.type === 'goal') {
-            st.lastAnimatedIdx = st.visibleCount;
-            // Вибрация при голе (если включена в настройках)
-            // Гол: звук + вибрация + toast (если включены в настройках)
-            playSound('goal');
-            vibrate('goal');
-            showToast('🥅 ' + (lastEv.text || ''), 'info');
-            const puck = c.querySelector('.mv-puck');
-            if (puck) {
-                puck.classList.add('puck-shooting');
-                const goalSide = lastEv.team === 'home' ? 'right' : 'left';
-                puck.style.setProperty('--goal-x', goalSide === 'right' ? '95%' : '5%');
-                puck.style.setProperty('--goal-y', '50%');
-                setTimeout(() => {
-                    puck.classList.remove('puck-shooting');
-                }, 1200);
-            }
-        }
-    }
+    // Делегирование: обработчик вешается один раз на контейнер кнопок.
+    const ctl = document.getElementById('mv-controls');
+    if (ctl) ctl.addEventListener('click', mvOnControlClick);
+}
 
-    if (playBtn) playBtn.addEventListener('click', startMatchPlayback);
-    if (pauseBtn) pauseBtn.addEventListener('click', pauseMatchPlayback);
-    if (skipBtn) skipBtn.addEventListener('click', skipMatchPlayback);
-    if (closeBtn) closeBtn.addEventListener('click', () => {
+function mvOnControlClick(ev) {
+    const btn = ev.target && ev.target.closest ? ev.target.closest('[data-mv]') : null;
+    if (!btn) return;
+    const act = btn.getAttribute('data-mv');
+    if (act === 'play') matchPlayback.play();
+    else if (act === 'pause') matchPlayback.pause();
+    else if (act === 'speed') matchPlayback.toggleSpeed();
+    else if (act === 'back') matchPlayback.stepBack();
+    else if (act === 'skip') matchPlayback.skip();
+    else if (act === 'close') {
         if (window._matchCloseLock) return;
         window._matchCloseLock = true;
         closeMatchView();
         setTimeout(() => { window._matchCloseLock = false; }, 350);
-    });
-}
-
-function startMatchPlayback() {
-    if (!matchViewState) return;
-    if (matchViewState.isPlaying) return;
-    matchViewState.isPlaying = true;
-    renderMatchView();
-    const tick = () => {
-        if (!matchViewState || !matchViewState.isPlaying) return;
-        if (matchViewState.visibleCount >= matchViewState.events.length) {
-            matchViewState.isPlaying = false;
-            clearTimeout(matchViewState.timer);
-            if (matchViewState.match) matchViewState.match.viewed = true;
-            renderMatchView();
-            return;
-        }
-        matchViewState.visibleCount++;
-        renderMatchView();
-        matchViewState.timer = setTimeout(tick, 2500);
-    };
-
-    // Первое событие сразу
-    if (matchViewState.visibleCount === 0) {
-        matchViewState.visibleCount = 1;
-        renderMatchView();
     }
-    matchViewState.timer = setTimeout(tick, 2500);
 }
 
-function pauseMatchPlayback() {
-    if (!matchViewState) return;
-    matchViewState.isPlaying = false;
-    clearTimeout(matchViewState.timer);
-    renderMatchView();
+// Единая точка синхронизации DOM с состоянием контроллера.
+function mvSyncAll(silent) {
+    mvSyncHeader();
+    mvSyncStats();
+    mvSyncClientLine();
+    mvSyncFeed(!!silent);
+    mvSyncFinal();
+    mvRenderControls();
 }
 
-function skipMatchPlayback() {
-    if (!matchViewState) return;
-    matchViewState.isPlaying = false;
-    clearTimeout(matchViewState.timer);
-    matchViewState.visibleCount = matchViewState.events.length;
-    if (matchViewState.match) matchViewState.match.viewed = true;
-    renderMatchView();
+// Текущий снимок матча — чисто функция от (сценарий, idx), без RNG и без DOM.
+function mvSnapshot() {
+    const st = matchViewState;
+    if (!st || st.events.length === 0) {
+        return { h: 0, a: 0, period: 1, minute: 0, stats: { ...MV_EMPTY_STATS }, finished: false, ev: null };
+    }
+    const idx = matchPlayback.idx;
+    const finished = idx >= st.events.length;
+    if (idx <= 0) return { h: 0, a: 0, period: 1, minute: 0, stats: { ...MV_EMPTY_STATS }, finished, ev: null };
+    const ev = st.events[idx - 1];
+    let period = ev.period;
+    if (ev.type === 'period') period = Math.min(3, ev.period + 1);
+    if (ev.type === 'ot' || ev.type === 'end' || finished) period = 3;
+    return { h: ev.scoreHome, a: ev.scoreAway, period, minute: ev.minute, stats: ev.after, finished, ev };
 }
+
+function mvSetText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+}
+
+function mvSyncHeader() {
+    const st = matchViewState;
+    if (!st || !st.mounted) return;
+    const s = mvSnapshot();
+    const H = s.finished ? st.homeScore : s.h;
+    const A = s.finished ? st.awayScore : s.a;
+    const inPeriod = Math.max(0, Math.min(20, s.minute - (s.period - 1) * 20));
+
+    mvSetText('mv-period-label', s.finished ? '🏁 ' + LANG.t('Финал') : s.period + '-' + LANG.t('й период'));
+    mvSetText('mv-time', s.finished ? 'FIN' : String(inPeriod).padStart(2, '0') + ':00');
+    mvSetText('mv-score-h', String(H));
+    mvSetText('mv-score-a', String(A));
+
+    const hh = document.getElementById('mv-score-h');
+    const aa = document.getElementById('mv-score-a');
+    if (hh) hh.classList.toggle('active', H > A);
+    if (aa) aa.classList.toggle('active', A > H);
+
+    const live = document.getElementById('mv-live');
+    if (live) {
+        const started = matchPlayback.idx > 0;
+        live.style.display = (!started || s.finished) ? 'none' : '';
+        live.classList.toggle('paused', !matchPlayback.playing);
+        live.textContent = matchPlayback.playing
+            ? (matchPlayback.speed > 1 ? '● LIVE x2' : '● LIVE')
+            : '❚❚ ' + LANG.t('Пауза');
+    }
+
+    const puck = document.getElementById('mv-puck');
+    if (puck) puck.classList.toggle('active', matchPlayback.playing && !s.finished);
+}
+
+function mvSyncStats() {
+    const st = matchViewState;
+    if (!st || !st.mounted) return;
+    const s = mvSnapshot().stats;
+    mvSetText('mv-sh-h', String(s.shotsH));
+    mvSetText('mv-sh-a', String(s.shotsA));
+    mvSetText('mv-pim-h', String(s.pimH));
+    mvSetText('mv-pim-a', String(s.pimA));
+    const tot = s.shotsH + s.shotsA;
+    const possH = tot > 0 ? Math.round((s.shotsH / tot) * 100) : 50;
+    mvSetText('mv-poss-h', possH + '%');
+    mvSetText('mv-poss-a', (100 - possH) + '%');
+}
+
+// «Живая строка» клиента агента: гол+пас, броски, штраф — только по уже показанным событиям.
+function mvSyncClientLine() {
+    const st = matchViewState;
+    if (!st || !st.mounted) return;
+    const el = document.getElementById('mv-client-line');
+    if (!el) return;
+    const name = st.clientName;
+    if (!name) { el.style.display = 'none'; el.innerHTML = ''; return; }
+
+    let g = 0, a = 0, sh = 0, pim = 0;
+    const upto = matchPlayback.idx;
+    for (let i = 0; i < upto && i < st.events.length; i++) {
+        const e = st.events[i];
+        if (e.type === 'goal') {
+            if (e.actor === name) g++;
+            if (e.assists.indexOf(name) !== -1) a++;
+        } else if (e.actor === name) {
+            if (e.type === 'shot') sh += e.dv || 1;
+            else if (e.type === 'penalty') pim += e.dv || 2;
+        }
+    }
+
+    el.style.display = '';
+    el.innerHTML = `
+        <span class="mv-cl-badge">★ ${LANG.t('Мой клиент')}</span>
+        <span class="mv-cl-name">${name}</span>
+        <span class="mv-cl-stat"><b>${g}+${a}</b> ${LANG.t('Голы')}</span>
+        <span class="mv-cl-stat"><b>${sh}</b> ${LANG.t('Броски')}</span>
+        <span class="mv-cl-stat"><b>${pim}</b> ${LANG.t('Штраф (мин)')}</span>
+    `;
+}
+
+// Лента: свежие события сверху. Дописываем/стираем только дельту, скелет не трогаем.
+function mvSyncFeed(silent) {
+    const st = matchViewState;
+    if (!st || !st.mounted) return;
+    const list = document.getElementById('mv-feed-list');
+    if (!list) return;
+
+    while (st.renderedCount < matchPlayback.idx && st.renderedCount < st.events.length) {
+        const e = st.events[st.renderedCount];
+        st.renderedCount++;
+        list.insertAdjacentHTML('afterbegin', mvEventRow(st, e));
+        if (!silent) mvOnEventShown(e);
+    }
+    while (st.renderedCount > matchPlayback.idx) {
+        st.renderedCount--;
+        const e = st.events[st.renderedCount];
+        const node = document.getElementById('mv-ev-' + e.id);
+        if (node) node.remove();
+    }
+
+    if (st.renderedCount === 0) {
+        if (!list.querySelector('.mv-feed-empty')) {
+            list.innerHTML = `<div class="match-empty mv-feed-empty">${LANG.t('Матч ещё не начался')}</div>`;
+        }
+    } else {
+        const ph = list.querySelector('.mv-feed-empty');
+        if (ph) ph.remove();
+    }
+}
+
+// Реакция на новое событие: анимация шайбы; звук/вибрация/toast — только голы клиента и сирена.
+function mvOnEventShown(e) {
+    const st = matchViewState;
+    if (!st) return;
+    if (e.type === 'goal') {
+        const puck = document.getElementById('mv-puck');
+        if (puck) {
+            puck.classList.add('puck-shooting');
+            puck.style.setProperty('--goal-x', e.team === 'home' ? '95%' : '5%');
+            puck.style.setProperty('--goal-y', '50%');
+            setTimeout(() => puck.classList.remove('puck-shooting'), 1200);
+        }
+        if (e.isClient) {
+            playSound('goal');
+            vibrate('goal');
+            showToast('🥅 ' + mvEventText(st, e).replace(/<[^>]+>/g, ''), 'positive');
+        }
+    } else if (e.type === 'end') {
+        playSound('event');
+        vibrate('event');
+        showToast(`🏁 ${st.match.home} ${st.homeScore}:${st.awayScore} ${st.match.away}`, 'info');
+    }
+}
+
+function mvSyncFinal() {
+    const st = matchViewState;
+    if (!st || !st.mounted) return;
+    const box = document.getElementById('mv-final');
+    if (!box) return;
+    if (!mvSnapshot().finished) { box.style.display = 'none'; return; }
+    if (box.dataset.done === '1') { box.style.display = ''; return; }
+    box.dataset.done = '1';
+
+    const r = st.match.result;
+    const ratings = (r.playerRatings || []).map((p, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
+        const mine = st.clients.has(p.name);
+        const pts = p.goals + p.assists;
+        const ptsStr = pts > 0 ? ` • ${p.goals}+${p.assists}` : '';
+        const rtClass = p.rating >= 8 ? 'rt-high' : p.rating >= 6.5 ? 'rt-mid' : 'rt-low';
+        return `<div class="match-rating-row ${mine ? 'my-client' : ''}">
+            <span class="mr-medal">${medal}</span>
+            <span class="mr-name">${p.name}</span>
+            <span class="mr-pts">${ptsStr}</span>
+            <span class="mr-rating ${rtClass}">${p.rating.toFixed(1)}</span>
+        </div>`;
+    }).join('');
+
+    box.innerHTML = `
+        <div class="mv-final-title">📊 ${LANG.t('Оценки игроков')}</div>
+        <div class="match-ratings">${ratings || `<div class="match-empty">—</div>`}</div>
+    `;
+    box.style.display = '';
+}
+
+function mvRenderControls() {
+    const st = matchViewState;
+    if (!st || !st.mounted) return;
+    const box = document.getElementById('mv-controls');
+    if (!box) return;
+
+    const finished = mvSnapshot().finished;
+    const key = [
+        finished ? 'f' : 'r',
+        matchPlayback.playing ? 'p' : 's',
+        matchPlayback.speed,
+        matchPlayback.idx === 0 ? '0' : 'n',
+        LANG.current
+    ].join('|');
+    if (box.dataset.key === key) return;
+    box.dataset.key = key;
+
+    if (finished) {
+        box.innerHTML = `<button class="mv-btn mv-btn-skip" data-mv="close">✕ ${LANG.t('Закрыть')}</button>`;
+        return;
+    }
+
+    const main = matchPlayback.playing
+        ? `<button class="mv-btn mv-btn-pause" data-mv="pause">⏸ ${LANG.t('Пауза')}</button>`
+        : `<button class="mv-btn mv-btn-play" data-mv="play">▶ ${matchPlayback.idx === 0 ? LANG.t('Начать матч') : LANG.t('Продолжить')}</button>`;
+
+    box.innerHTML = `
+        ${main}
+        <button class="mv-btn mv-btn-speed ${matchPlayback.speed > 1 ? 'on' : ''}" data-mv="speed" title="${LANG.t('Скорость')}">x${matchPlayback.speed}</button>
+        <button class="mv-btn mv-btn-back" data-mv="back" ${matchPlayback.idx === 0 ? 'disabled' : ''} title="${LANG.t('Шаг назад')}">↺</button>
+        <button class="mv-btn mv-btn-skip" data-mv="skip">⏩ ${LANG.t('Пропустить')}</button>
+    `;
+}
+
 
 function closeMatchView() {
+    matchPlayback.clearTimer();
+    matchPlayback.reset();
     if (matchViewState) {
-        clearTimeout(matchViewState.timer);
         matchViewState = null;
     }
     
@@ -8607,13 +9574,15 @@ function openMatchModal(match, lk) {
         else periodA[pIdx]++;
     });
 
-    // Статистика (генерируем на основе счёта)
-    const shotsH = 20 + Math.floor(Math.random() * 20) + r.homeScore * 2;
-    const shotsA = 20 + Math.floor(Math.random() * 20) + r.awayScore * 2;
-    const pimH = randomInt(2, 12);
-    const pimA = randomInt(2, 12);
+    // Статистика — из того же детерминированного сценария, что и живой просмотр
+    // (локальный seeded-RNG; глобальный sim-поток не сдвигается).
+    const script = buildMatchScript(match, lk);
+    const shotsH = script.totals.shotsH;
+    const shotsA = script.totals.shotsA;
+    const pimH = script.totals.pimH;
+    const pimA = script.totals.pimA;
     const totalShots = shotsH + shotsA;
-    const possH = Math.round((shotsH / totalShots) * 100);
+    const possH = totalShots > 0 ? Math.round((shotsH / totalShots) * 100) : 50;
     const possA = 100 - possH;
 
     // Хелпер: проверяем — мой клиент?
@@ -9622,7 +10591,7 @@ function makeSparkline(hist) {
     const range = max - min || 1;
     const pts = hist.map((v, i) => `${((i / (hist.length - 1)) * W).toFixed(1)},${(H - ((v - min) / range) * H).toFixed(1)}`).join(' ');
     const trend = hist[hist.length - 1] >= hist[0];
-    const color = trend ? '#00ff88' : '#ff2d55';
+    const color = trend ? '#c6ff00' : '#ff2e55';
     return `<div class="sparkline-wrap"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="sparkline"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" /></svg></div>`;
 }
 
@@ -9854,7 +10823,7 @@ function showNextDraftChoice() {
     if (draftChoiceQueue.length === 0) { document.getElementById('draft-choice-modal').style.display = 'none'; closeDraftAndStartSeason(); return; }
     currentDraftChoice = draftChoiceQueue.shift();
     const p = currentDraftChoice.player;
-    const avatar = getPlayerAvatarSVG(p);
+    const avatar = getPlayerAvatar(p);
     const flag = getPlayerCountry(p);
     document.getElementById('draft-choice-body').innerHTML = `
         <div class="draft-choice-header">
@@ -9901,6 +10870,12 @@ function applyDraftChoice(choice) {
         p.club = currentDraftChoice.nhlClub;
         p.league = 'NHL';
         p.contractYears = simInt(2, 3);
+        p.goalBonus = 0;
+        p.assistBonus = 0;
+        p.cleanSheetBonus = 0;
+        p.savesBonus = 0;
+        p.gamesPlayedBonus = 0;
+        p.guaranteedYears = 0;
         p.rating = Math.min(100, p.rating + 5);
         const newS = calculateSalary(p.rating, 'NHL');
         p.salary = newS;
@@ -9911,6 +10886,12 @@ function applyDraftChoice(choice) {
         p.club = currentDraftChoice.farmClub;
         p.league = 'AHL';
         p.contractYears = simInt(1, 2);
+        p.goalBonus = 0;
+        p.assistBonus = 0;
+        p.cleanSheetBonus = 0;
+        p.savesBonus = 0;
+        p.gamesPlayedBonus = 0;
+        p.guaranteedYears = 0;
         const newS = calculateSalary(p.rating, 'AHL');
         p.salary = newS;
         payTransferCommission(p, oldS, newS);
@@ -10007,20 +10988,40 @@ function processEndOfSeasonContracts() {
     myRoster.forEach(p => {
         if (p.club && p.contractYears === 1) {
             p.contractYears = 0;
+            p.goalBonus = 0;
+            p.assistBonus = 0;
+            p.cleanSheetBonus = 0;
+            p.savesBonus = 0;
+            p.gamesPlayedBonus = 0;
+            p.guaranteedYears = 0;
             p.club = '';
             p.league = '';
             p.salary = 25;
             becameFreeAgent.add(p);
             addNews(`🕊️ ${p.name} стал свободным агентом`, "info");
-        } else if (p.contractYears > 0) p.contractYears--;
+        } else if (p.contractYears > 0) {
+            p.contractYears--;
+            p.guaranteedYears = Math.max(0, Math.min(p.contractYears, (p.guaranteedYears || 0) - 1));
+        }
     });
     // Миру продлеваем контракты, но НЕ тем, кто уже без клуба
     // и не тем, кто только что стал свободным агентом
     players.forEach(p => {
         if (!p.club) return;
         if (becameFreeAgent.has(p)) return;
-        if (p.contractYears > 0) p.contractYears--;
-        if (p.contractYears <= 0) p.contractYears = simInt(1, 4);
+        if (p.contractYears > 0) {
+            p.contractYears--;
+            p.guaranteedYears = Math.max(0, Math.min(p.contractYears, (p.guaranteedYears || 0) - 1));
+        }
+        if (p.contractYears <= 0) {
+            p.contractYears = simInt(1, 4);
+            p.goalBonus = 0;
+            p.assistBonus = 0;
+            p.cleanSheetBonus = 0;
+            p.savesBonus = 0;
+            p.gamesPlayedBonus = 0;
+            p.guaranteedYears = 0;
+        }
     });
 }
 
@@ -10376,10 +11377,10 @@ function renderUpgradeTab(c) {
     profile.className = 'agency-profile';
     const xp = getXPProgress();
     profile.innerHTML = `
-        <div class="ap-avatar">🧑‍💼</div>
+        <div class="ap-avatar">${getAgentAvatarHTML()}</div>
         <div class="ap-name">${agentName}</div>
         <div class="ap-agency">${agencyFlag} ${agencyName}</div>
-        <div class="ap-xp-text">⚡ ${LANG.t('Уровень')} ${agentLevel} • ${xp.current.toLocaleString()} XP</div>
+        <div class="ap-xp-text">⚡ ${LANG.t('Уровень')} ${agentLevel} • ${formatInt(xp.current)} XP</div>
         <div class="ap-xp-bar"><div class="ap-xp-fill" style="width:${xp.percent}%"></div></div>
         <div class="ap-weekly">📅 ${LANG.t('Расходы')}: <b>${formatMoney(totalWeeklyCost())}${LANG.t('/нед')}</b></div>
         ${isDebt ? '<div class="ap-debt">⚠️ В ДОЛГАХ! Работает только офис</div>' : ''}
@@ -10531,7 +11532,7 @@ function openNpcAgency(ag) {
             const can = !poachedPlayersThisSeason[p.name] && !isClosed;
             html += `
                 <div class="npc-client-row ${!can ? 'locked' : ''}" data-pname="${p.name}">
-                    <div class="ncr-avatar">${getPlayerAvatarSVG(p)}</div>
+                    <div class="ncr-avatar">${getPlayerAvatar(p)}</div>
                     <div class="ncr-info">
                         <div class="ncr-name">${p.name} ${getPlayerCountry(p)}</div>
                         <div class="ncr-meta">${p.age} лет • ${p.club}</div>
@@ -10621,7 +11622,7 @@ function openPoachDialog(player, npcAgency) {
 
     body.innerHTML = `
         <div class="pd-player-card">
-            <div class="pd-avatar">${getPlayerAvatarSVG(player)}</div>
+            <div class="pd-avatar">${getPlayerAvatar(player)}</div>
             <div class="pd-name">${player.name} ${country}</div>
             <div class="pd-meta">${player.age} ${LANG.t('лет')} • ${player.position}</div>
             <div class="pd-stats">
@@ -10865,7 +11866,7 @@ function playRegularWeek() {
     if (tax > 0) {
         agentMoney -= tax;
         // Логируем не каждую неделю, чтобы не спамить
-        if (currentWeek % 4 === 0) addNews(`🏦 Налог на активы: −$${tax.toLocaleString()}`, "info");
+        if (currentWeek % 4 === 0) addNews(`🏦 Налог на активы: −$${formatInt(tax)}`, "info");
     }
 
     // Доходы
@@ -11149,7 +12150,7 @@ const EVENT_POOL = [
         choices: [
             { icon: '✅', label: 'Опровергнуть', desc: 'Сказать, что это фейк',
               apply: (p) => {
-                  if (Math.random() < 0.6) {
+                  if (simRandom() < 0.6) {
                       p.loyalty = Math.min(100, p.loyalty + 10);
                       upgrades.reputation = Math.min(25, upgrades.reputation + 1);
                       return { text: 'Пресса поверила. Лояльность +10, репутация +1.', type: 'positive' };
@@ -11184,7 +12185,7 @@ const EVENT_POOL = [
         text: (p) => `<b>${p.name}</b> наговорил лишнего журналистам после матча — раскритиковал тренера и партнёров. Клуб в ярости.`,
         choices: [
             { icon: '🙏', label: 'Публично извиниться', desc: 'Сгладить конфликт', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Клуб доволен, клиент ворчит. Лояльность +5.', type: 'positive' }; } },
-            { icon: '🎯', label: 'Перевести стрелки', desc: 'Обвинить журналистов', apply: (p) => { if (Math.random() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Сработало! Лояльность +10.', type: 'positive' }; } upgrades.reputation = Math.max(1, upgrades.reputation - 3); return { text: 'Пресса возмущена. Репутация −3.', type: 'negative' }; } },
+            { icon: '🎯', label: 'Перевести стрелки', desc: 'Обвинить журналистов', apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Сработало! Лояльность +10.', type: 'positive' }; } upgrades.reputation = Math.max(1, upgrades.reputation - 3); return { text: 'Пресса возмущена. Репутация −3.', type: 'negative' }; } },
             { icon: '🛡', label: 'Поддержать клиента', desc: '«Он сказал правду»', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 15); upgrades.reputation = Math.max(1, upgrades.reputation - 2); return { text: 'Клиент благодарен. Лояльность +15, репутация −2.', type: 'positive' }; } },
             { icon: '📣', label: 'Пиар-кампания ($20K)', desc: 'Задавить историю позитивом', apply: (p) => { if (agentMoney < 20000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 20000; p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'История забыта. −$20K, лояльность +10.', type: 'positive' }; } }
         ]
@@ -11195,10 +12196,10 @@ const EVENT_POOL = [
         getPlayer: () => myRoster.find(p => p.rating >= 80),
         text: (p) => `Допинг-проба клиента <b>${p.name}</b> дала сомнительный результат. Дело грозит дисквалификацией.`,
         choices: [
-            { icon: '⚖️', label: 'Нанять адвоката ($50K)', desc: 'Лучшая защита', apply: (p) => { if (agentMoney < 50000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 50000; if (Math.random() < 0.9) { p.loyalty = Math.min(100, p.loyalty + 20); return { text: 'Клиент оправдан! Лояльность +20.', type: 'positive' }; } return { text: 'Адвокат проиграл дело.', type: 'negative' }; } },
-            { icon: '🤫', label: 'Тихо решить', desc: 'Не привлекать внимания', apply: (p) => { if (Math.random() < 0.6) return { text: 'Историю замяли.', type: 'positive' }; p.loyalty = Math.max(0, p.loyalty - 30); upgrades.reputation = Math.max(1, upgrades.reputation - 5); return { text: 'Всплыло. Лояльность −30, репутация −5.', type: 'negative' }; } },
+            { icon: '⚖️', label: 'Нанять адвоката ($50K)', desc: 'Лучшая защита', apply: (p) => { if (agentMoney < 50000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 50000; if (simRandom() < 0.9) { p.loyalty = Math.min(100, p.loyalty + 20); return { text: 'Клиент оправдан! Лояльность +20.', type: 'positive' }; } return { text: 'Адвокат проиграл дело.', type: 'negative' }; } },
+            { icon: '🤫', label: 'Тихо решить', desc: 'Не привлекать внимания', apply: (p) => { if (simRandom() < 0.6) return { text: 'Историю замяли.', type: 'positive' }; p.loyalty = Math.max(0, p.loyalty - 30); upgrades.reputation = Math.max(1, upgrades.reputation - 5); return { text: 'Всплыло. Лояльность −30, репутация −5.', type: 'negative' }; } },
             { icon: '📢', label: 'Опровергнуть публично', desc: 'Заявить о провокации', apply: (p) => { upgrades.reputation = Math.max(1, upgrades.reputation - 2); return { text: 'Пресса поверила на 70%. Репутация −2.', type: 'positive' }; } },
-            { icon: '⏳', label: 'Ждать итогов', desc: 'Не мешать разбирательству', apply: (p) => { if (Math.random() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Всё обошлось.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 20); return { text: 'Плохие новости. Лояльность −20.', type: 'negative' }; } }
+            { icon: '⏳', label: 'Ждать итогов', desc: 'Не мешать разбирательству', apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Всё обошлось.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 20); return { text: 'Плохие новости. Лояльность −20.', type: 'negative' }; } }
         ]
     },
     {
@@ -11222,7 +12223,7 @@ const EVENT_POOL = [
         text: (p) => `<b>${p.name}</b> требует перехода в сильную лигу: «Найди мне клуб в NHL или КХЛ. Иначе буду искать другого агента».`,
         choices: [
             { icon: '✅', label: 'Обещать («Найду в этом сезоне»)', desc: 'Взять на себя обязательство', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 15); createTask({ type: 'find_club_top', playerName: p.name, description: `Найти клуб в NHL/КХЛ для ${p.name}`, icon: '🏒', deadlineWeeks: 30, reward: { loyalty: 15, rep: 3, xp: 500 }, penalty: { loyalty: -30, rep: -2 } }); return { text: 'Обещание принято. Найди клиенту клуб до конца сезона.', type: 'positive' }; } },
-            { icon: '🤝', label: 'Честно объяснить', desc: '«Сейчас не готов, поработаем»', apply: (p) => { if (Math.random() < 0.7) { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Клиент понял. Лояльность +5.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 20); return { text: 'Клиент ищет другого агента. Лояльность −20.', type: 'negative' }; } },
+            { icon: '🤝', label: 'Честно объяснить', desc: '«Сейчас не готов, поработаем»', apply: (p) => { if (simRandom() < 0.7) { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Клиент понял. Лояльность +5.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 20); return { text: 'Клиент ищет другого агента. Лояльность −20.', type: 'negative' }; } },
             { icon: '💰', label: 'Подкупить бонусом ($25K)', desc: 'Дать денег сейчас', apply: (p) => { if (agentMoney < 25000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 25000; p.loyalty = Math.min(100, p.loyalty + 20); return { text: 'Клиент доволен. −$25K, лояльность +20.', type: 'positive' }; } },
             { icon: '🚪', label: 'Отпустить', desc: 'Клиент уходит', apply: (p) => { agentMoney += 10000; removeClientFromRoster(p); return { text: 'Клиент ушёл. +$10K компенсации.', type: 'negative' }; } }
         ]
@@ -11233,7 +12234,7 @@ const EVENT_POOL = [
         getPlayer: () => myRoster.find(p => p.rating >= 70 && p.club && p.salary < calculateSalaryCap(p.rating) * 0.85),
         text: (p) => `<b>${p.name}</b> недоволен зарплатой. Требует пересмотра контракта или уйдёт.`,
         choices: [
-            { icon: '🤝', label: 'Торговаться с клубом', desc: 'Попробовать выбить повышение', apply: (p) => { if (Math.random() < 0.6) { p.salary = Math.round(p.salary * 1.15); p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Клуб повысил ЗП на 15%. Лояльность +10.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 5); return { text: 'Клуб отказался. Лояльность −5.', type: 'negative' }; } },
+            { icon: '🤝', label: 'Торговаться с клубом', desc: 'Попробовать выбить повышение', apply: (p) => { if (simRandom() < 0.6) { p.salary = Math.round(p.salary * 1.15); p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Клуб повысил ЗП на 15%. Лояльность +10.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 5); return { text: 'Клуб отказался. Лояльность −5.', type: 'negative' }; } },
             { icon: '🔍', label: 'Найти спонсора', desc: 'Найти деньги извне (4 недели)', apply: (p) => { createTask({ type: 'find_sponsor', playerName: p.name, description: `Найти спонсора для ${p.name}`, icon: '💰', deadlineWeeks: 4, reward: { loyalty: 15 }, penalty: { loyalty: -10 } }); return { text: 'Ищем спонсора. 4 недели.', type: 'positive' }; } },
             { icon: '😤', label: 'Уговорить потерпеть', desc: '«Сейчас не время»', apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 10); return { text: 'Клиент недоволен. Лояльность −10.', type: 'negative' }; } },
             { icon: '💰', label: 'Бонус из своего кармана ($30K)', desc: 'Заплатить самому', apply: (p) => { if (agentMoney < 30000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 30000; p.loyalty = Math.min(100, p.loyalty + 20); return { text: 'Клиент благодарен. −$30K, лояльность +20.', type: 'positive' }; } }
@@ -11260,7 +12261,7 @@ const EVENT_POOL = [
             { icon: '✅', label: 'Разрешить', desc: 'Личная жизнь важна', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 10); p.rating = Math.max(1, p.rating - 1); return { text: 'Клиент счастлив. Лояльность +10, рейтинг −1.', type: 'positive' }; } },
             { icon: '❌', label: 'Запретить', desc: 'Только хоккей', apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 15); return { text: 'Клиент обижен. Лояльность −15.', type: 'negative' }; } },
             { icon: '🤝', label: 'Помочь с идеей ($10K)', desc: 'Вложить в развитие', apply: (p) => { if (agentMoney < 10000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 10000; p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Помог с бизнесом. −$10K, лояльность +15.', type: 'positive' }; } },
-            { icon: '💼', label: 'Взять долю', desc: 'Стать партнёром', apply: (p) => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 5000; if (Math.random() < 0.5) { agentMoney += 20000; return { text: 'Бизнес окупился! +$20K.', type: 'positive' }; } agentMoney -= 15000; return { text: 'Бизнес провалился. −$15K.', type: 'negative' }; } }
+            { icon: '💼', label: 'Взять долю', desc: 'Стать партнёром', apply: (p) => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 5000; if (simRandom() < 0.5) { agentMoney += 20000; return { text: 'Бизнес окупился! +$20K.', type: 'positive' }; } agentMoney -= 15000; return { text: 'Бизнес провалился. −$15K.', type: 'negative' }; } }
         ]
     },
 
@@ -11272,7 +12273,7 @@ const EVENT_POOL = [
         text: (p) => `Банк «Прогресс» хочет снять <b>${p.name}</b> в рекламном ролике за $40K. Клиент недоволен — считает, что отвлечёт от хоккея.`,
         choices: [
             { icon: '✅', label: 'Взять $40K', desc: 'Деньги не пахнут', apply: (p) => { agentMoney += 40000; p.loyalty = Math.max(0, p.loyalty - 15); return { text: '+$40K, но клиент обижен. Лояльность −15.', type: 'positive' }; } },
-            { icon: '🤝', label: 'Поторговаться', desc: 'Просить больше', apply: (p) => { if (Math.random() < 0.6) { agentMoney += 60000; p.loyalty = Math.max(0, p.loyalty - 10); return { text: 'Банк дал $60K! Лояльность −10.', type: 'positive' }; } p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Банк отказался. Клиент ценит. Лояльность +5.', type: 'positive' }; } },
+            { icon: '🤝', label: 'Поторговаться', desc: 'Просить больше', apply: (p) => { if (simRandom() < 0.6) { agentMoney += 60000; p.loyalty = Math.max(0, p.loyalty - 10); return { text: 'Банк дал $60K! Лояльность −10.', type: 'positive' }; } p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Банк отказался. Клиент ценит. Лояльность +5.', type: 'positive' }; } },
             { icon: '❌', label: 'Отказать', desc: 'Клиент важнее', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Клиент благодарен. Лояльность +10.', type: 'positive' }; } },
             { icon: '🎁', label: 'Взять и поделиться', desc: 'Отдать часть клиенту', apply: (p) => { agentMoney += 25000; p.loyalty = Math.min(100, p.loyalty + 5); return { text: '+$25K, клиент доволен. Лояльность +5.', type: 'positive' }; } }
         ]
@@ -11283,7 +12284,7 @@ const EVENT_POOL = [
         getPlayer: () => myRoster.find(p => p.rating >= 70),
         text: (p) => `Бренд клюшек предлагает <b>${p.name}</b> контракт на $30K. Клиент не любит их продукцию.`,
         choices: [
-            { icon: '🗣', label: 'Уговорить', desc: 'Деньги решают', apply: (p) => { if (Math.random() < 0.7) { agentMoney += 30000; return { text: 'Согласился! +$30K.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 10); return { text: 'Отказался. Лояльность −10.', type: 'negative' }; } },
+            { icon: '🗣', label: 'Уговорить', desc: 'Деньги решают', apply: (p) => { if (simRandom() < 0.7) { agentMoney += 30000; return { text: 'Согласился! +$30K.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 10); return { text: 'Отказался. Лояльность −10.', type: 'negative' }; } },
             { icon: '❌', label: 'Отказать', desc: 'Уважать выбор клиента', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Клиент ценит. Лояльность +5.', type: 'positive' }; } },
             { icon: '🤝', label: 'Компромисс', desc: 'Снять один ролик', apply: (p) => { agentMoney += 15000; p.loyalty = Math.min(100, p.loyalty + 10); return { text: '+$15K и клиент доволен. Лояльность +10.', type: 'positive' }; } },
             { icon: '🔄', label: 'Сменить бренд ($20K)', desc: 'Найти другого производителя', apply: (p) => { if (agentMoney < 20000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 20000; p.loyalty = Math.min(100, p.loyalty + 20); return { text: 'Нашли другого. −$20K, лояльность +20.', type: 'positive' }; } }
@@ -11296,9 +12297,9 @@ const EVENT_POOL = [
         text: (p) => `У <b>${p.name}</b> проблемы с налоговой. Грозит штраф или разбирательство.`,
         choices: [
             { icon: '💰', label: 'Заплатить штраф ($30K)', desc: 'Закрыть вопрос', apply: (p) => { if (agentMoney < 30000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 30000; return { text: 'Штраф оплачен.', type: 'positive' }; } },
-            { icon: '⚖️', label: 'Нанять юриста ($15K)', desc: 'Попробовать оспорить', apply: (p) => { if (agentMoney < 15000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 15000; if (Math.random() < 0.7) return { text: 'Юрист решил. −$15K.', type: 'positive' }; agentMoney -= 50000; return { text: 'Проиграл. −$15K юрист + $50K штраф.', type: 'negative' }; } },
-            { icon: '🏛', label: 'Судиться', desc: '3 недели, риск', apply: (p) => { if (Math.random() < 0.5) return { text: 'Выиграли суд!', type: 'positive' }; agentMoney -= 60000; return { text: 'Проиграли. −$60K.', type: 'negative' }; } },
-            { icon: '📤', label: 'Переложить на клуб', desc: 'Пусть разбираются', apply: (p) => { if (Math.random() < 0.4) return { text: 'Клуб взялся.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 2); return { text: 'Клуб обиделся. Репутация −2.', type: 'negative' }; } }
+            { icon: '⚖️', label: 'Нанять юриста ($15K)', desc: 'Попробовать оспорить', apply: (p) => { if (agentMoney < 15000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 15000; if (simRandom() < 0.7) return { text: 'Юрист решил. −$15K.', type: 'positive' }; agentMoney -= 50000; return { text: 'Проиграл. −$15K юрист + $50K штраф.', type: 'negative' }; } },
+            { icon: '🏛', label: 'Судиться', desc: '3 недели, риск', apply: (p) => { if (simRandom() < 0.5) return { text: 'Выиграли суд!', type: 'positive' }; agentMoney -= 60000; return { text: 'Проиграли. −$60K.', type: 'negative' }; } },
+            { icon: '📤', label: 'Переложить на клуб', desc: 'Пусть разбираются', apply: (p) => { if (simRandom() < 0.4) return { text: 'Клуб взялся.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 2); return { text: 'Клуб обиделся. Репутация −2.', type: 'negative' }; } }
         ]
     },
     {
@@ -11309,7 +12310,7 @@ const EVENT_POOL = [
         choices: [
             { icon: '💰', label: 'Взять $100K', desc: 'Рискнуть', apply: (p) => { agentMoney += 100000; return { text: '+$100K. Через 8 недель станет ясно.', type: 'positive' }; } },
             { icon: '❌', label: 'Отказаться', desc: 'Не связываться', apply: (p) => { return { text: 'Отказался. Всё чисто.', type: 'positive' }; } },
-            { icon: '🔍', label: 'Проверить репутацию ($5K)', desc: 'Узнать правду', apply: (p) => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 5000; if (Math.random() < 0.6) return { text: 'Инвестор нормальный. Можно брать.', type: 'positive' }; return { text: 'Это мошенник! Хорошо, что проверили.', type: 'positive' }; } },
+            { icon: '🔍', label: 'Проверить репутацию ($5K)', desc: 'Узнать правду', apply: (p) => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 5000; if (simRandom() < 0.6) return { text: 'Инвестор нормальный. Можно брать.', type: 'positive' }; return { text: 'Это мошенник! Хорошо, что проверили.', type: 'positive' }; } },
             { icon: '🤝', label: 'Торговаться', desc: 'Просить больше', apply: (p) => { agentMoney += 150000; return { text: '+$150K, но риск выше.', type: 'positive' }; } }
         ]
     },
@@ -11322,7 +12323,7 @@ const EVENT_POOL = [
         text: (p) => `Тренер не ставит <b>${p.name}</b> в состав 4 матча подряд. Клиент в ярости.`,
         choices: [
             { icon: '📢', label: 'Возмутиться публично', desc: 'Давить на клуб', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 15); upgrades.reputation = Math.max(1, upgrades.reputation - 3); return { text: 'Лояльность +15, репутация −3.', type: 'positive' }; } },
-            { icon: '🤝', label: 'Поговорить с тренером', desc: 'Тихо решить', apply: (p) => { if (Math.random() < 0.7) { p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Клиент снова в составе. Лояльность +10.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 5); return { text: 'Тренер упёрся. Лояльность −5.', type: 'negative' }; } },
+            { icon: '🤝', label: 'Поговорить с тренером', desc: 'Тихо решить', apply: (p) => { if (simRandom() < 0.7) { p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Клиент снова в составе. Лояльность +10.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 5); return { text: 'Тренер упёрся. Лояльность −5.', type: 'negative' }; } },
             { icon: '🔍', label: 'Искать другой клуб', desc: 'Найти новый (6 недель)', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 5); createTask({ type: 'find_club_same', playerName: p.name, description: `Найти ${p.name} клуб того же уровня`, icon: '🔍', deadlineWeeks: 6, reward: { loyalty: 10, rep: 1 }, penalty: { loyalty: -15 }, params: { originalClub: p.club, originalLeague: p.league } }); return { text: 'Ищем новый клуб.', type: 'positive' }; } },
             { icon: '😐', label: '«Терпи»', desc: 'Пусть докажет', apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 15); return { text: 'Клиент в бешенстве. Лояльность −15.', type: 'negative' }; } }
         ]
@@ -11335,7 +12336,7 @@ const EVENT_POOL = [
         choices: [
             { icon: '📢', label: 'Скандал', desc: 'Публично возмутиться', apply: (p) => { upgrades.reputation = Math.max(1, upgrades.reputation - 2); return { text: 'Скандал. Репутация −2, но клуб оплатит лечение.', type: 'negative' }; } },
             { icon: '👨‍⚕️', label: 'Нанять других врачей ($30K)', desc: 'Частная клиника', apply: (p) => { if (agentMoney < 30000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 30000; p.loyalty = Math.min(100, p.loyalty + 20); p.injuryWeeks = Math.max(0, (p.injuryWeeks || 0) - 2); return { text: 'Клиент здоров. −$30K, лояльность +20.', type: 'positive' }; } },
-            { icon: '⚖️', label: 'Судиться с клубом', desc: '6 недель, риск', apply: (p) => { if (Math.random() < 0.6) { agentMoney += 100000; return { text: 'Выиграл $100K!', type: 'positive' }; } return { text: 'Проиграл дело.', type: 'negative' }; } },
+            { icon: '⚖️', label: 'Судиться с клубом', desc: '6 недель, риск', apply: (p) => { if (simRandom() < 0.6) { agentMoney += 100000; return { text: 'Выиграл $100K!', type: 'positive' }; } return { text: 'Проиграл дело.', type: 'negative' }; } },
             { icon: '🤫', label: 'Тихо решить', desc: 'Не выносить сор', apply: (p) => { return { text: 'Ничего не изменилось.', type: 'negative' }; } }
         ]
     },
@@ -11345,9 +12346,9 @@ const EVENT_POOL = [
         getPlayer: () => myRoster.find(p => p.rating >= 65 && p.club && (p.clubLoyalty || 50) > 40),
         text: (p) => `<b>${p.name}</b> поссорился с одноклубником. Атмосфера в команде накалена.`,
         choices: [
-            { icon: '🤝', label: 'Помирить', desc: 'Поговорить с обоими', apply: (p) => { if (Math.random() < 0.6) { p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Помирил! Лояльность +10.', type: 'positive' }; } return { text: 'Не получилось помирить.', type: 'negative' }; } },
+            { icon: '🤝', label: 'Помирить', desc: 'Поговорить с обоими', apply: (p) => { if (simRandom() < 0.6) { p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Помирил! Лояльность +10.', type: 'positive' }; } return { text: 'Не получилось помирить.', type: 'negative' }; } },
             { icon: '🛡', label: 'Поддержать клиента', desc: 'Встать на его сторону', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 15); p.clubLoyalty = Math.max(0, (p.clubLoyalty || 50) - 5); return { text: 'Клиент ценит. Лояльность +15, клуб недоволен.', type: 'positive' }; } },
-            { icon: '📞', label: 'Обратиться к тренеру', desc: 'Пусть разберётся', apply: (p) => { if (Math.random() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 8); return { text: 'Тренер решил. Лояльность +8.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 5); return { text: 'Тренер не вмешался. Лояльность −5.', type: 'negative' }; } },
+            { icon: '📞', label: 'Обратиться к тренеру', desc: 'Пусть разберётся', apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 8); return { text: 'Тренер решил. Лояльность +8.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 5); return { text: 'Тренер не вмешался. Лояльность −5.', type: 'negative' }; } },
             { icon: '😐', label: 'Игнорировать', desc: 'Само рассосётся', apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 5); return { text: 'Не вмешался. Лояльность −5.', type: 'negative' }; } }
         ]
     },
@@ -11372,7 +12373,7 @@ const EVENT_POOL = [
         text: (p) => `У <b>${p.name}</b> жена беременна. Хочет вернуться в родную страну. Просит найти клуб ближе к дому.`,
         choices: [
 { icon: '✅', label: 'Пообещать помочь', desc: 'Найти клуб дома (12 недель)', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 15); createTask({ type: 'find_club_home', playerName: p.name, description: `Вернуть ${p.name} домой`, icon: '🏠', deadlineWeeks: 12, reward: { loyalty: 15, rep: 3, xp: 500 }, penalty: { loyalty: -25 }, params: { originalClub: p.club, originalLeague: p.league } }); return { text: 'Обещание принято. Найди клуб в родной стране.', type: 'positive' }; } },
-            { icon: '🤝', label: 'Уговорить остаться', desc: 'Попробовать переубедить', apply: (p) => { if (Math.random() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Остался. Лояльность +5.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 20); return { text: 'Обиделся. Лояльность −20.', type: 'negative' }; } },
+            { icon: '🤝', label: 'Уговорить остаться', desc: 'Попробовать переубедить', apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Остался. Лояльность +5.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 20); return { text: 'Обиделся. Лояльность −20.', type: 'negative' }; } },
             { icon: '💰', label: 'Оплатить перелёты семьи ($15K)', desc: 'Пусть семья приедет', apply: (p) => { if (agentMoney < 15000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 15000; p.loyalty = Math.min(100, p.loyalty + 25); return { text: 'Семья рядом! −$15K, лояльность +25.', type: 'positive' }; } },
             { icon: '❌', label: 'Игнорировать', desc: 'Не наше дело', apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 25); return { text: 'Клиент в ярости. Лояльность −25.', type: 'negative' }; } }
         ]
@@ -11407,10 +12408,10 @@ const EVENT_POOL = [
         getPlayer: () => myRoster.find(p => p.club && p.injuryWeeks === 0),
         text: (p) => `<b>${p.name}</b> сломал палец на бытовухе. На матч через 3 дня. Что скажешь клубу?`,
         choices: [
-            { icon: '🤫', label: 'Скрыть от клуба', desc: 'Сыграет через боль', apply: (p) => { if (Math.random() < 0.5) return { text: 'Прокатило. Сыграл.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 3); p.injuryWeeks = 2; return { text: 'Всплыло. Дисквалификация + репутация −3.', type: 'negative' }; } },
+            { icon: '🤫', label: 'Скрыть от клуба', desc: 'Сыграет через боль', apply: (p) => { if (simRandom() < 0.5) return { text: 'Прокатило. Сыграл.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 3); p.injuryWeeks = 2; return { text: 'Всплыло. Дисквалификация + репутация −3.', type: 'negative' }; } },
             { icon: '✅', label: 'Сказать правду', desc: 'Честность важнее', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 5); p.injuryWeeks = 3; return { text: 'Клиент пропустит 3 недели. Лояльность +5.', type: 'positive' }; } },
             { icon: '👨‍⚕️', label: 'Частный врач ($20K)', desc: 'Быстрое лечение', apply: (p) => { if (agentMoney < 20000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 20000; p.injuryWeeks = 1; return { text: 'Восстановление за 1 неделю. −$20K.', type: 'positive' }; } },
-            { icon: '📝', label: 'Изменить историю', desc: 'Сказать, что на тренировке', apply: (p) => { if (Math.random() < 0.6) return { text: 'Поверили.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 5); return { text: 'Всплыло. Репутация −5.', type: 'negative' }; } }
+            { icon: '📝', label: 'Изменить историю', desc: 'Сказать, что на тренировке', apply: (p) => { if (simRandom() < 0.6) return { text: 'Поверили.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 5); return { text: 'Всплыло. Репутация −5.', type: 'negative' }; } }
         ]
     },
     {
@@ -11435,8 +12436,8 @@ const EVENT_POOL = [
         choices: [
             { icon: '✅', label: 'Согласиться', desc: 'Хорошее дело', apply: (p) => { upgrades.reputation = Math.min(25, upgrades.reputation + 2); p.loyalty = Math.min(100, p.loyalty + 10); if (p.age > 30) p.rating = Math.max(1, p.rating - 1); return { text: 'Пиар успешен. Репутация +2, лояльность +10.', type: 'positive' }; } },
             { icon: '💰', label: 'За деньги для фонда ($5K)', desc: 'Сам оплатить', apply: (p) => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 5000; upgrades.reputation = Math.min(25, upgrades.reputation + 3); p.loyalty = Math.min(100, p.loyalty + 15); return { text: '−$5K, репутация +3, лояльность +15.', type: 'positive' }; } },
-            { icon: '❌', label: 'Отказать', desc: 'Нет времени', apply: (p) => { if (Math.random() < 0.2) { upgrades.reputation = Math.max(1, upgrades.reputation - 1); return { text: 'Пресса недовольна. Репутация −1.', type: 'negative' }; } return { text: 'Ничего не произошло.', type: 'negative' }; } },
-            { icon: '🤝', label: 'С условием оплаты клиенту', desc: 'Хитрая сделка', apply: (p) => { if (Math.random() < 0.4) { agentMoney += 3000; upgrades.reputation = Math.min(25, upgrades.reputation + 1); return { text: 'Фонд согласился. +$3K, репутация +1.', type: 'positive' }; } upgrades.reputation = Math.max(1, upgrades.reputation - 1); return { text: 'Фонд обиделся. Репутация −1.', type: 'negative' }; } }
+            { icon: '❌', label: 'Отказать', desc: 'Нет времени', apply: (p) => { if (simRandom() < 0.2) { upgrades.reputation = Math.max(1, upgrades.reputation - 1); return { text: 'Пресса недовольна. Репутация −1.', type: 'negative' }; } return { text: 'Ничего не произошло.', type: 'negative' }; } },
+            { icon: '🤝', label: 'С условием оплаты клиенту', desc: 'Хитрая сделка', apply: (p) => { if (simRandom() < 0.4) { agentMoney += 3000; upgrades.reputation = Math.min(25, upgrades.reputation + 1); return { text: 'Фонд согласился. +$3K, репутация +1.', type: 'positive' }; } upgrades.reputation = Math.max(1, upgrades.reputation - 1); return { text: 'Фонд обиделся. Репутация −1.', type: 'negative' }; } }
         ]
     },
     {
@@ -11447,7 +12448,7 @@ const EVENT_POOL = [
         choices: [
             { icon: '✅', label: 'Согласиться', desc: 'Это шанс', apply: (p) => { upgrades.reputation = Math.min(25, upgrades.reputation + 2); return { text: 'Съёмки начались. Репутация +2.', type: 'positive' }; } },
             { icon: '❌', label: 'Отказаться', desc: 'Не время', apply: (p) => { return { text: 'Отказались.', type: 'negative' }; } },
-            { icon: '💰', label: 'Запросить $50K', desc: 'Дорого', apply: (p) => { if (Math.random() < 0.5) { agentMoney += 50000; return { text: 'Канал согласился! +$50K.', type: 'positive' }; } return { text: 'Канал отказался.', type: 'negative' }; } },
+            { icon: '💰', label: 'Запросить $50K', desc: 'Дорого', apply: (p) => { if (simRandom() < 0.5) { agentMoney += 50000; return { text: 'Канал согласился! +$50K.', type: 'positive' }; } return { text: 'Канал отказался.', type: 'negative' }; } },
             { icon: '📺', label: 'Найти другой канал', desc: 'Более престижный', apply: (p) => { upgrades.reputation = Math.min(25, upgrades.reputation + 1); return { text: 'Нашли. Репутация +1.', type: 'positive' }; } }
         ]
     },
@@ -11460,7 +12461,7 @@ const EVENT_POOL = [
             { icon: '🙋', label: 'Навестить', desc: 'Просто прийти', apply: (p) => { upgrades.reputation = Math.min(25, upgrades.reputation + 1); p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Репутация +1, лояльность +5.', type: 'positive' }; } },
             { icon: '🎁', label: 'Купить подарки ($10K)', desc: 'С подарками', apply: (p) => { if (agentMoney < 10000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 10000; upgrades.reputation = Math.min(25, upgrades.reputation + 2); return { text: '−$10K, репутация +2.', type: 'positive' }; } },
             { icon: '🎪', label: 'Организовать шоу ($30K)', desc: 'Большое мероприятие', apply: (p) => { if (agentMoney < 30000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 30000; upgrades.reputation = Math.min(25, upgrades.reputation + 5); p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Отличный пиар! −$30K, репутация +5, лояльность +15.', type: 'positive' }; } },
-            { icon: '❌', label: 'Отказать', desc: 'Нет времени', apply: (p) => { if (Math.random() < 0.2) { upgrades.reputation = Math.max(1, upgrades.reputation - 1); return { text: 'Пресса накатила. Репутация −1.', type: 'negative' }; } return { text: 'Ничего.', type: 'negative' }; } }
+            { icon: '❌', label: 'Отказать', desc: 'Нет времени', apply: (p) => { if (simRandom() < 0.2) { upgrades.reputation = Math.max(1, upgrades.reputation - 1); return { text: 'Пресса накатила. Репутация −1.', type: 'negative' }; } return { text: 'Ничего.', type: 'negative' }; } }
         ]
     },
     {
@@ -11472,7 +12473,7 @@ const EVENT_POOL = [
             { icon: '✅', label: 'Согласиться', desc: 'Пусть расскажет', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 5); upgrades.reputation = Math.min(25, upgrades.reputation + 1); return { text: 'Лояльность +5, репутация +1.', type: 'positive' }; } },
             { icon: '❌', label: 'Отказаться', desc: 'Не время', apply: (p) => { return { text: 'Отказались.', type: 'negative' }; } },
             { icon: '📚', label: 'С репетицией ($5K)', desc: 'Подготовить клиента', apply: (p) => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 5000; p.loyalty = Math.min(100, p.loyalty + 10); upgrades.reputation = Math.min(25, upgrades.reputation + 2); return { text: 'Прокачали навык. −$5K, репутация +2, лояльность +10.', type: 'positive' }; } },
-            { icon: '💰', label: 'За деньги ($20K)', desc: 'Платный подкаст', apply: (p) => { if (Math.random() < 0.4) { agentMoney += 20000; return { text: 'Заплатили! +$20K.', type: 'positive' }; } upgrades.reputation = Math.max(1, upgrades.reputation - 2); return { text: 'Обиделись. Репутация −2.', type: 'negative' }; } }
+            { icon: '💰', label: 'За деньги ($20K)', desc: 'Платный подкаст', apply: (p) => { if (simRandom() < 0.4) { agentMoney += 20000; return { text: 'Заплатили! +$20K.', type: 'positive' }; } upgrades.reputation = Math.max(1, upgrades.reputation - 2); return { text: 'Обиделись. Репутация −2.', type: 'negative' }; } }
         ]
     },
 
@@ -11484,8 +12485,8 @@ const EVENT_POOL = [
         text: (p) => `Другое агентство предлагает <b>${p.name}</b> контракт с лучшими условиями.`,
         choices: [
             { icon: '💰', label: 'Удержать деньгами ($50K)', desc: 'Дать бонус', apply: (p) => { if (agentMoney < 50000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 50000; p.loyalty = Math.min(100, p.loyalty + 25); return { text: 'Удержали! −$50K, лояльность +25.', type: 'positive' }; } },
-            { icon: '🗣', label: 'Поговорить по душам', desc: 'Убедить остаться', apply: (p) => { if (Math.random() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Остался! Лояльность +15.', type: 'positive' }; } removeClientFromRoster(p); return { text: 'Ушёл к конкурентам.', type: 'negative' }; } },
-            { icon: '😠', label: 'Угрожать конкуренту', desc: 'Показать, кто здесь главный', apply: (p) => { if (Math.random() < 0.3) return { text: 'Испугались.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 5); return { text: 'Они нажаловались. Репутация −5.', type: 'negative' }; } },
+            { icon: '🗣', label: 'Поговорить по душам', desc: 'Убедить остаться', apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Остался! Лояльность +15.', type: 'positive' }; } removeClientFromRoster(p); return { text: 'Ушёл к конкурентам.', type: 'negative' }; } },
+            { icon: '😠', label: 'Угрожать конкуренту', desc: 'Показать, кто здесь главный', apply: (p) => { if (simRandom() < 0.3) return { text: 'Испугались.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 5); return { text: 'Они нажаловались. Репутация −5.', type: 'negative' }; } },
             { icon: '🚪', label: 'Отпустить', desc: 'Забрать компенсацию', apply: (p) => { agentMoney += 30000; removeClientFromRoster(p); return { text: 'Отпустил. +$30K.', type: 'negative' }; } }
         ]
     },
@@ -11495,7 +12496,7 @@ const EVENT_POOL = [
         getPlayer: () => myRoster[0],
         text: () => `Журналист опубликовал разгромную статью о твоём агентстве. Клиенты нервничают.`,
         choices: [
-            { icon: '📢', label: 'Опровергнуть', desc: 'Публичный ответ', apply: () => { if (Math.random() < 0.6) return { text: 'Пресса поверила.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 2); return { text: 'Не поверили. Репутация −2.', type: 'negative' }; } },
+            { icon: '📢', label: 'Опровергнуть', desc: 'Публичный ответ', apply: () => { if (simRandom() < 0.6) return { text: 'Пресса поверила.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 2); return { text: 'Не поверили. Репутация −2.', type: 'negative' }; } },
             { icon: '😐', label: 'Игнорировать', desc: 'Пусть забудут', apply: () => { upgrades.reputation = Math.max(1, upgrades.reputation - 1); return { text: 'Репутация −1.', type: 'negative' }; } },
             { icon: '💰', label: 'Купить газету ($100K)', desc: 'Дорого, но надёжно', apply: () => { if (agentMoney < 100000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 100000; return { text: 'Статья исчезла. −$100K.', type: 'positive' }; } },
             { icon: '✍️', label: 'Ответная статья ($10K)', desc: 'Написать свою', apply: () => { if (agentMoney < 10000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 10000; upgrades.reputation = Math.min(25, upgrades.reputation + 1); return { text: 'Репутация +1.', type: 'positive' }; } }
@@ -11507,7 +12508,7 @@ const EVENT_POOL = [
         getPlayer: () => myRoster[0],
         text: () => `Бывший сотрудник украл список твоих клиентов. Грозит массовое переманивание.`,
         choices: [
-            { icon: '⚖️', label: 'Судиться ($20K)', desc: 'Наказать вора', apply: () => { if (agentMoney < 20000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 20000; if (Math.random() < 0.6) { agentMoney += 50000; return { text: 'Выиграл суд! +$50K компенсации.', type: 'positive' }; } return { text: 'Проиграл дело.', type: 'negative' }; } },
+            { icon: '⚖️', label: 'Судиться ($20K)', desc: 'Наказать вора', apply: () => { if (agentMoney < 20000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 20000; if (simRandom() < 0.6) { agentMoney += 50000; return { text: 'Выиграл суд! +$50K компенсации.', type: 'positive' }; } return { text: 'Проиграл дело.', type: 'negative' }; } },
             { icon: '🤐', label: 'Купить молчание ($30K)', desc: 'Тихо решить', apply: () => { if (agentMoney < 30000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 30000; return { text: 'Молчит. −$30K.', type: 'positive' }; } },
             { icon: '🚪', label: 'Уволить', desc: 'Уже уволен', apply: () => { return { text: 'Ничего.', type: 'negative' }; } },
             { icon: '👤', label: 'Нанять нового ($5K)', desc: 'Восстановить штат', apply: () => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 5000; return { text: 'Штат восстановлен. −$5K.', type: 'positive' }; } }
@@ -11523,7 +12524,7 @@ const EVENT_POOL = [
         choices: [
             { icon: '✅', label: 'Отпустить', desc: 'Топ-обучение', apply: (p) => { p.rating = Math.min(100, p.rating + 3); return { text: 'Развитие +3, но 8 недель без практики.', type: 'positive' }; } },
             { icon: '❌', label: 'Удержать', desc: 'Практика важнее', apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 10); return { text: 'Обиделся. Лояльность −10.', type: 'negative' }; } },
-            { icon: '🤝', label: 'Компромисс', desc: 'Совмещать', apply: (p) => { if (Math.random() < 0.6) { p.rating = Math.min(100, p.rating + 2); p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Совмещает! Рейтинг +2, лояльность +5.', type: 'positive' }; } return { text: 'Не получилось.', type: 'negative' }; } }
+            { icon: '🤝', label: 'Компромисс', desc: 'Совмещать', apply: (p) => { if (simRandom() < 0.6) { p.rating = Math.min(100, p.rating + 2); p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Совмещает! Рейтинг +2, лояльность +5.', type: 'positive' }; } return { text: 'Не получилось.', type: 'negative' }; } }
         ]
     },
     {
@@ -11532,7 +12533,7 @@ const EVENT_POOL = [
         getPlayer: () => myRoster.find(p => p.age <= 21),
         text: (p) => `<b>${p.name}</b> зависает в играх и мало тренируется.`,
         choices: [
-            { icon: '🗣', label: 'Поговорить', desc: 'Попробовать убедить', apply: (p) => { if (Math.random() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Понял. Лояльность +10.', type: 'positive' }; } return { text: 'Не понял.', type: 'negative' }; } },
+            { icon: '🗣', label: 'Поговорить', desc: 'Попробовать убедить', apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Понял. Лояльность +10.', type: 'positive' }; } return { text: 'Не понял.', type: 'negative' }; } },
             { icon: '💻', label: 'Купить новый ПК ($5K)', desc: 'Разрешить хобби', apply: (p) => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 5000; p.loyalty = Math.min(100, p.loyalty + 5); p.rating = Math.max(1, p.rating - 2); return { text: '−$5K, но рейтинг −2.', type: 'negative' }; } },
             { icon: '👨‍🏫', label: 'Наставник ($15K)', desc: 'Приставить тренера', apply: (p) => { if (agentMoney < 15000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 15000; p.rating = Math.min(100, p.rating + 2); p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Профессионал подтянул. Рейтинг +2, лояльность +10.', type: 'positive' }; } },
             { icon: '😐', label: 'Игнорировать', desc: 'Само пройдёт', apply: (p) => { p.rating = Math.max(1, p.rating - 2); return { text: 'Рейтинг −2.', type: 'negative' }; } }
@@ -11546,7 +12547,7 @@ const EVENT_POOL = [
         choices: [
             { icon: '🫂', label: 'Поддержать', desc: 'Просто быть рядом', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Лояльность +15.', type: 'positive' }; } },
             { icon: '🧠', label: 'Психолог ($10K)', desc: 'Профессиональная помощь', apply: (p) => { if (agentMoney < 10000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 10000; p.loyalty = Math.min(100, p.loyalty + 20); p.rating = Math.min(100, p.rating + 1); return { text: 'Помогло! −$10K, лояльность +20, рейтинг +1.', type: 'positive' }; } },
-            { icon: '💘', label: 'Устроить знакомство', desc: 'Найти новую девушку', apply: (p) => { if (Math.random() < 0.3) { p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Получилось! Лояльность +15.', type: 'positive' }; } return { text: 'Не сработало.', type: 'negative' }; } },
+            { icon: '💘', label: 'Устроить знакомство', desc: 'Найти новую девушку', apply: (p) => { if (simRandom() < 0.3) { p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Получилось! Лояльность +15.', type: 'positive' }; } return { text: 'Не сработало.', type: 'negative' }; } },
             { icon: '🏒', label: 'Отвлечь работой', desc: 'Залить хоккеем', apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 5); p.rating = Math.min(100, p.rating + 1); return { text: 'Работа помогла. Рейтинг +1, лояльность −5.', type: 'negative' }; } }
         ]
     },
@@ -11570,9 +12571,9 @@ const EVENT_POOL = [
         getPlayer: () => myRoster.find(p => p.rating >= 75 && ['NHL','KHL','SHL','Liiga','NL_Switzerland','Czech_Extraliga'].includes(p.league)),
         text: (p) => `<b>${p.name}</b> вызван в сборную на товарищеские матчи.`,
         choices: [
-            { icon: '✅', label: 'Отпустить', desc: 'Честь страны', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 10); upgrades.reputation = Math.min(25, upgrades.reputation + 2); if (Math.random() < 0.1) { p.injuryWeeks = 2; return { text: 'Травма в сборной! Лояльность +10, репутация +2, 2 недели отдыха.', type: 'negative' }; } return { text: 'Лояльность +10, репутация +2.', type: 'positive' }; } },
+            { icon: '✅', label: 'Отпустить', desc: 'Честь страны', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 10); upgrades.reputation = Math.min(25, upgrades.reputation + 2); if (simRandom() < 0.1) { p.injuryWeeks = 2; return { text: 'Травма в сборной! Лояльность +10, репутация +2, 2 недели отдыха.', type: 'negative' }; } return { text: 'Лояльность +10, репутация +2.', type: 'positive' }; } },
             { icon: '❌', label: 'Отказать', desc: 'Клуб важнее', apply: (p) => { upgrades.reputation = Math.max(1, upgrades.reputation - 2); p.loyalty = Math.max(0, p.loyalty - 10); return { text: 'Репутация −2, лояльность −10.', type: 'negative' }; } },
-            { icon: '💬', label: 'Попросить выходной', desc: 'Один матч', apply: (p) => { if (Math.random() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Согласились. Лояльность +5.', type: 'positive' }; } return { text: 'Отказали.', type: 'negative' }; } },
+            { icon: '💬', label: 'Попросить выходной', desc: 'Один матч', apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Согласились. Лояльность +5.', type: 'positive' }; } return { text: 'Отказали.', type: 'negative' }; } },
             { icon: '📝', label: 'С условием страховки', desc: 'Только без травм', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 5); upgrades.reputation = Math.min(25, upgrades.reputation + 1); return { text: 'Договорились. Лояльность +5, репутация +1.', type: 'positive' }; } }
         ]
     },
@@ -11582,10 +12583,10 @@ const EVENT_POOL = [
         getPlayer: () => myRoster.find(p => p.age >= 25 && !isInHomeCountry(p)),
         text: (p) => `Другая страна предлагает <b>${p.name}</b> сменить спортивное гражданство. Шанс на Олимпиаду.`,
         choices: [
-            { icon: '✅', label: 'Разрешить', desc: 'Больше возможностей', apply: (p) => { if (Math.random() < 0.6) { p.rating = Math.min(100, p.rating + 2); return { text: 'Новые возможности! Рейтинг +2.', type: 'positive' }; } upgrades.reputation = Math.max(1, upgrades.reputation - 3); return { text: 'Фанаты обижены. Репутация −3.', type: 'negative' }; } },
+            { icon: '✅', label: 'Разрешить', desc: 'Больше возможностей', apply: (p) => { if (simRandom() < 0.6) { p.rating = Math.min(100, p.rating + 2); return { text: 'Новые возможности! Рейтинг +2.', type: 'positive' }; } upgrades.reputation = Math.max(1, upgrades.reputation - 3); return { text: 'Фанаты обижены. Репутация −3.', type: 'negative' }; } },
             { icon: '❌', label: 'Отговорить', desc: 'Родина одна', apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 15); return { text: 'Обиделся. Лояльность −15.', type: 'negative' }; } },
             { icon: '💰', label: 'Торговаться ($30K)', desc: 'Взять за согласие', apply: (p) => { agentMoney += 30000; return { text: '+$30K.', type: 'positive' }; } },
-            { icon: '😐', label: 'Игнорировать', desc: 'Пусть решает сам', apply: (p) => { if (Math.random() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 5); } return { text: 'Клиент сам решил.', type: 'negative' }; } }
+            { icon: '😐', label: 'Игнорировать', desc: 'Пусть решает сам', apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 5); } return { text: 'Клиент сам решил.', type: 'negative' }; } }
         ]
     },
     {
@@ -11594,7 +12595,7 @@ const EVENT_POOL = [
         getPlayer: () => myRoster.find(p => p.club && !isInHomeCountry(p)),
         text: (p) => `У <b>${p.name}</b> проблемы с визой. Может потерять право на работу.`,
         choices: [
-            { icon: '⚖️', label: 'Адвокат ($20K)', desc: 'Профессиональная помощь', apply: (p) => { if (agentMoney < 20000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 20000; if (Math.random() < 0.8) return { text: 'Виза получена! −$20K.', type: 'positive' }; return { text: 'Не помогло.', type: 'negative' }; } },
+            { icon: '⚖️', label: 'Адвокат ($20K)', desc: 'Профессиональная помощь', apply: (p) => { if (agentMoney < 20000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 20000; if (simRandom() < 0.8) return { text: 'Виза получена! −$20K.', type: 'positive' }; return { text: 'Не помогло.', type: 'negative' }; } },
             { icon: '🏠', label: 'Вернуться домой', desc: 'Решить кардинально', apply: (p) => { p.rating = Math.max(1, p.rating - 5); createTask({ type: 'find_club_home', playerName: p.name, description: `Найти ${p.name} клуб дома`, icon: '🏠', deadlineWeeks: 12, reward: { loyalty: 10 }, penalty: { loyalty: -15 } }); return { text: 'Ищем клуб дома. Рейтинг −5.', type: 'negative' }; } },
             { icon: '💰', label: 'Заплатить ($50K)', desc: 'Дорого, но быстро', apply: (p) => { if (agentMoney < 50000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 50000; return { text: 'Виза ускорена. −$50K.', type: 'positive' }; } },
             { icon: '🔄', label: 'Сменить клуб', desc: 'Найти в другой стране', apply: (p) => { createTask({ type: 'find_club_same', playerName: p.name, description: `Перевести ${p.name} в другой клуб`, icon: '🔄', deadlineWeeks: 4, reward: { loyalty: 5 }, penalty: { loyalty: -10 } }); return { text: 'Ищем новый клуб.', type: 'positive' }; } }
@@ -11606,10 +12607,10 @@ const EVENT_POOL = [
         getPlayer: () => myRoster.find(p => p.rating >= 78 && ['NHL','KHL','SHL','Liiga','NL_Switzerland','Czech_Extraliga'].includes(p.league)),
         text: (p) => `<b>${p.name}</b> вызван на Кубок мира! Огромный турнир.`,
         choices: [
-            { icon: '✅', label: 'Отпустить', desc: 'Честь страны', apply: (p) => { upgrades.reputation = Math.min(25, upgrades.reputation + 5); p.loyalty = Math.min(100, p.loyalty + 20); if (Math.random() < 0.15) { p.injuryWeeks = 3; return { text: 'Травма! Но репутация +5, лояльность +20.', type: 'negative' }; } if (Math.random() < 0.3) { agentMoney += 100000; upgrades.reputation = Math.min(25, upgrades.reputation + 5); return { text: 'MVP турнира! +$100K, репутация +10, лояльность +20.', type: 'positive' }; } return { text: 'Успех! Репутация +5, лояльность +20.', type: 'positive' }; } },
+            { icon: '✅', label: 'Отпустить', desc: 'Честь страны', apply: (p) => { upgrades.reputation = Math.min(25, upgrades.reputation + 5); p.loyalty = Math.min(100, p.loyalty + 20); if (simRandom() < 0.15) { p.injuryWeeks = 3; return { text: 'Травма! Но репутация +5, лояльность +20.', type: 'negative' }; } if (simRandom() < 0.3) { agentMoney += 100000; upgrades.reputation = Math.min(25, upgrades.reputation + 5); return { text: 'MVP турнира! +$100K, репутация +10, лояльность +20.', type: 'positive' }; } return { text: 'Успех! Репутация +5, лояльность +20.', type: 'positive' }; } },
             { icon: '❌', label: 'Отказать', desc: 'Клуб важнее', apply: (p) => { upgrades.reputation = Math.max(1, upgrades.reputation - 3); p.loyalty = Math.max(0, p.loyalty - 30); return { text: 'Репутация −3, лояльность −30.', type: 'negative' }; } },
-            { icon: '📝', label: 'С условием страховки', desc: 'Только без травм', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 10); upgrades.reputation = Math.min(25, upgrades.reputation + 2); if (Math.random() < 0.2) { agentMoney += 100000; return { text: 'MVP! +$100K, репутация +2, лояльность +10.', type: 'positive' }; } return { text: 'Успех. Репутация +2, лояльность +10.', type: 'positive' }; } },
-            { icon: '🎯', label: 'Лично сопровождать ($30K)', desc: 'Помогать на турнире', apply: (p) => { if (agentMoney < 30000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 30000; upgrades.reputation = Math.min(25, upgrades.reputation + 5); p.loyalty = Math.min(100, p.loyalty + 25); if (Math.random() < 0.5) { agentMoney += 200000; return { text: 'MVP! −$30K, +$200K, репутация +5, лояльность +25.', type: 'positive' }; } return { text: 'Помог! −$30K, репутация +5, лояльность +25.', type: 'positive' }; } }
+            { icon: '📝', label: 'С условием страховки', desc: 'Только без травм', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 10); upgrades.reputation = Math.min(25, upgrades.reputation + 2); if (simRandom() < 0.2) { agentMoney += 100000; return { text: 'MVP! +$100K, репутация +2, лояльность +10.', type: 'positive' }; } return { text: 'Успех. Репутация +2, лояльность +10.', type: 'positive' }; } },
+            { icon: '🎯', label: 'Лично сопровождать ($30K)', desc: 'Помогать на турнире', apply: (p) => { if (agentMoney < 30000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 30000; upgrades.reputation = Math.min(25, upgrades.reputation + 5); p.loyalty = Math.min(100, p.loyalty + 25); if (simRandom() < 0.5) { agentMoney += 200000; return { text: 'MVP! −$30K, +$200K, репутация +5, лояльность +25.', type: 'positive' }; } return { text: 'Помог! −$30K, репутация +5, лояльность +25.', type: 'positive' }; } }
         ]
     }
 ];
@@ -11639,7 +12640,7 @@ EVENT_CHAINS.bad_press_chain = {
                 { icon: '🤝', label: 'Приехать поговорить', desc: 'Личный визит',
                   apply: () => { return { text: 'Тренер смягчился. Конфликт исчерпан.', type: 'positive' }; } },
                 { icon: '📞', label: 'Позвонить', desc: 'По телефону',
-                  apply: () => { if (Math.random() < 0.5) return { text: 'Разговор удался.', type: 'positive' }; return { text: 'Тренер в бешенстве.', type: 'negative' }; } },
+                  apply: () => { if (simRandom() < 0.5) return { text: 'Разговор удался.', type: 'positive' }; return { text: 'Тренер в бешенстве.', type: 'negative' }; } },
                 { icon: '🚫', label: 'Игнорировать', desc: 'Не приеду',
                   apply: () => { return { text: 'Тренер запомнил. Проблемы будут.', type: 'negative' }; } }
             ]
@@ -11695,7 +12696,7 @@ EVENT_CHAINS.rival_war = {
                 { icon: '💰', label: 'Удержать деньгами ($40K)', desc: 'Заплатить',
                   apply: (p) => { if (agentMoney < 40000) return { text: 'Недостаточно денег.', skip: true }; agentMoney -= 40000; p.loyalty = Math.min(100, p.loyalty + 20); return { text: 'Удержали! −$40K, лояльность +20.', type: 'positive' }; } },
                 { icon: '🗣', label: 'Поговорить', desc: 'По-человечески',
-                  apply: (p) => { if (Math.random() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Остался! Лояльность +15.', type: 'positive' }; } removeClientFromRoster(p); return { text: 'Ушёл.', type: 'negative' }; } },
+                  apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Остался! Лояльность +15.', type: 'positive' }; } removeClientFromRoster(p); return { text: 'Ушёл.', type: 'negative' }; } },
                 { icon: '🚪', label: 'Отпустить', desc: 'Забрать компенсацию',
                   apply: (p) => { agentMoney += 30000; removeClientFromRoster(p); return { text: '+$30K компенсации.', type: 'negative' }; } }
             ]
@@ -11709,9 +12710,9 @@ EVENT_CHAINS.rival_war = {
                 { icon: '🤝', label: 'Согласиться', desc: 'Мир выгоден',
                   apply: () => { upgrades.reputation = Math.min(25, upgrades.reputation + 3); return { text: 'Мир заключён. Репутация +3.', type: 'positive' }; } },
                 { icon: '⚔️', label: 'Объявить войну', desc: 'Битва до конца',
-                  apply: () => { if (Math.random() < 0.5) { upgrades.reputation = Math.min(25, upgrades.reputation + 5); agentMoney += 50000; return { text: 'Ты победил! +$50K, репутация +5.', type: 'positive' }; } agentMoney -= 30000; return { text: 'Проиграл. −$30K.', type: 'negative' }; } },
+                  apply: () => { if (simRandom() < 0.5) { upgrades.reputation = Math.min(25, upgrades.reputation + 5); agentMoney += 50000; return { text: 'Ты победил! +$50K, репутация +5.', type: 'positive' }; } agentMoney -= 30000; return { text: 'Проиграл. −$30K.', type: 'negative' }; } },
                 { icon: '🎯', label: 'Торговаться', desc: 'Забрать часть их клиентов',
-                  apply: () => { if (Math.random() < 0.4) { agentMoney += 20000; return { text: 'Получил 2 клиентов! +$20K.', type: 'positive' }; } return { text: 'Они не согласились.', type: 'negative' }; } }
+                  apply: () => { if (simRandom() < 0.4) { agentMoney += 20000; return { text: 'Получил 2 клиентов! +$20K.', type: 'positive' }; } return { text: 'Они не согласились.', type: 'negative' }; } }
             ]
         }
     ]
@@ -11752,7 +12753,7 @@ EVENT_CHAINS.doping_chain = {
             { icon: '✅', label: 'Признать вину', desc: 'Пойти на сделку',
               apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 20); p.injuryWeeks = 4; return { text: 'Сделка: 4 недели дисквалификации. Лояльность −20.', type: 'negative' }; } },
             { icon: '⚔️', label: 'Оспорить', desc: 'До конца',
-              apply: (p) => { if (Math.random() < 0.6) { p.loyalty = Math.min(100, p.loyalty + 20); return { text: 'Оправдан! Лояльность +20.', type: 'positive' }; } p.injuryWeeks = 8; p.loyalty = Math.max(0, p.loyalty - 30); return { text: 'Дисквалификация 8 недель. Лояльность −30.', type: 'negative' }; } }
+              apply: (p) => { if (simRandom() < 0.6) { p.loyalty = Math.min(100, p.loyalty + 20); return { text: 'Оправдан! Лояльность +20.', type: 'positive' }; } p.injuryWeeks = 8; p.loyalty = Math.max(0, p.loyalty - 30); return { text: 'Дисквалификация 8 недель. Лояльность −30.', type: 'negative' }; } }
           ] },
         { icon: '📋', title: 'ИТОГ', triggerWeek: 6,
           getPlayer: () => myRoster.find(p => p.rating >= 78),
@@ -11784,7 +12785,7 @@ EVENT_CHAINS.home_return_chain = {
             { icon: '🤝', label: 'Сказать «работаю»', desc: 'Успокоить',
               apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Лояльность +5.', type: 'positive' }; } },
             { icon: '💬', label: 'Честно объяснить', desc: 'Что сложно',
-              apply: (p) => { if (Math.random() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 3); return { text: 'Понял. Лояльность +3.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 15); return { text: 'Обиделся. Лояльность −15.', type: 'negative' }; } }
+              apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 3); return { text: 'Понял. Лояльность +3.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 15); return { text: 'Обиделся. Лояльность −15.', type: 'negative' }; } }
           ] },
         { icon: '🏒', title: 'ПРЕДЛОЖЕНИЕ ОТ СТАРОГО КЛУБА', triggerWeek: 7,
           getPlayer: () => myRoster.find(p => p.club && !isInHomeCountry(p)),
@@ -11816,7 +12817,7 @@ EVENT_CHAINS.coach_conflict_chain = {
             { icon: '📢', label: 'Публично возмутиться', desc: 'Давить',
               apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 15); upgrades.reputation = Math.max(1, upgrades.reputation - 3); return { text: 'Лояльность +15, репутация −3.', type: 'positive' }; } },
             { icon: '🤝', label: 'Поговорить с тренером', desc: 'Тихо',
-              apply: (p) => { if (Math.random() < 0.7) { p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Сработало! Лояльность +10.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 5); return { text: 'Тренер упёрся. Лояльность −5.', type: 'negative' }; } },
+              apply: (p) => { if (simRandom() < 0.7) { p.loyalty = Math.min(100, p.loyalty + 10); return { text: 'Сработало! Лояльность +10.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 5); return { text: 'Тренер упёрся. Лояльность −5.', type: 'negative' }; } },
             { icon: '😐', label: '«Терпи»', desc: 'Пусть докажет',
               apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 15); return { text: 'Обиделся. Лояльность −15.', type: 'negative' }; } }
           ] },
@@ -11829,7 +12830,7 @@ EVENT_CHAINS.coach_conflict_chain = {
             { icon: '🤐', label: 'Промолчать', desc: 'Не подливать масла',
               apply: (p) => { return { text: 'Скандал утихнет.', type: 'positive' }; } },
             { icon: '📞', label: 'Пожаловаться в клуб', desc: 'Пусть разберутся',
-              apply: (p) => { if (Math.random() < 0.4) return { text: 'Клуб вмешался.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 1); return { text: 'Клуб не помог. Репутация −1.', type: 'negative' }; } }
+              apply: (p) => { if (simRandom() < 0.4) return { text: 'Клуб вмешался.', type: 'positive' }; upgrades.reputation = Math.max(1, upgrades.reputation - 1); return { text: 'Клуб не помог. Репутация −1.', type: 'negative' }; } }
           ] },
         { icon: '🎯', title: 'ИТОГ', triggerWeek: 5,
           getPlayer: () => myRoster.find(p => p.club),
@@ -11872,7 +12873,7 @@ EVENT_CHAINS.crypto_scheme_chain = {
             { icon: '🚪', label: 'Принять убыток', desc: 'Выйти',
               apply: () => { agentMoney -= 80000; return { text: '−$80K. Урок получен.', type: 'negative' }; } },
             { icon: '💰', label: 'Вложить ещё $40K', desc: 'Отбить',
-              apply: () => { agentMoney -= 40000; if (Math.random() < 0.2) { agentMoney += 200000; return { text: 'Невероятно — удача! +$200K!', type: 'positive' }; } return { text: 'Провал. −$40K ещё.', type: 'negative' }; } }
+              apply: () => { agentMoney -= 40000; if (simRandom() < 0.2) { agentMoney += 200000; return { text: 'Невероятно — удача! +$200K!', type: 'positive' }; } return { text: 'Провал. −$40K ещё.', type: 'negative' }; } }
           ] }
     ]
 };
@@ -12006,7 +13007,7 @@ EVENT_CHAINS.career_turn_chain = {
           text: (p) => `Клуб <b>${p.name}</b> решает: продлевать или нет.`,
           choices: [
             { icon: '💼', label: 'Торговаться', desc: 'Хороший контракт',
-              apply: (p) => { if (Math.random() < 0.6) { p.contractYears = 2; p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Продлён на 2 года! Лояльность +15.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 10); return { text: 'Отказали. Лояльность −10.', type: 'negative' }; } },
+              apply: (p) => { if (simRandom() < 0.6) { p.contractYears = 2; p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Продлён на 2 года! Лояльность +15.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 10); return { text: 'Отказали. Лояльность −10.', type: 'negative' }; } },
             { icon: '✅', label: 'Принять что дают', desc: 'Скромно',
               apply: (p) => { p.contractYears = 1; return { text: 'Продлён на 1 год.', type: 'positive' }; } }
           ] }
@@ -12067,7 +13068,7 @@ EVENT_CHAINS.national_team_chain = {
           text: (p) => `<b>${p.name}</b> конфликтует с соотечественником в сборной.`,
           choices: [
             { icon: '🤝', label: 'Помирить', desc: 'Поговорить',
-              apply: (p) => { if (Math.random() < 0.7) { p.loyalty = Math.min(100, p.loyalty + 8); return { text: 'Помирились. Лояльность +8.', type: 'positive' }; } return { text: 'Не получилось.', type: 'negative' }; } },
+              apply: (p) => { if (simRandom() < 0.7) { p.loyalty = Math.min(100, p.loyalty + 8); return { text: 'Помирились. Лояльность +8.', type: 'positive' }; } return { text: 'Не получилось.', type: 'negative' }; } },
             { icon: '🛡', label: 'Поддержать клиента', desc: 'На его стороне',
               apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 12); return { text: 'Лояльность +12.', type: 'positive' }; } }
           ] },
@@ -12094,7 +13095,7 @@ EVENT_CHAINS.media_mogul_chain = {
             { icon: '✅', label: 'Согласиться', desc: 'Пиар',
               apply: (p) => { upgrades.reputation = Math.min(25, upgrades.reputation + 2); return { text: 'Репутация +2.', type: 'positive' }; } },
             { icon: '💰', label: 'За деньги ($50K)', desc: 'Гонорар',
-              apply: (p) => { if (Math.random() < 0.5) { agentMoney += 50000; return { text: '+$50K.', type: 'positive' }; } return { text: 'Отказали.', type: 'negative' }; } }
+              apply: (p) => { if (simRandom() < 0.5) { agentMoney += 50000; return { text: '+$50K.', type: 'positive' }; } return { text: 'Отказали.', type: 'negative' }; } }
           ] },
         { icon: '🎬', title: 'СЪЁМКИ', triggerWeek: 4,
           getPlayer: () => null, requiresPlayer: false,
@@ -12141,7 +13142,7 @@ function isInHomeCountry(player) {
 // ============ СИСТЕМА ЗАДАЧ ============
 function createTask(config) {
     const task = {
-        id: 'task_' + Date.now() + '_' + simRandom().toString(36).slice(2, 7),
+        id: nextEntityId('task'),
         type: config.type || 'generic',
         playerName: config.playerName || null,
         createdWeek: currentWeek,
@@ -12262,7 +13263,7 @@ function checkActiveTasks() {
                 if (simRandom() < 0.6) {
                     const bonus = simInt(20000, 50000);
                     agentMoney += bonus;
-                    completeTask(task, `✅ Спонсор найден! +$${bonus.toLocaleString()}`);
+                    completeTask(task, `✅ Спонсор найден! +$${formatInt(bonus)}`);
                 } else failTask(task);
             }
         } else if (weeksLeft <= 0) failTask(task);
@@ -12444,6 +13445,8 @@ function openPendingEvent() {
 }
 
 function renderEventInPhone(ev, player) {
+    setNegotiationConsoleMode('list');
+    if (negGauges) negGauges.innerHTML = '';
     // Шапка телефона
     phoneChatAvatar.innerHTML = `<span style="font-size:26px;">${ev.icon}</span>`;
     phoneChatName.textContent = LANG.t(ev.title);
@@ -12584,6 +13587,12 @@ function simulateAITransfers() {
         p.league = newClub.league;
         p.lastTransferSeason = currentSeason;
         p.contractYears = simInt(2, 4);
+        p.goalBonus = 0;
+        p.assistBonus = 0;
+        p.cleanSheetBonus = 0;
+        p.savesBonus = 0;
+        p.gamesPlayedBonus = 0;
+        p.guaranteedYears = 0;
         p.salary = calculateSalary(p.rating, p.league); // ЗП по рынку нового клуба
         p.clubLoyalty = simInt(40, 60);
         transfers++;
@@ -12845,10 +13854,46 @@ function getClubsForPlayer(player, options) {
     }
     return result;
 }
+// Базовая проверка: насколько скиллы игрока подходят клубу.
+// Без RNG: одинаковые игрок/клуб → одинаковый интерес.
+function evaluateClubInterest(player, clubInfo) {
+    const data = clubData[clubInfo.league + "_" + clubInfo.club];
+    if (!data) return { accepted: false, score: -10, skill: 0, need: 0, archetype: 'twoWay' };
+    const a = player.attributes || generateAttributes(player.position, player.rating, player.name);
+    const arch = getPlayerArchetype(player.position, player.name);
+    let skill;
+    if (arch === 'sniper') skill = a.attack;
+    else if (arch === 'playmaker') skill = a.technique;
+    else if (arch === 'defensive' || arch === 'goalie') skill = a.defense;
+    else skill = (a.attack + a.defense) / 2;
+
+    const samePos = players.filter(p =>
+        p.club === clubInfo.club && p.league === clubInfo.league && p.position === player.position
+    );
+    let need = 4;
+    if (samePos.length > 0) {
+        const avg = samePos.reduce((s, p) => s + p.rating, 0) / samePos.length;
+        need = Math.max(-4, Math.min(4, Math.round((player.rating - avg) / 8)));
+    }
+    const growth = Math.max(0, Math.min(4, Math.round(((player.potential || player.rating) - player.rating) / 8)));
+    let score = Math.round((skill - data.prestige) / 10) + need + growth;
+    if (player.age <= 23) score += 1;
+    else if (player.age >= 33) score -= 1;
+    score = Math.max(-10, Math.min(10, score));
+    return {
+        accepted: score >= -2,
+        score, skill: Math.round(skill), need, growth,
+        archetype: arch,
+        attack: a.attack, defense: a.defense, potential: player.potential || player.rating
+    };
+}
+
 function generateTransferOffer(player, clubInfo) {
     setSimulationSeed(matchSeed([agentName, agencyName, 'offer', currentSeason, currentWeek, player.name, clubInfo.league, clubInfo.club]));
     const data = clubData[clubInfo.league + "_" + clubInfo.club];
     if (!data) return null;
+    const clubInterest = evaluateClubInterest(player, clubInfo);
+    if (!clubInterest.accepted) return null;
     const pd = data.prestige - player.rating;
     const minM = 1.05;
     const maxM = pd > 0 ? 1.6 : 1.25;
@@ -12873,6 +13918,42 @@ function generateTransferOffer(player, clubInfo) {
     const prestigeBoost = oldData ? data.prestige > oldData.prestige : false;
 
     const playingTime = getPlayingTimeInfo(player, clubInfo);
+    const motivation = getPlayerMotivation(player);
+    const positionGroup = getPlayerPositionGroup(player);
+    const archetype = getPlayerArchetype(player.position, player.name);
+    const annual = newSalary * 1000;
+
+    // Пункты контракта зависят от позиции и архетипа.
+    // Вратарь: сухие матчи / отражённые броски. Защитник: сухие матчи / игры.
+    // Нападающий: голы / передачи.
+    const goalBonus = positionGroup === 'F'
+        ? Math.round(annual * (0.002 + simRandom() * 0.004) * (archetype === 'sniper' ? 1.35 : archetype === 'playmaker' ? 0.75 : 1))
+        : 0;
+    const assistBonus = positionGroup === 'F'
+        ? Math.round(annual * (0.0012 + simRandom() * 0.0028) * (archetype === 'playmaker' ? 1.40 : archetype === 'sniper' ? 0.70 : 1))
+        : 0;
+    const cleanSheetBonus = positionGroup === 'G'
+        ? Math.round(annual * (0.0018 + simRandom() * 0.0035))
+        : positionGroup === 'D'
+            ? Math.round(annual * (0.0014 + simRandom() * 0.0030) * (archetype === 'defensive' ? 1.30 : archetype === 'twoWay' ? 1.15 : 0.85))
+            : 0;
+    const savesBonus = positionGroup === 'G'
+        ? Math.round(annual * (0.0010 + simRandom() * 0.0020))
+        : 0;
+    const gamesPlayedBonus = positionGroup === 'F'
+        ? 0
+        : Math.round(annual * (positionGroup === 'D'
+            ? 0.0009 + simRandom() * 0.0013
+            : 0.0005 + simRandom() * 0.0008));
+    const guaranteeImportance = getBonusImportance(player, 'guarantee');
+    let guaranteedYears = 0;
+    if (motivation === 'loyalty' || guaranteeImportance >= 0.9) {
+        guaranteedYears = Math.min(years, simInt(2, Math.max(2, years)));
+    } else if (years >= 3 && simRandom() < 0.45 * (0.5 + guaranteeImportance)) {
+        guaranteedYears = simInt(1, Math.min(2, years));
+    } else if (years >= 2 && simRandom() < 0.20 * (0.5 + guaranteeImportance)) {
+        guaranteedYears = 1;
+    }
 
     const pros = [];
     const cons = [];
@@ -12913,6 +13994,30 @@ function generateTransferOffer(player, clubInfo) {
     if (player.character === 'loyal') { interest -= 2; cons.push('🐺 По характеру — верный'); }
     else if (player.character === 'ambitious') { interest += 1; pros.push('🚀 Амбициозен'); }
 
+    // Скрытая мотивация: определяет, какие пункты контракта важны игроку
+    if (motivation === 'greed') {
+        if (salaryBoost >= 1.2 || goalBonus > 0 || assistBonus > 0 || cleanSheetBonus > 0 || savesBonus > 0 || gamesPlayedBonus > 0) { interest += 2; pros.push('💰 Жадность: важны деньги и бонусы'); }
+        else { interest -= 2; cons.push('💰 Жадность: нужна максимальная зарплата'); }
+    } else if (motivation === 'ambition') {
+        if (data.prestige >= 70 || getLeagueTier(clubInfo.league) <= 2) { interest += 2; pros.push('🚀 Амбиции: топ-клуб и высокая лига'); }
+        else { interest -= 2; cons.push('🚀 Амбиции: клуб недостаточно амбициозен'); }
+    } else if (motivation === 'loyalty') {
+        if (years >= 3 || guaranteedYears > 0) { interest += 2; pros.push('🐺 Лояльность: ценит длинный контракт и гарантии'); }
+        else { interest -= 1; cons.push('🐺 Лояльность: хочет больше гарантий'); }
+    } else if (motivation === 'playtime') {
+        if (playingTime.score >= 2) { interest += 3; pros.push('⏱ Игровое время: обещают важную роль'); }
+        else if (playingTime.score <= -2) { interest -= 3; cons.push('⏱ Игровое время: слишком мало минут'); }
+    }
+
+    // Позиционная логика: вратарь ценит гарантии и сухие матчи, защитник — оборонные бонусы.
+    if (positionGroup === 'G' && (guaranteedYears > 0 || cleanSheetBonus > 0 || savesBonus > 0)) {
+        interest += 2;
+        pros.push('🧤 Вратарь: важны гарантии и сухие матчи');
+    } else if (positionGroup === 'D' && (cleanSheetBonus > 0 || gamesPlayedBonus > 0)) {
+        interest += 1;
+        pros.push('🛡 Защитник: важны сухие матчи и игры');
+    }
+
     // Возраст
     if (player.age <= 22) interest += 1;
     else if (player.age >= 32) interest -= 1;
@@ -12920,16 +14025,24 @@ function generateTransferOffer(player, clubInfo) {
     // Свободный агент — хочет играть
     if (!player.club) { interest += 5; pros.push('🕊️ Свободный агент — хочет играть'); }
 
+    // Скиллы под запрос клуба
+    if (clubInterest.score > 0) { interest += Math.min(4, clubInterest.score); pros.push(`✅ Скиллы подходят клубу (+${Math.min(4, clubInterest.score)})`); }
+    else if (clubInterest.score < 0) { interest += Math.max(-4, clubInterest.score); cons.push(`⚠️ Скиллы ниже запросов клуба (${clubInterest.score})`); }
+
     let acceptChance = 50 + interest * 10;
     acceptChance = Math.max(10, Math.min(95, acceptChance));
 
-    return {
+    const offer = {
         club: clubInfo.club, league: clubInfo.league, prestige: data.prestige,
-        newSalary, years, totalCommission: totalComm, weeklyCommission: weeklyComm,
+        newSalary, years, goalBonus, assistBonus, cleanSheetBonus, savesBonus, gamesPlayedBonus, guaranteedYears,
+        totalCommission: totalComm, weeklyCommission: weeklyComm,
         salaryBoost, tierBoost, prestigeBoost, interest,
         pros, cons, acceptChance, playingTime: playingTime.role,
-        id: clubInfo.league + "_" + clubInfo.club + "_" + Date.now() + "_" + simRandom()
+        clubInterest, clubBudget: data.budget, trueInterest: clubInterest.score,
+        motivation,
+        id: nextEntityId(clubInfo.league + '_' + clubInfo.club)
     };
+    return normalizeOfferContract(offer);
 }
 
 function generateOffersForPlayer(player, count, options) {
@@ -12938,10 +14051,11 @@ function generateOffersForPlayer(player, count, options) {
     if (clubs.length === 0) return [];
     const shuffled = [...clubs].sort(() => simRandom() - 0.5);
     const offers = [];
-    shuffled.slice(0, count).forEach(c => {
+    for (const c of shuffled) {
+        if (offers.length >= count) break;
         const o = generateTransferOffer(player, c);
         if (o) offers.push(o);
-    });
+    }
     offers.sort((a, b) => {
         const sA = a.salaryBoost + (a.tierBoost ? 0.5 : 0) + (a.prestigeBoost ? 0.3 : 0);
         const sB = b.salaryBoost + (b.tierBoost ? 0.5 : 0) + (b.prestigeBoost ? 0.3 : 0);
@@ -13009,9 +14123,8 @@ function acceptTransferOffer(player, offer) {    // Игрок может отк
     const oldClub = player.club;
     player.club = offer.club;
     player.league = offer.league;
-    player.salary = offer.newSalary;
+    applyContractTerms(player, offer);
     player.clubLoyalty = 50;
-    player.contractYears = offer.years;
     player.lastTransferSeason = currentSeason;
 
     // Комиссия агента: 10% от годовой зарплаты, выплачивается 26 недель
@@ -13276,7 +14389,7 @@ function showPassiveOffer(player, bestOffer, allOffers) {
             <div class="tm-money-line"><span>💰 Комиссия/нед</span><span>${formatMoney(bestOffer.weeklyCommission)}</span></div>
             <div class="tm-money-line"><span>💵 Всего</span><span>${formatMoney(bestOffer.totalCommission)}</span></div>
         </div>
-        ${allOffers.length > 1 ? '<div class="tm-warning" style="background-color:rgba(0,212,255,0.08);border-color:rgba(0,212,255,0.25);color:var(--neon-blue);">💡 Ещё ' + (allOffers.length - 1) + ' клуб(ов) прислали предложения</div>' : ''}
+        ${allOffers.length > 1 ? '<div class="tm-warning" style="background-color:rgba(0,229,255,0.08);border-color:rgba(0,229,255,0.25);color:var(--neon-blue);">💡 Ещё ' + (allOffers.length - 1) + ' клуб(ов) прислали предложения</div>' : ''}
     `;
     eventActions.innerHTML = '';
 
@@ -13338,7 +14451,7 @@ function processPendingClubReturns() {
         const improved = {
             ...base, newSalary, weeklyCommission: newComm,
             totalCommission: Math.round(newSalary * 1000 * COMMISSION_RATE),
-            id: base.league + "_" + base.club + "_" + Date.now() + "_r"
+            id: nextEntityId(base.league + '_' + base.club + '_r')
         };
         addNews(`🔔 ${item.club} вернулся с улучшенным предложением`, "positive");
         showPassiveOffer(player, improved, [improved]);
@@ -13359,11 +14472,41 @@ function generateRenewalOffer(player) {
     if (newSalary > cap) newSalary = Math.round(cap);
     const years = player.age < 25 ? simInt(2, 4) : player.age < 30 ? simInt(2, 3) : simInt(1, 2);
     const bonus = Math.round(newSalary * 1000 * 0.02);
-    return {
+    const motivation = getPlayerMotivation(player);
+    const positionGroup = getPlayerPositionGroup(player);
+    const archetype = getPlayerArchetype(player.position, player.name);
+    const annual = newSalary * 1000;
+    const goalBonus = positionGroup === 'F'
+        ? Math.round(annual * (0.002 + simRandom() * 0.003) * (archetype === 'sniper' ? 1.35 : archetype === 'playmaker' ? 0.75 : 1))
+        : 0;
+    const assistBonus = positionGroup === 'F'
+        ? Math.round(annual * (0.0012 + simRandom() * 0.0024) * (archetype === 'playmaker' ? 1.40 : archetype === 'sniper' ? 0.70 : 1))
+        : 0;
+    const cleanSheetBonus = positionGroup === 'G'
+        ? Math.round(annual * (0.0018 + simRandom() * 0.0032))
+        : positionGroup === 'D'
+            ? Math.round(annual * (0.0014 + simRandom() * 0.0028) * (archetype === 'defensive' ? 1.30 : archetype === 'twoWay' ? 1.15 : 0.85))
+            : 0;
+    const savesBonus = positionGroup === 'G'
+        ? Math.round(annual * (0.0010 + simRandom() * 0.0018))
+        : 0;
+    const gamesPlayedBonus = positionGroup === 'F'
+        ? 0
+        : Math.round(annual * (positionGroup === 'D'
+            ? 0.0009 + simRandom() * 0.0012
+            : 0.0005 + simRandom() * 0.0008));
+    let guaranteedYears = 0;
+    if (motivation === 'loyalty' || getBonusImportance(player, 'guarantee') >= 0.9 || years >= 3) {
+        guaranteedYears = Math.min(years, simInt(1, Math.min(2, years)));
+    }
+    const offer = {
         club: player.club, league: player.league, prestige: data.prestige,
         currentSalary: player.salary, newSalary, years, signingBonus: bonus,
+        goalBonus, assistBonus, cleanSheetBonus, savesBonus, gamesPlayedBonus, guaranteedYears,
+        clubBudget: data.budget, trueInterest: 0, motivation,
         salaryBoost: newSalary / Math.max(1, player.salary), isRenewal: true
     };
+    return normalizeOfferContract(offer);
 }
 
 function rollPlayerWantsToLeave(player) {
@@ -13410,6 +14553,12 @@ function showContractRenewalModal(player, offer, wantsLeave) {
             <div class="tm-stat"><span class="lbl">Новая ЗП</span><span class="val">${formatSalary(offer.newSalary)}</span></div>
             <div class="tm-stat"><span class="lbl">Прибавка</span><span class="val">+${sD}%</span></div>
             <div class="tm-stat"><span class="lbl">Срок</span><span class="val">${formatContractYears(offer.years)}</span></div>
+            ${getContractBonusKinds(player).map(kind => {
+                const field = getBonusField(kind);
+                const meta = getContractBonusMeta(kind, player);
+                return `<div class="tm-stat"><span class="lbl">${meta.label}</span><span class="val">${offer[field] ? formatMoney(offer[field]) + ' / ' + meta.unit : '—'}</span></div>`;
+            }).join('')}
+            <div class="tm-stat"><span class="lbl">Гарантированные годы</span><span class="val">${offer.guaranteedYears ? formatContractYears(offer.guaranteedYears) : '—'}</span></div>
         </div>
         <div class="team-modal-money">
             <div class="tm-money-line"><span>💰 Подписной бонус</span><span>${formatMoney(offer.signingBonus)}</span></div>
@@ -13425,7 +14574,7 @@ function showContractRenewalModal(player, offer, wantsLeave) {
         b1.addEventListener('click', () => {
             const chance = Math.min(0.85, 0.30 + getTradeBonus());
             closeEventModal();
-            if (Math.random() < chance) {
+            if (simRandom() < chance) {
                 addNews(`🗣 Уговорили ${player.name} остаться`, "positive");
                 player.loyalty = Math.min(100, (player.loyalty || 0) + 10);
                 setTimeout(() => showContractRenewalModal(player, offer, false), 150);
@@ -13482,8 +14631,7 @@ function showContractRenewalModal(player, offer, wantsLeave) {
 }
 
 function applyContractRenewal(player, offer) {
-    player.salary = offer.newSalary;
-    player.contractYears = offer.years;
+    applyContractTerms(player, offer);
     player.declinedRenewal = false;
     if (offer.signingBonus > 0) {
         agentMoney += offer.signingBonus;
@@ -13704,6 +14852,8 @@ function renderCreateAgency() {
 
 function startNewGame() {
     resetGame();
+    // Новая карьера: сразу наполняем базу талантов, иначе подписывать некого.
+    generateFreeAgentWindow(1);
     document.getElementById('create-agency-screen').style.display = 'none';
     showMobileScreen('office-screen');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -14183,11 +15333,11 @@ function generateSnowflakes() {
     for (let i = 0; i < 25; i++) {
         const f = document.createElement('div');
         f.className = 'snowflake';
-        f.style.left = Math.random() * 100 + '%';
-        f.style.animationDuration = (6 + Math.random() * 8) + 's';
-        f.style.animationDelay = (Math.random() * 8) + 's';
-        f.style.opacity = 0.2 + Math.random() * 0.4;
-        const s = 2 + Math.random() * 3;
+        f.style.left = cosmeticRandom() * 100 + '%';
+        f.style.animationDuration = (6 + cosmeticRandom() * 8) + 's';
+        f.style.animationDelay = (cosmeticRandom() * 8) + 's';
+        f.style.opacity = 0.2 + cosmeticRandom() * 0.4;
+        const s = 2 + cosmeticRandom() * 3;
         f.style.width = s + 'px';
         f.style.height = s + 'px';
         c.appendChild(f);
@@ -14451,7 +15601,7 @@ document.addEventListener('pointerdown', (e) => {
 // Модалки, которые можно закрыть системной кнопкой Назад.
 // При открытии модалки делаем pushState; popstate закрывает верхнюю открытую модалку.
 const BACK_HANDLERS = [
-    { id: 'negotiation-modal', close: () => { closeNegotiationModal(); activeNegotiation = null; } },
+    { id: 'negotiation-modal', close: () => { if (activeNegotiation) saveNegotiationSession(activeNegotiation); closeNegotiationModal(); activeNegotiation = null; } },
     { id: 'event-modal',       close: () => { eventModal.style.display = 'none'; } },
     { id: 'stock-trade-modal', close: () => { document.getElementById('stock-trade-modal').style.display = 'none'; } },
     { id: 'settings-modal',    close: () => { settingsModal.style.display = 'none'; } },
@@ -15021,19 +16171,19 @@ function awardNationalTournamentMedals(gold, silver, bronze) {
             addXP(1500);
             const bonus = scaleEventMoney(12000);
             agentMoney += bonus;
-            addNews(`🥇 ${p.name} — чемпион ${t.name}! +$${bonus.toLocaleString()}`, "positive");
+            addNews(`🥇 ${p.name} — чемпион ${t.name}! +$${formatInt(bonus)}`, "positive");
         } else if (inSilver) {
             p.trophies.push({ name: `🥈 ${t.name} ${t.year}`, season: t.year, club: silver.name });
             addXP(800);
             const bonus = scaleEventMoney(6000);
             agentMoney += bonus;
-            addNews(`🥈 ${p.name} — серебро ${t.name}! +$${bonus.toLocaleString()}`, "positive");
+            addNews(`🥈 ${p.name} — серебро ${t.name}! +$${formatInt(bonus)}`, "positive");
         } else if (inBronze) {
             p.trophies.push({ name: `🥉 ${t.name} ${t.year}`, season: t.year, club: bronze.name });
             addXP(400);
             const bonus = scaleEventMoney(2500);
             agentMoney += bonus;
-            addNews(`🥉 ${p.name} — бронза ${t.name}! +$${bonus.toLocaleString()}`, "positive");
+            addNews(`🥉 ${p.name} — бронза ${t.name}! +$${formatInt(bonus)}`, "positive");
         }
     });
 }
@@ -15510,7 +16660,7 @@ function openNationalTeamModal(code) {
         const isMine = myRoster.some(x => x.name === p.name);
         return `
             <div class="roster-row${isMine ? ' my-client' : ''}" data-nt-player="${p.name}" style="cursor:pointer;">
-                <div class="rr-avatar">${getPlayerAvatarSVG(p)}</div>
+                <div class="rr-avatar">${getPlayerAvatar(p)}</div>
                 <div class="rr-info">
                     <div class="rr-name-line">
                         <span class="rr-pos-icon">${posIcon}</span>
@@ -15592,6 +16742,8 @@ function onLanguageChanged() {
     }
     if (visible('news-feed-screen')) renderNewsFeedScreen();
     if (visible('event-history-screen')) renderEventHistory();
+    if (visible('match-view-screen') && matchViewState) mvRemount();
+    if (visible('negotiation-modal') && activeNegotiation) renderNegotiationModal(getActiveNegotiationPlayer());
 }
 window.onLanguageChanged = onLanguageChanged;
 
@@ -15618,14 +16770,165 @@ if (import.meta.env.DEV) {
             return simulateMatchWithDetails({ home: clubs[0], away: clubs[1] }, lk, null);
         },
         // Тестовый клиент в ростер (dev/test only).
-        addClient: (name = 'Тест Клиент') => {
+        addClient: (name = 'Тест Клиент', position = 'C') => {
             const lk = 'NHL';
             const clubs = getAllClubs(lk);
-            const p = createPlayer(name, clubs[0], lk, 'C', 22, 75, null, 'RU');
+            const p = createPlayer(name, clubs[0], lk, position, 22, 75, null, 'RU');
             players.push(p);
             myRoster.push(p);
             return p.name;
         },
+        // Проверка позиционных бонусов: первый валидный оффер и доступные пункты.
+        transferOfferProbe: (playerName) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p) return null;
+            const lk = p.league || 'NHL';
+            const clubs = getAllClubs(lk);
+            for (const club of clubs) {
+                if (club === p.club) continue;
+                const offer = generateTransferOffer(p, { league: lk, club });
+                if (offer) {
+                    const { id, ...rest } = offer;
+                    return rest;
+                }
+            }
+            return null;
+        },
+        contractBonusKinds: (playerName) => {
+            const p = players.find(x => x.name === playerName);
+            return p ? getContractBonusKinds(p) : [];
+        },
+        freeAgentCountForLevel: (level = agentLevel) => Math.min(60, 5 + level * 2),
+        freeAgentPoolCount: () => players.filter(p => p.agentId === null && !p.club && (p.isScouted || p.rating >= 40)).length,
+        setSeed: (value) => setSimulationSeed(value),
+        generateFreeAgentWindow: (level = agentLevel) => {
+            return generateFreeAgentWindow(level).map(p => ({
+                name: p.name, position: p.position, nationality: p.nationality,
+                rating: p.rating, potential: p.potential,
+                attack: p.attributes.attack, defense: p.attributes.defense,
+                archetype: getPlayerArchetype(p.position, p.name)
+            }));
+        },
+        buildTalentCardHTML: (name) => {
+            const p = players.find(x => x.name === name);
+            return p ? buildTalentCard(p) : '';
+        },
+        clubInterestProbe: (playerName, league) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p) return null;
+            const club = getAllClubs(league)[0];
+            return { club, ...evaluateClubInterest(p, { league, club }) };
+        },
+        motivationForCharacter: (character) => getMotivationForCharacter(character),
+        getPlayerMotivation: (playerName) => {
+            const p = players.find(x => x.name === playerName);
+            return p ? getPlayerMotivation(p) : null;
+        },
+        normalizeContractData: (player) => normalizeContractData({ ...player }),
+        evaluateNegotiationDemand: (playerName, offer, kind) => {
+            const p = players.find(x => x.name === playerName);
+            return p ? evaluateNegotiationDemand(p, offer, kind) : null;
+        },
+        // ===== Переговоры 2.0: универсальное ядро, шкалы, диалоговый раунд =====
+        evaluateContractPackage: (playerName, offer, perspective = 'club', anchor = null) => {
+            const p = players.find(x => x.name === playerName);
+            return p ? evaluateContractPackage(p, offer, perspective, anchor) : null;
+        },
+        gaugeTone: (value) => getGaugeTone(value),
+        negotiationGauges: (neg) => getNegotiationGauges(neg),
+        buildGaugesHTML: (playerName, neg) => {
+            const p = players.find(x => x.name === playerName);
+            return p ? buildNegotiationGaugesHTML(p, neg) : '';
+        },
+        // Открыть диалог по сохранённому офферу (или первому сгенерированному).
+        openNegotiationDialogue: (playerName) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p) return null;
+            const entry = getNegotiationEntry(p.name);
+            if (entry.offers.length === 0) {
+                const clubs = getClubsForPlayer(p);
+                entry.offers = pickRandomClubs(clubs, 3).map(c => generateTransferOffer(p, c)).filter(Boolean);
+                entry.offers.forEach(o => { o.signingBonus = o.signingBonus || 0; });
+            }
+            if (entry.offers.length === 0) return null;
+            startNegotiationFromSaved(p, entry.offers[0]);
+            return window.__HL.negotiationState();
+        },
+        // Детерминированное открытие диалога с явным оффером (для тестов).
+        openDialogueWithOffer: (playerName, offer) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p) return null;
+            const entry = getNegotiationEntry(p.name);
+            const o = normalizeOfferContract({ id: 'test_' + p.name + '_' + offer.club, ...offer });
+            entry.offers = [o];
+            entry.exhausted = false;
+            if (!entry.sessions) entry.sessions = {};
+            delete entry.sessions[o.league + '_' + o.club];
+            startNegotiationFromSaved(p, o);
+            return window.__HL.negotiationState();
+        },
+        negotiationState: () => {
+            const neg = activeNegotiation;
+            if (!neg) return null;
+            return JSON.parse(JSON.stringify({
+                playerName: neg.playerName, clubKey: neg.clubKey, club: neg.club, league: neg.league,
+                patience: neg.patience, interest: neg.interest, round: neg.round,
+                phase: neg.phase, finished: !!neg.finished, walkedAway: !!neg.walkedAway,
+                counterOffer: neg.counterOffer, draft: neg.draft,
+                messages: neg.messages.map(m => ({ from: m.from, text: m.text, hasOffer: !!m.offer }))
+            }));
+        },
+        // Раунд диалога без DOM-рендера: 'offer' | 'press' | 'adjust'.
+        dialogueRound: (playerName, pkg, action) => {
+            const p = players.find(x => x.name === playerName);
+            const neg = activeNegotiation;
+            if (!p || !neg) return null;
+            const result = resolveDialogueRound(p, neg, pkg, action);
+            if (neg.counterOffer) neg.draft = normalizeOfferContract({ ...neg.counterOffer });
+            saveNegotiationSession(neg);
+            return { ...result, state: window.__HL.negotiationState() };
+        },
+        // Принять текущий контр-оффер (подписание контракта).
+        acceptDialogue: (playerName) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p || !activeNegotiation) return null;
+            acceptNegotiation(p, activeNegotiation.counterOffer || activeNegotiation.offer);
+            return { club: p.club, salary: p.salary, years: p.contractYears };
+        },
+        // Повторное открытие того же оффера: сессия НЕ сбрасывается (продолжение диалога).
+        reopenNegotiation: (playerName) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p) return null;
+            const entry = playerNegotiations[p.name];
+            if (!entry || !entry.offers || entry.offers.length === 0) return null;
+            startNegotiationFromSaved(p, entry.offers[0]);
+            return window.__HL.negotiationState();
+        },
+        // Закрыть диалог (сессия сохраняется для продолжения).
+        closeDialogue: () => {
+            if (activeNegotiation) saveNegotiationSession(activeNegotiation);
+            activeNegotiation = null;
+            closeNegotiationModal();
+        },
+        // Перерисовать UI активного диалога (как после клика действия).
+        refreshDialogueUI: () => {
+            if (!activeNegotiation) return;
+            finishDialogueUiUpdate(getActiveNegotiationPlayer());
+        },
+        // Сессии диалогов игрока (для проверки персистентности).
+        negotiationSessions: (playerName) => {
+            const entry = playerNegotiations[playerName];
+            return entry && entry.sessions ? JSON.parse(JSON.stringify(entry.sessions)) : {};
+        },
+        getNegotiationInsight: (playerName, offer) => {
+            const p = players.find(x => x.name === playerName);
+            return p ? getNegotiationInsight(p, offer) : null;
+        },
+        buildNegotiationInsightHTML: (playerName, offer) => {
+            const p = players.find(x => x.name === playerName);
+            return p ? buildNegotiationInsightHTML(p, offer) : '';
+        },
+        setAgentLevel: (level) => { agentLevel = Math.max(1, Math.min(50, level)); },
         advanceWeek: () => playRegularWeek(),
         // Плей-офф: старт и раунд (dev/test only).
         startPlayoffsNow: () => startPlayoffs(),
@@ -15662,6 +16965,45 @@ if (import.meta.env.DEV) {
                 wants: rollPlayerWantsToLeave(p),
                 offers: generateOffersForPlayer(p, 3).map(strip)
             });
+        },
+        // ===== Просмотр матча: сценарий play-by-play и контроллер воспроизведения =====
+        mvDraws: () => getSimulationDraws(),
+        // Построить сценарий по синтетическому матчу (не мутирует состояние игры).
+        mvBuildScript: (home, away, lk, week, result) => {
+            const match = { home, away, week, isNational: false, isPlayoff: false, result };
+            const s = buildMatchScript(match, lk);
+            return JSON.stringify({
+                attendance: s.attendance,
+                homeScore: s.homeScore, awayScore: s.awayScore,
+                isOT: s.isOT, isSO: s.isSO, clientName: s.clientName,
+                totals: s.totals,
+                events: s.events.map(e => ({
+                    id: e.id, minute: e.minute, period: e.period, type: e.type, team: e.team,
+                    actor: e.actor, assists: e.assists, scoreHome: e.scoreHome, scoreAway: e.scoreAway,
+                    isClient: e.isClient, dv: e.dv, after: e.after, delay: e.delay
+                }))
+            });
+        },
+        // Открыть сценарий в контроллере (без DOM-рендера).
+        mvOpen: (home, away, lk, week, result) => {
+            const match = { home, away, week, isNational: false, isPlayoff: false, result };
+            matchViewState = buildMatchScript(match, lk);
+            matchPlayback.reset();
+            return JSON.stringify({ total: matchPlayback.total(), idx: matchPlayback.idx });
+        },
+        mvState: () => JSON.stringify({
+            idx: matchPlayback.idx, playing: matchPlayback.playing, speed: matchPlayback.speed,
+            total: matchPlayback.total(), finished: matchPlayback.isFinished()
+        }),
+        mvStepOnce: () => matchPlayback.stepOnce(),
+        mvToggleSpeed: () => { matchPlayback.toggleSpeed(); return matchPlayback.speed; },
+        mvSkip: () => { matchPlayback.skip(); return matchPlayback.idx; },
+        mvStepBack: () => { matchPlayback.stepBack(); return matchPlayback.idx; },
+        mvClose: () => { matchPlayback.clearTimer(); matchPlayback.reset(); matchViewState = null; },
+        mvText: (home, away, lk, week, result) => {
+            const match = { home, away, week, isNational: false, isPlayoff: false, result };
+            const s = buildMatchScript(match, lk);
+            return JSON.stringify(s.events.map(e => mvEventText(s, e)));
         },
         playoffSnapshot: () => JSON.stringify({            phase: seasonPhase,
             round: playoffRound,

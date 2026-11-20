@@ -6,7 +6,7 @@
 // Подключается ПОСЛЕ script.js.
 // ============================================================
 
-import { LEAGUE_DATA, generateLogoSlug, isDatapackActive } from './script.js';
+import { LEAGUE_DATA, generateLogoSlug, isDatapackActive, generateNeonShieldInner } from './script.js';
 import { migrateSaveWithMap } from './src/features/save/migrations';
 
 console.log('📦 datapack.js загружен');
@@ -376,43 +376,9 @@ window.getFarmClubOverride = function(nhlClub) {
 window.FARM_PAIRS_FAKE = FARM_PAIRS_FAKE;
 
 // ============ SVG-ГЕНЕРАТОР ЩИТОВ (для fallback) ============
-function getShieldColors(club) {
-    let h = 0;
-    for (let i = 0; i < club.length; i++) h = (h * 31 + club.charCodeAt(i)) | 0;
-    h = Math.abs(h);
-    const h1 = h % 360;
-    const h2 = (h1 + 25 + (h % 80)) % 360;
-    return [`hsl(${h1}, 62%, 40%)`, `hsl(${h2}, 70%, 22%)`];
-}
-
-function getClubAbbr(club) {
-    const clean = club.replace(/[^\wА-Яа-яЁё\s]/g, ' ').trim();
-    const words = clean.split(/\s+/).filter(w => w.length > 0);
-    if (words.length === 0) return '??';
-    if (words.length === 1) return words[0].substring(0, 3).toUpperCase();
-    return words.slice(0, 3).map(w => w[0]).join('').toUpperCase();
-}
-
+// NEON RINK: единый неоновый щит из script.js (inline SVG / data-uri дают одинаковую картинку).
 function generateShieldSVG(club) {
-    const [c1, c2] = getShieldColors(club);
-    const abbr = getClubAbbr(club);
-    const fs = abbr.length <= 2 ? 15 : abbr.length === 3 ? 13 : 11;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 44">
-        <defs>
-            <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="${c1}"/>
-                <stop offset="100%" stop-color="${c2}"/>
-            </linearGradient>
-        </defs>
-        <path d="M2 2 L38 2 L38 26 Q38 40 20 42 Q2 40 2 26 Z"
-              fill="url(#g)" stroke="rgba(255,255,255,0.55)" stroke-width="1.5"/>
-        <path d="M2 2 L38 2 L38 12 L2 12 Z"
-              fill="rgba(255,255,255,0.08)"/>
-        <text x="20" y="27" text-anchor="middle"
-              font-family="Arial, sans-serif" font-weight="900" font-size="${fs}"
-              fill="white" stroke="rgba(0,0,0,0.45)" stroke-width="0.6"
-              paint-order="stroke">${abbr}</text>
-    </svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 44">${generateNeonShieldInner(club)}</svg>`;
 }
 
 // ============ ЗАГРУЗКА ЛОГОТИПОВ ИЗ GITHUB RELEASES ============

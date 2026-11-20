@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#0d1420">
+    <meta name="theme-color" content="#05070c">
     <meta name="description" content="Hockey Legend — симулятор хоккейного агента: клиенты, контракты, лиги, драфт и трофеи.">
     <title>Hockey Legend v1.0</title>
     <link rel="icon" type="image/svg+xml" href="icon.svg">
@@ -26,9 +26,9 @@
         <svg class="menu-bg-rink" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice">
             <defs>
                 <linearGradient id="rinkLine" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="#00d4ff" stop-opacity="0"/>
-                    <stop offset="50%" stop-color="#00d4ff" stop-opacity="0.15"/>
-                    <stop offset="100%" stop-color="#00d4ff" stop-opacity="0"/>
+                    <stop offset="0%" stop-color="#00e5ff" stop-opacity="0"/>
+                    <stop offset="50%" stop-color="#00e5ff" stop-opacity="0.15"/>
+                    <stop offset="100%" stop-color="#00e5ff" stop-opacity="0"/>
                 </linearGradient>
             </defs>
             <line x1="200" y1="0" x2="200" y2="300" stroke="url(#rinkLine)" stroke-width="2"/>
@@ -66,8 +66,8 @@
                 <svg viewBox="0 0 120 120" class="menu-logo-svg">
                     <defs>
                         <linearGradient id="puckGrad" x1="0" y1="0" x2="1" y2="1">
-                            <stop offset="0%" stop-color="#00d4ff"/>
-                            <stop offset="100%" stop-color="#0088cc"/>
+                            <stop offset="0%" stop-color="#00e5ff"/>
+                            <stop offset="100%" stop-color="#0097c7"/>
                         </linearGradient>
                         <linearGradient id="shineGrad" x1="0" y1="0" x2="1" y2="1">
                             <stop offset="0%" stop-color="rgba(255,255,255,0.6)"/>
@@ -159,7 +159,7 @@
         </div>
         <div class="mobile-content">
             <div class="agent-profile">
-                <div class="agent-avatar"><span class="avatar-emoji">🧑‍💼</span></div>
+                <div class="agent-avatar"><span class="avatar-emoji" id="office-agent-avatar"></span></div>
                 <div class="agent-name" id="office-agent-name">АГЕНТ</div>
                 <div class="agent-rank" id="office-agent-rank">Начинающий агент</div>
             </div>
@@ -689,7 +689,7 @@
                 <div class="about-hero">
                     <div class="about-puck">
                         <svg viewBox="0 0 80 80" width="80" height="80">
-                            <defs><linearGradient id="aboutGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#00d4ff"/><stop offset="100%" stop-color="#0088cc"/></linearGradient></defs>
+                            <defs><linearGradient id="aboutGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#00e5ff"/><stop offset="100%" stop-color="#0097c7"/></linearGradient></defs>
                             <ellipse cx="40" cy="55" rx="28" ry="8" fill="rgba(0,0,0,0.4)"/>
                             <ellipse cx="40" cy="48" rx="28" ry="12" fill="#1a1a2e" stroke="url(#aboutGrad)" stroke-width="2"/>
                             <ellipse cx="40" cy="45" rx="28" ry="12" fill="#25253d"/>
@@ -841,20 +841,33 @@
         </div>
     </div>
 
-    <!-- Модалка переговоров в стиле смартфона (чат с клубом) -->
+    <!-- Модалка переговоров: слева конструктор контракта, справа представитель клуба (чат + шкалы) -->
     <div id="negotiation-modal" class="modal-overlay" style="display: none;">
-        <div class="phone-mockup">
-            <div class="phone-notch"><span class="phone-speaker"></span></div>
-            <div class="phone-screen">
-                <div class="phone-chat-header">
-                    <div class="phone-chat-avatar" id="phone-chat-avatar"></div>
-                    <div class="phone-chat-info">
-                        <span class="phone-chat-name" id="phone-chat-name"></span>
-                        <span class="phone-chat-status" id="phone-chat-status"></span>
-                    </div>
+        <div class="negotiation-console">
+            <!-- Левая панель: конструктор контракта агента -->
+            <div class="neg-builder-panel" id="neg-builder-panel">
+                <div class="neg-builder-head">
+                    <span class="neg-builder-title">📋 <span id="neg-builder-title-text">Конструктор контракта</span></span>
+                    <span class="neg-builder-client" id="neg-builder-client"></span>
                 </div>
-                <div class="phone-chat-body" id="phone-chat-body"></div>
-                <div class="phone-input-bar" id="phone-input-bar"></div>
+                <div class="neg-builder-body" id="neg-builder-body"></div>
+                <div class="neg-builder-actions" id="neg-builder-actions"></div>
+            </div>
+            <!-- Правая панель: представитель клуба, шкалы Interest/Patience и чат -->
+            <div class="neg-club-panel phone-mockup">
+                <div class="phone-notch"><span class="phone-speaker"></span></div>
+                <div class="phone-screen">
+                    <div class="phone-chat-header">
+                        <div class="phone-chat-avatar" id="phone-chat-avatar"></div>
+                        <div class="phone-chat-info">
+                            <span class="phone-chat-name" id="phone-chat-name"></span>
+                            <span class="phone-chat-status" id="phone-chat-status"></span>
+                        </div>
+                    </div>
+                    <div class="neg-gauges" id="neg-gauges"></div>
+                    <div class="phone-chat-body" id="phone-chat-body"></div>
+                    <div class="phone-input-bar" id="phone-input-bar"></div>
+                </div>
             </div>
         </div>
     </div>

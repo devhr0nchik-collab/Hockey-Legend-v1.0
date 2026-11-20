@@ -58,6 +58,13 @@ export interface Player {
     clubLoyalty: number;
     lastTransferSeason: number;
     contractYears: number;
+    goalBonus?: number;
+    assistBonus?: number;
+    cleanSheetBonus?: number;
+    savesBonus?: number;
+    gamesPlayedBonus?: number;
+    guaranteedYears?: number;
+    motivation?: string;
     declinedRenewal: boolean;
     trophies: string[];
     awards: string[];
@@ -165,6 +172,7 @@ export interface SaveData {
     activeCommissions: unknown[];
     pendingClubReturn: unknown[];
     playerNegotiations: Record<string, unknown>;
+    contractExtras?: Record<string, [string, number, number, number, number?, number?, number?]>;
     poachedPlayersThisSeason: Record<string, unknown>;
     agencyPoachAttempts: Record<string, unknown>;
     closedAgencies: Record<string, unknown>;

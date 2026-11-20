@@ -9,6 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:unit": "vitest run --exclude tests/season-determinism.test.mjs",
+    "test:season": "vitest run tests/season-determinism.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
