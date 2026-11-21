@@ -29,10 +29,10 @@ script.js             ядро игры (постепенно разбирает
 i18n.js               словари RU/EN + перевод DOM (техдолг, план — ключи)
 datapack_rosters.js   реальные составы
 datapack.js           переименования клубов, логотипы, миграции сейва
-public/               статика как есть: sw.js, icon.svg, manifest
+public/               статика как есть: sw.js, icon.svg, icons/*.png, offline.html, manifest
 src/main.ts           точка входа Vite (порядок: i18n → rosters → script → datapack)
 src/core/             типизированное чистое ядро (rng, атрибуты, зарплаты, упаковка сейва)
-tests/                vitest: smoke (jsdom) + юнит-тесты ядра
+tests/                vitest: smoke (jsdom) + юнит-тесты ядра и геймплея
 ```
 
 ## Правила разработки
@@ -49,7 +49,7 @@ tests/                vitest: smoke (jsdom) + юнит-тесты ядра
 - [x] Фаза 1. Vite + ESM-модули, SW только в prod, smoke-тесты
 - [x] Фаза 2. Модель и сейвы: `types.ts`, `core/pack.ts`, `features/save/storage.ts`, `features/save/migrations.ts`, roundtrip-тест сейва на fake-indexeddb
 - [ ] Фаза 2.5. Вынести `saveGame`/`loadGame` из `script.js` (требует единого state-объекта — делается вместе с Фазой 3)
-- [~] Фаза 3. Детерминизм: неделя, плей-офф и межсезонье воспроизводимы (0 вызовов `Math.random`, проверяется тестами). Осталось: трансферы/переговоры, драфт-выборы, национальные турниры и вынос sim-модулей в `features/sim/`
-- [ ] Фаза 3. Симуляция: RNG-сервис вместо `Math.random`, модули match/league/economy/draft/playoffs
+- [~] Фаза 3. Детерминизм: неделя, плей-офф, межсезонье, трансферы/переговоры и полный сезон воспроизводимы (0 вызовов `Math.random`, проверяется тестами). Осталось: вынос sim-модулей в `features/sim/`.
+- [ ] Фаза 3. Симуляция: модули match/league/economy/draft/playoffs (поведение уже детерминировано, нужен рефакторинг).
 - [ ] Фаза 4. i18n на ключи, удаление regex-слоя и MutationObserver
 - [ ] Фаза 5. UI-экраны по одному: шаблоны + экранирование вместо `innerHTML`

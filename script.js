@@ -10,6 +10,138 @@ import { setSimulationSeed, simRandom, simInt, simChoice, matchSeed, getSimulati
 import { cosmeticRandom } from './src/core/cosmetic-random';
 
 if (window.DEBUG) console.log("✅ script.js загружен");
+
+// ============ СПРАВКА ПО АТРИБУТАМ ============
+// Единый источник названий/описаний для карточек игрока, базы талантов и «Об игре».
+const ATTRIBUTE_INFO = {
+    attack:    { icon: '🎯', name: 'Атака',    desc: 'Завершение атак, броски и голы.' },
+    defense:   { icon: '🛡️', name: 'Защита',   desc: 'Игра в обороне, отбор и меньше пропущенных.' },
+    technique: { icon: '🎩', name: 'Техника',  desc: 'Контроль шайбы, пас и ассисты.' },
+    psyche:    { icon: '🧠', name: 'Психика',  desc: 'Хладнокровие, стресс и буллиты.' },
+    physics:   { icon: '💪', name: 'Физика',   desc: 'Сила, выносливость и силовые приёмы.' },
+    speed:     { icon: '💨', name: 'Скорость', desc: 'Катание и ускорение.' },
+    potential: { icon: '📈', name: 'Потенциал', desc: 'Потолок роста игрока: выше рейтинга не прыгнуть.' }
+};
+
+function getAttributeInfo(attrKey) {
+    const info = ATTRIBUTE_INFO[attrKey];
+    if (!info) return null;
+    return {
+        key: attrKey,
+        icon: info.icon,
+        name: LANG.t(info.name),
+        desc: LANG.t(info.desc)
+    };
+}
+
+function attrHelpButton(attrKey) {
+    const info = getAttributeInfo(attrKey);
+    if (!info) return '';
+    const label = `${LANG.t('Справка по атрибуту')}: ${info.name}`;
+    return `<button type="button" class="attr-help" data-attr-help="${attrKey}" aria-label="${label}" title="${label}">?</button>`;
+}
+
+function renderAttributeHelpHTML() {
+    return Object.keys(ATTRIBUTE_INFO).map((key) => {
+        const info = getAttributeInfo(key);
+        return `<div class="attr-guide-item" data-attr="${key}">
+            <div class="attr-guide-head"><span class="attr-guide-icon">${info.icon}</span><span class="attr-guide-name">${info.name}</span></div>
+            <div class="attr-guide-desc">${info.desc}</div>
+        </div>`;
+    }).join('');
+}
+
+function renderAttributeHelpInto(el) {
+    if (el) el.innerHTML = renderAttributeHelpHTML();
+}
+
+// Доступный тултип: hover на desktop, tap на mobile, Escape/клик вне — закрыть.
+let attrTooltipEl = null;
+let attrTooltipAnchor = null;
+let attrTooltipPinned = false;
+let attrTooltipAttr = null;
+
+function ensureAttrTooltipEl() {
+    if (attrTooltipEl && document.body.contains(attrTooltipEl)) return attrTooltipEl;
+    attrTooltipEl = document.createElement('div');
+    attrTooltipEl.id = 'attr-tooltip';
+    attrTooltipEl.className = 'attr-tooltip';
+    attrTooltipEl.setAttribute('role', 'tooltip');
+    document.body.appendChild(attrTooltipEl);
+    return attrTooltipEl;
+}
+
+function positionAttrTooltip(anchor) {
+    if (!attrTooltipEl) return;
+    const vw = window.innerWidth || 360;
+    const vh = window.innerHeight || 640;
+    let anchorRect = { left: vw / 2, top: vh / 2, width: 0, height: 0, bottom: vh / 2 };
+    if (anchor && anchor.getBoundingClientRect) anchorRect = anchor.getBoundingClientRect();
+    const tRect = attrTooltipEl.getBoundingClientRect();
+    let left = anchorRect.left + anchorRect.width / 2 - tRect.width / 2;
+    left = Math.max(8, Math.min(vw - tRect.width - 8, left));
+    let top = anchorRect.bottom + 8;
+    if (top + tRect.height > vh - 8) top = Math.max(8, anchorRect.top - tRect.height - 8);
+    attrTooltipEl.style.left = `${Math.round(left)}px`;
+    attrTooltipEl.style.top = `${Math.round(top)}px`;
+}
+
+function showAttrTooltip(attrKey, anchor = null, pinned = false) {
+    const info = getAttributeInfo(attrKey);
+    if (!info) return;
+    const el = ensureAttrTooltipEl();
+    el.innerHTML = `<div class="attr-tooltip-title">${info.icon} ${info.name}</div><div class="attr-tooltip-desc">${info.desc}</div>`;
+    el.classList.add('show');
+    attrTooltipAttr = attrKey;
+    attrTooltipAnchor = anchor;
+    attrTooltipPinned = !!pinned;
+    positionAttrTooltip(anchor);
+}
+
+function hideAttrTooltip() {
+    if (attrTooltipEl) attrTooltipEl.classList.remove('show');
+    attrTooltipAttr = null;
+    attrTooltipAnchor = null;
+    attrTooltipPinned = false;
+}
+
+function isAttrTooltipOpen() {
+    return !!(attrTooltipEl && attrTooltipEl.classList.contains('show'));
+}
+
+document.addEventListener('click', (e) => {
+    const target = e.target;
+    const help = target && target.closest ? target.closest('[data-attr-help]') : null;
+    if (help) {
+        e.preventDefault();
+        const key = help.getAttribute('data-attr-help');
+        if (attrTooltipAttr === key && attrTooltipPinned) hideAttrTooltip();
+        else showAttrTooltip(key, help, true);
+        return;
+    }
+    if (target && target.closest && target.closest('.attr-tooltip')) return;
+    if (isAttrTooltipOpen()) hideAttrTooltip();
+});
+
+document.addEventListener('pointerover', (e) => {
+    if (e.pointerType === 'touch') return;
+    const target = e.target;
+    const help = target && target.closest ? target.closest('[data-attr-help]') : null;
+    if (help && !attrTooltipPinned) showAttrTooltip(help.getAttribute('data-attr-help'), help, false);
+});
+
+document.addEventListener('pointerout', (e) => {
+    if (e.pointerType === 'touch' || attrTooltipPinned) return;
+    const target = e.target;
+    const help = target && target.closest ? target.closest('[data-attr-help]') : null;
+    if (help) hideAttrTooltip();
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isAttrTooltipOpen()) hideAttrTooltip();
+});
+window.addEventListener('resize', () => { if (isAttrTooltipOpen()) hideAttrTooltip(); });
+
 // ============ 1. ЭЛЕМЕНТЫ ============
 const mainMenu = document.getElementById('main-menu');
 const officeScreen = document.getElementById('office-screen');
@@ -66,6 +198,7 @@ let currentWeek = 1;
 let newsFeed = [];
 let standings = {};
 let teamStrengths = {};
+let teamInjuryPenalty = {};
 let clubData = {};
 let myPortfolio = {};
 let npcAgencies = [];
@@ -75,6 +208,11 @@ let marketSort = 'price_asc';
 let playerTab = 'info';
 let currentPlayerScreen = null;
 let currentPlayerSource = 'my';
+// Автотренировки: { [playerName]: attribute }. Хранятся в корне сейва (не в PackedPlayer).
+let trainingAuto = {};
+// Живой мир: динамические события (банкротства, тренеры, арены).
+// Хранится в корне сейва, PackedClub не меняется.
+let worldState = { v: 1, cooldowns: {}, debtWeeks: {}, effects: {}, feed: [] };
 let playerReturnContext = null; // { type: 'club', clubName, league } | { type: 'national' } | null
 let agencyTab = 'upgrade';
 
@@ -136,7 +274,9 @@ let matchQueueIdx = 0;
 // XP
 let agentXP = 0;
 let agentLevel = 1;
-const XP_THRESHOLDS = [0, 500, 1500, 4000, 10000, 25000, 60000, 150000, 400000, 1000000];
+// Верхние пороги сжаты (v1.1): уровень 10 достижим за реальный лонг-ран
+// (раньше 1 000 000 XP при доходе 10–20K XP/сезон — это 50–100 сезонов).
+const XP_THRESHOLDS = [0, 500, 1500, 4000, 10000, 25000, 60000, 120000, 250000, 400000];
 
 // NPC
 let npcCooldownWeeks = 0;
@@ -215,8 +355,8 @@ const CAREER_GOALS = {
         { lvl: 8,  title: '3 клуба в портфеле',       desc: 'Разные инвестиции',                 check: 'portfolio_count', target: 3, reward: { money: 100000 } },
         { lvl: 9,  title: '$10M',                     desc: 'Десять миллионов',                  check: 'money',        target: 10000000, reward: { money: 500000 } },
         { lvl: 10, title: '$50M',                     desc: 'Финансовый гигант',                 check: 'money',        target: 50000000, reward: { title: 'Магнат' } },
-        { lvl: 11, title: '$100M',                    desc: 'Сто миллионов',                     check: 'money',        target: 100000000, reward: { title: 'Империя' } },
-        { lvl: 12, title: '$1B',                      desc: 'Миллиардер',                        check: 'money',        target: 1000000000, reward: { title: 'Финансовый бессмертный' } }
+        { lvl: 11, title: '$25M',                     desc: 'Двадцать пять миллионов',           check: 'money',        target: 25000000,  reward: { title: 'Империя' } },
+        { lvl: 12, title: '$75M',                     desc: 'Семьдесят пять миллионов',          check: 'money',        target: 75000000,  reward: { title: 'Финансовый бессмертный' } }
     ],
     legend: [
         { lvl: 1,  title: 'Первый гол клиента',       desc: 'Твой игрок забил',                   check: 'client_goals', target: 1,  reward: { xp: 50 } },
@@ -349,8 +489,11 @@ export const LEAGUE_DATA = {
         {name:"DEL",clubs:["Adler Mannheim","Eisbären Berlin","Augsburger Panther","Grizzlys Wolfsburg","Dresdner Eislöwen","Iserlohn Roosters","ERC Ingolstadt","Kölner Haie","Löwen Frankfurt","Nürnberg Ice Tigers","Red Bull München","Fischtown Pinguins","Schwenninger Wild Wings","Straubing Tigers"]}]},
     "NL_Switzerland": { country:"🇨🇭 Швейцария",group:"Европа",min:50,max:88,playoffSpots:8,divisions:[
         {name:"National League",clubs:["HC Davos","Fribourg-Gottéron","ZSC Lions","Genève-Servette","HC Lugano","Lausanne HC","Rapperswil-Jona Lakers","EV Zug","SC Bern","EHC Biel","SCL Tigers","EHC Kloten","HC Ambrì-Piotta","HC Ajoie"]}]},
-    "ICE_HL": { country:"🇦🇹 Австрия",group:"Европа",min:35,max:72,playoffSpots:2,divisions:[
-        {name:"ICE Hockey League",clubs:["Red Bull Salzburg","KAC Klagenfurt","Graz 99ers"]}]}
+    "ICE_HL": { country:"🇦🇹 Австрия",group:"Европа",min:35,max:72,playoffSpots:4,divisions:[
+        {name:"ICE Hockey League",clubs:[
+            "Red Bull Salzburg","KAC Klagenfurt","Graz 99ers","Vienna Capitals","EC VSV","Black Wings Linz",
+            "HC Bolzano","HC Pustertal","Olimpija Ljubljana","Fehérvár AV19","Pioneers Vorarlberg","Asiago"
+        ]}]}
 };
 
 const LEAGUE_NAMES = {
@@ -490,17 +633,19 @@ const UPGRADE_CARDS = {
 };
 
 // ============ ПРИЗОВЫЕ ЗА ТРОФЕИ ============
-const LEAGUE_PRIZE_BUDGETS = {
+function getLeaguePrize(lk, multiplier) {
+    const b = getLeagueBudget(lk);
+    return Math.round(b * multiplier);
+}
+
+// Единый словарь годовых бюджетов лиг (биржа и экономика клубов).
+const LEAGUE_BUDGET = {
     "NHL": 100000000, "AHL": 15000000, "KHL": 30000000, "VHL": 3000000,
     "MHL": 500000, "Belarus_Extraliga": 5000000, "Belarus_Vysshaya": 500000,
     "SHL": 20000000, "Liiga": 15000000, "Czech_Extraliga": 12000000,
     "DEL": 15000000, "NL_Switzerland": 25000000, "ICE_HL": 8000000
 };
-
-function getLeaguePrize(lk, multiplier) {
-    const b = LEAGUE_PRIZE_BUDGETS[lk] || 1000000;
-    return Math.round(b * multiplier);
-}
+function getLeagueBudget(lk) { return LEAGUE_BUDGET[lk] || 1000000; }
 
 // ============ КАРТОЧКИ ПРОКАЧКИ КЛУБА ============
 const CLUB_UPGRADE_CARDS = {
@@ -512,16 +657,16 @@ const CLUB_UPGRADE_CARDS = {
     academy:   { icon:'👶', name:'Академия',      desc:'Потенциал молодёжи' }
 };
 
-function getLeagueBaseCost(lk) {
-    const budgets = {"NHL":100000000,"AHL":15000000,"KHL":30000000,"VHL":3000000,"MHL":500000,
-        "Belarus_Extraliga":5000000,"Belarus_Vysshaya":500000,"SHL":20000000,"Liiga":15000000,
-        "Czech_Extraliga":12000000,"DEL":15000000,"NL_Switzerland":25000000,"ICE_HL":8000000};
-    const b = budgets[lk] || 1000000;
-    return Math.max(50, Math.round(b / 40000));
+function clubUpgradeCost(cardKey, level, lk) {
+    const base = getLeagueBudget(lk) * 0.005; // 0.5% годового бюджета лиги
+    return Math.max(100, Math.round(base * Math.pow(Math.max(1, level), 1.35)));
 }
 
-function clubUpgradeCost(cardKey, level, lk) {
-    return Math.round(getLeagueBaseCost(lk) * Math.pow(level, 2.3));
+// Доля стоимости апгрейда от текущего бюджета клуба (для карточки в UI).
+function getClubUpgradeBudgetShare(cost, club) {
+    const fallback = getLeagueBudget(club && club.league ? club.league : 'NHL');
+    const budget = club && club.budget > 0 ? club.budget : fallback;
+    return budget > 0 ? (cost / budget) * 100 : 0;
 }
 
 function generateClubUpgrades(prestige) {
@@ -746,6 +891,27 @@ function getOfferCommissionRate(offer) {
 }
 
 function clampNumber(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+// Экранирование пользовательских строк перед вставкой в innerHTML.
+function escapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Денежная награда карьерной цели, которая реально начисляется.
+// UI и начисление обязаны использовать одну и ту же функцию (B10).
+function getCareerGoalMoney(goal) {
+    const amount = goal && goal.reward ? Number(goal.reward.money) : 0;
+    return Number.isFinite(amount) && amount > 0 ? Math.round(amount / 5) : 0;
+}
 
 function applyContractTerms(player, offer) {
     normalizeOfferContract(offer);
@@ -1144,8 +1310,16 @@ function getTrainerSuccessChance() {
 }
 // Еженедельная зарплата тренера (добавляется в totalWeeklyCost)
 function getTrainerWeeklyCost() { return Math.round(100 + Math.pow(upgrades.trainer, 1.7) * 12); }
-// Стоимость одной индивидуальной тренировки клиента
-const TRAINING_COST = 50000;
+// Динамическая стоимость индивидуальной тренировки клиента.
+// base = 1500 + rating * 40; множитель растёт с уровнем агента.
+// Ориентиры: rating 50 / lvl 1 → $3 500; rating 80 / lvl 10 → ~$7 000; потолок $25 000.
+const MAX_TRAINING_COST = 25000;
+function getTrainingCost(player) {
+    const rating = Math.max(1, Math.min(99, (player && player.rating) || 1));
+    const base = 1500 + rating * 40;
+    const levelMult = 1 + (Math.max(1, agentLevel) - 1) * 0.06;
+    return Math.min(MAX_TRAINING_COST, Math.round(base * levelMult));
+}
 // Длительность тренировки в неделях
 const TRAINING_WEEKS = 2;
 
@@ -1959,12 +2133,20 @@ function selectWorldCupTeams() {
                     .filter(p => p.season === currentSeason - 1);
                 return { club, place: posList.length > 0 ? posList[0].place : null };
             });
-            rows.sort((a, b) => {
-                if (a.place === null && b.place === null) return 0;
-                if (a.place === null) return 1;
-                if (b.place === null) return -1;
-                return a.place - b.place;
-            });
+            // B6: в первый сезон мест ещё нет — сразу выбираем по престижу,
+            // а не по алфавитному порядку клубов.
+            const hasAnyPlace = rows.some(r => r.place !== null);
+            const prestigeOf = (club) => clubData[lk + "_" + club]?.prestige || 50;
+            if (!hasAnyPlace) {
+                rows.sort((a, b) => prestigeOf(b.club) - prestigeOf(a.club));
+            } else {
+                rows.sort((a, b) => {
+                    if (a.place === null && b.place === null) return prestigeOf(b.club) - prestigeOf(a.club);
+                    if (a.place === null) return 1;
+                    if (b.place === null) return -1;
+                    return a.place - b.place;
+                });
+            }
             selected = rows.slice(0, count).map(p => p.club);
         }
 
@@ -2126,6 +2308,16 @@ function padRealRoster(allPlayers, clubStart, club, leagueName, leagueData) {
         total++;
     }
     if (total >= 17) return;
+    // B17: паддинг по медиане реального состава ±6, а не по min/max лиги
+    // (иначе в KHL появлялись игроки до 92, а в NHL — до 60).
+    const existingRatings = [];
+    for (let i = clubStart; i < allPlayers.length; i++) {
+        const p = allPlayers[i];
+        if (p.league === leagueName && p.club === club) existingRatings.push(p.rating);
+    }
+    const medianRating = existingRatings.length
+        ? getMedianRating(existingRatings)
+        : (leagueData.min + leagueData.max) / 2;
     for (const position of template) {
         if (total >= 17) break;
         if ((have[position] || 0) >= needCounts[position]) continue;
@@ -2136,8 +2328,7 @@ function padRealRoster(allPlayers, clubStart, club, leagueName, leagueData) {
         }
         if (!name) name = 'Player ' + (allPlayers.length + 1);
         GLOBAL_USED_NAMES.add(name);
-        const baseRating = simInt(leagueData.min, leagueData.max);
-        const rating = Math.max(1, Math.min(100, baseRating + simInt(-5, 5)));
+        const rating = Math.max(1, Math.min(100, Math.round(medianRating) + simInt(-6, 6)));
         const age = (leagueName === "MHL" || leagueName === "Belarus_Vysshaya") ? simInt(14, 20) : simInt(18, 30);
         allPlayers.push(createPlayer(name, club, leagueName, position, age, rating, null, nationality));
         have[position] = (have[position] || 0) + 1;
@@ -2242,11 +2433,6 @@ function assignPlayersToNpcAgencies() {
 }
 
 // ============ 10. ЭКОНОМИКА КЛУБОВ ============
-function getLeagueStockMultiplier(lk){
-    const m = {"NHL":12,"NL_Switzerland":4,"SHL":3,"AHL":3,"KHL":1.5,"Liiga":2,"Czech_Extraliga":2,"DEL":2,"ICE_HL":1,"Belarus_Extraliga":0.5,"VHL":0.3,"MHL":0.1,"Belarus_Vysshaya":0.05};
-    return m[lk] || 1;
-}
-
 // ============ ПРОВЕРКА ЦЕЛЕЙ ============
 // Реальная репутация агента в мировом рейтинге
 function getMyAgentReputation() {
@@ -2416,7 +2602,7 @@ function checkAllGoals() {
                     if (nextGoal.reward) {
                         if (nextGoal.reward.xp) addXP(nextGoal.reward.xp);
                         if (nextGoal.reward.money) {
-                            const cut = Math.round(nextGoal.reward.money / 5);
+                            const cut = getCareerGoalMoney(nextGoal);
                             agentMoney += cut;
                             addNews(`💰 Награда за цель: +$${formatInt(cut)}`, "info");
                         }
@@ -2435,9 +2621,49 @@ function checkAllGoals() {
     return anyNew;
 }
 
+// ============ БИРЖА: справедливая капитализация (этап 1.1) ============
+// Стоимость клуба = годовой бюджет лиги × множители (престиж, апгрейды,
+// форма, титулы, бюджет клуба). Никаких абсолютных добавок — для слабых
+// лиг они перекрывали базу и разгоняли акции на сотни процентов.
+// noise — параметр (по умолчанию 1): чистая fair-оценка без RNG.
+function getClubEnterpriseValue(club, noise = 1) {
+    const leagueBudget = getLeagueBudget(club.league);
+    const prestigePart = 0.35 + (club.prestige || 0) / 100;
+    const upgradeLevels = getClubUpgradesTotal(club);
+    const upgradePart = 1 + Math.min(upgradeLevels / 600, 0.25);
+    const wins = (club.form || []).filter(f => f === 'W').length;
+    const losses = (club.form || []).filter(f => f === 'L').length;
+    const formScore = (wins - losses) / 5;
+    const formPart = 1 + formScore * 0.04;
+    const titlesPart = 1 + Math.min(club.titles || 0, 20) * 0.005;
+    const budgetRatio = leagueBudget > 0 ? (club.budget || 0) / leagueBudget - 1 : 0;
+    const budgetPart = 1 + Math.max(-0.5, Math.min(0.5, budgetRatio)) * 0.1;
+    return leagueBudget * prestigePart * upgradePart * formPart * titlesPart * budgetPart * noise;
+}
+
+// Цена за 1% клуба (1 акция = 1%, sharesTotal = 100).
+function getFairStockPrice(club) {
+    return Math.max(1, Math.round(getClubEnterpriseValue(club) / 100));
+}
+
+// Коридор цены: 0.75×fair … 1.5×fair.
+function getStockBounds(club) {
+    const fair = getFairStockPrice(club);
+    const floor = Math.max(1, Math.round(fair * 0.75));
+    const ceiling = Math.max(floor, Math.round(fair * 1.5));
+    return { floor, ceiling };
+}
+
+// Недельный лимит изменения: не более ±2.5% от предыдущей цены.
+function clampStockMove(prev, next) {
+    if (!Number.isFinite(prev) || prev <= 0) return Math.max(1, Math.round(next));
+    const lo = Math.max(1, Math.round(prev * 0.975));
+    const hi = Math.max(lo, Math.round(prev * 1.025));
+    return Math.max(lo, Math.min(hi, Math.round(next)));
+}
+
 function generateClubData() {
     clubData = {};
-    const leagueBudgets = {"NHL":100000000,"AHL":15000000,"KHL":30000000,"VHL":3000000,"MHL":500000,"Belarus_Extraliga":5000000,"Belarus_Vysshaya":500000,"SHL":20000000,"Liiga":15000000,"Czech_Extraliga":12000000,"DEL":15000000,"NL_Switzerland":25000000,"ICE_HL":8000000};
     for (const [lk, ld] of Object.entries(LEAGUE_DATA)) {
         const clubs = getAllClubs(lk);
         const basePrestige = Math.round((ld.min + ld.max) / 2);
@@ -2448,7 +2674,7 @@ function generateClubData() {
             const prestige = (realData && realData.prestige)
                 ? realData.prestige
                 : Math.max(20, Math.min(99, basePrestige + randomInt(-10, 10)));
-            const bb = leagueBudgets[lk] || 1000000;
+            const bb = getLeagueBudget(lk);
             const budget = Math.round(bb * (0.6 + simRandom() * 0.8));
             const founded = randomInt(1940, 2005);
             const titles = randomInt(0, Math.max(1, Math.floor(prestige / 8)));
@@ -2457,19 +2683,26 @@ function generateClubData() {
             const bestSeasons = [];
             for (let i = 0; i < 3; i++) bestSeasons.push({year:randomInt(founded+10,2024),points:randomInt(80,140),place:randomInt(1,3)});
             bestSeasons.sort((a, b) => b.points - a.points);
-            const stockPrice = Math.round(prestige * 1000 * getLeagueStockMultiplier(lk));
-            const stockHistory = [];
-            let temp = stockPrice;
-            for (let w = 0; w < 10; w++) { temp = Math.round(temp * (0.93 + simRandom() * 0.14)); stockHistory.push(temp); }
-            stockHistory.push(stockPrice);
             const upgrades = generateClubUpgrades(prestige);
-            clubData[key] = {
+            const clubObj = {
                 club, league:lk, prestige, budget,
                 upgrades,
                 founded, titles, legends, bestSeasons, form:[],
-                stockPrice, stockHistory, sharesTotal:100,
+                stockPrice:0, stockHistory:[], sharesTotal:100,
                 weeklyIncome:0, weeklyExpenses:0, weeklyResult:0
             };
+            // Стартовая цена — fair; история гуляет от неё в пределах коридора.
+            const fair = getFairStockPrice(clubObj);
+            const bounds = getStockBounds(clubObj);
+            clubObj.stockPrice = fair;
+            let temp = fair;
+            for (let w = 0; w < 10; w++) {
+                temp = clampStockMove(temp, Math.round(temp * (0.97 + simRandom() * 0.06)));
+                temp = Math.max(bounds.floor, Math.min(bounds.ceiling, temp));
+                clubObj.stockHistory.push(temp);
+            }
+            clubObj.stockHistory.push(fair);
+            clubData[key] = clubObj;
         });
     }
 }
@@ -2664,7 +2897,7 @@ function ensureCouncil() {
     }
 }
 
-function checkTaskProgress(club, task) {
+function checkTaskProgress(club, task, seasonArg) {
     if (task.check === 'playoff') {
         const arr = (standings[club.league] || []).slice().sort(sortStandingsFn);
         const idx = arr.findIndex(t => t.club === club.club);
@@ -2674,8 +2907,13 @@ function checkTaskProgress(club, task) {
     if (task.check === 'top4' || task.check === 'top2' || task.check === 'champion') {
         const arr = (standings[club.league] || []).slice().sort(sortStandingsFn);
         const idx = arr.findIndex(t => t.club === club.club);
+        if (task.check === 'champion') {
+            // B13: «Кубок лиги» — это чемпион плей-офф, а не первое место регулярки.
+            const season = Number.isFinite(seasonArg) ? seasonArg : currentSeason;
+            const row = (championsHistory[club.league] || []).find(h => h.season === season);
+            return row && row.champion === club.club ? 1 : 0;
+        }
         if (idx < 0) return 0;
-        if (task.check === 'champion') return idx === 0 ? 1 : 0;
         return idx < task.target ? 1 : 0;
     }
     if (task.check === 'budget_plus') return club.budget > 0 ? 1 : 0;
@@ -2742,6 +2980,7 @@ function simulateAIUpgrades() {
 
 function simulateClubActions() {
     // Пока AI-прокачка упрощена — расширим в этапе 5
+    let rosterChanged = false;
     for (const key of Object.keys(clubData)) {
         const c = clubData[key];
         if (simRandom() > 0.05) continue;
@@ -2754,28 +2993,237 @@ function simulateClubActions() {
                 c.prestige = Math.max(20, c.prestige - 3);
                 players = players.filter(p => p !== sold);
                 addNews(`Финансовый кризис! ${c.club} продал ${sold.name}.`, "negative");
+                rosterChanged = true;
             }
         }
     }
+    if (rosterChanged) { rebalanceClubRosters(); refreshTeamStrengths(); }
+}
+
+// ============ ЖИВОЙ МИР: ДИНАМИЧЕСКИЕ НОВОСТИ ============
+// События недели используют СВОЙ seeded-RNG: основной sim-поток не сдвигается,
+// поэтому детерминизм сезона и матчей не ломается.
+const WORLD_EVENT_CHANCE = 0.12;
+const WORLD_EVENT_COOLDOWN_WEEKS = 12;
+const WORLD_FEED_LIMIT = 12;
+
+function createEmptyWorldState() {
+    return { v: 1, cooldowns: {}, debtWeeks: {}, effects: {}, feed: [], rumorUntil: 0 };
+}
+
+function normalizeWorldState(raw) {
+    const st = createEmptyWorldState();
+    if (!raw || typeof raw !== 'object') return st;
+    st.cooldowns = (raw.cooldowns && typeof raw.cooldowns === 'object') ? raw.cooldowns : {};
+    st.debtWeeks = (raw.debtWeeks && typeof raw.debtWeeks === 'object') ? raw.debtWeeks : {};
+    st.effects = (raw.effects && typeof raw.effects === 'object') ? raw.effects : {};
+    st.feed = Array.isArray(raw.feed)
+        ? raw.feed.filter(f => f && typeof f.text === 'string').slice(0, WORLD_FEED_LIMIT)
+        : [];
+    st.rumorUntil = Number.isFinite(raw.rumorUntil) ? raw.rumorUntil : 0;
+    return st;
+}
+
+function worldClockKey() { return currentSeason * 100 + currentWeek; }
+
+// Детерминированный RNG именно для мировых событий (не трогает simRandom()).
+function getWorldEventRng() {
+    return makeSeededRNG(matchSeed([agentName, agencyName, 'world', currentSeason, currentWeek]));
+}
+
+// Временный эффект тренера: множитель к силе клуба до указанной недели.
+function getEffectiveTeamStrength(lk, club) {
+    let base = teamStrengths[lk + '_' + club] || 0.5;
+    // B15/Б6: форма клуба и травмы ключевых игроков реально влияют на силу.
+    const data = clubData[lk + '_' + club];
+    if (data && Array.isArray(data.form) && data.form.length > 0) {
+        const wins = data.form.filter(f => f === 'W').length;
+        const losses = data.form.filter(f => f === 'L').length;
+        base *= 1 + ((wins - losses) / data.form.length) * 0.05;
+    }
+    const injury = teamInjuryPenalty[lk + '_' + club] || 0;
+    if (injury > 0) base *= (1 - injury);
+    const eff = worldState.effects[lk + '_' + club];
+    if (eff && Number.isFinite(eff.until) && eff.until >= worldClockKey()) {
+        const mult = Number(eff.mult);
+        if (Number.isFinite(mult)) base *= mult;
+    }
+    return Math.max(0.35, Math.min(1.0, base));
+}
+
+function pruneWorldState() {
+    const now = worldClockKey();
+    for (const key of Object.keys(worldState.effects)) {
+        const eff = worldState.effects[key];
+        if (!eff || !Number.isFinite(eff.until) || eff.until < now) delete worldState.effects[key];
+    }
+}
+
+function pushWorldFeed(text, type, emoji) {
+    worldState.feed.unshift({
+        text, type, emoji: emoji || '🌍',
+        season: currentSeason, week: currentWeek
+    });
+    if (worldState.feed.length > WORLD_FEED_LIMIT) worldState.feed.length = WORLD_FEED_LIMIT;
+}
+
+function addWorldNews(text, type, emoji, bannerText) {
+    pushWorldFeed(text, type, emoji);
+    // silent: важные мировые события показываем угловым баннером, а не общим тостом.
+    addNews(text, type, 'world', true);
+    if (bannerText) showWorldToast(bannerText, type, emoji);
+}
+
+function applyWorldEvent(clubKey, type, rng) {
+    const c = clubData[clubKey];
+    if (!c) return null;
+    const ev = { type, clubKey, club: c.club, league: c.league, season: currentSeason, week: currentWeek };
+
+    if (type === 'bankruptcy') {
+        if (clubKey === presidentClubKey) return null; // свой клуб не банкротим
+        const squad = players.filter(p =>
+            p.club === c.club && p.league === c.league && !myRoster.includes(p)
+        );
+        if (squad.length === 0) return null;
+        squad.sort((a, b) => (b.salary || 0) - (a.salary || 0) || String(a.name).localeCompare(String(b.name)));
+        const count = squad.length >= 20 ? 2 : 1;
+        const released = squad.slice(0, count);
+        released.forEach(p => { p.club = ''; p.isScouted = true; });
+        c.prestige = Math.max(20, c.prestige - 3);
+        c.budget = Math.max(0, Math.round(c.budget || 0));
+        worldState.debtWeeks[clubKey] = 0;
+        ev.players = released.map(p => p.name);
+        ev.text = LANG.t('🌍 {club} объявлен банкротом — игроки ушли в свободные агенты')
+            .replace('{club}', c.club);
+        addWorldNews(ev.text, 'negative', '💸',
+            LANG.t('Внимание: {club} обанкротился!').replace('{club}', c.club));
+    } else if (type === 'coach') {
+        const boost = rng() < 0.45;
+        const mult = boost ? 1.05 : 0.92;
+        const until = worldClockKey() + 6 + Math.floor(rng() * 3);
+        worldState.effects[clubKey] = { mult, until, type: 'coach', season: currentSeason, week: currentWeek };
+        ev.mult = mult;
+        ev.until = until;
+        ev.text = boost
+            ? LANG.t('🌍 {club} назначил нового тренера — команда на подъёме').replace('{club}', c.club)
+            : LANG.t('🌍 {club} уволил тренера — команда перестраивается').replace('{club}', c.club);
+        addWorldNews(ev.text, boost ? 'positive' : 'negative', boost ? '📈' : '🔁',
+            boost
+                ? LANG.t('{club} назначил нового тренера').replace('{club}', c.club)
+                : LANG.t('Внимание: {club} уволил тренера!').replace('{club}', c.club));
+    } else if (type === 'arena') {
+        const bonus = Math.round(getLeagueBudget(c.league) * 0.05 * (0.6 + rng() * 0.8));
+        c.budget += bonus;
+        c.upgrades.stadium = Math.min(25, (c.upgrades.stadium || 1) + 1);
+        ev.budget = bonus;
+        ev.text = LANG.t('🏟️ {club} начал строительство арены — бюджет вырос').replace('{club}', c.club);
+        addWorldNews(ev.text, 'positive', '🏟️',
+            LANG.t('🏟️ {club} строит новую арену').replace('{club}', c.club));
+    } else {
+        return null;
+    }
+
+    worldState.cooldowns[clubKey] = worldClockKey() + WORLD_EVENT_COOLDOWN_WEEKS;
+    return ev;
+}
+
+// Один тик мира: долговые недели, затем максимум одно событие (шанс ~12%).
+// forceType/forceClubKey — только для тестов.
+function simulateWorldEvents(forceType, forceClubKey) {
+    pruneWorldState();
+    for (const key of Object.keys(clubData)) {
+        const c = clubData[key];
+        if ((c.budget || 0) < 0) worldState.debtWeeks[key] = (worldState.debtWeeks[key] || 0) + 1;
+        else worldState.debtWeeks[key] = 0;
+    }
+
+    const rng = getWorldEventRng();
+    if (forceType) {
+        const key = forceClubKey || Object.keys(clubData)[0];
+        return applyWorldEvent(key, forceType, rng);
+    }
+    if (rng() > WORLD_EVENT_CHANCE) return null;
+
+    const now = worldClockKey();
+    const candidates = Object.keys(clubData).filter(k => (worldState.cooldowns[k] || 0) <= now);
+    if (candidates.length === 0) return null;
+    const key = candidates[Math.floor(rng() * candidates.length)];
+    const c = clubData[key];
+
+    const canBankrupt = key !== presidentClubKey &&
+        (worldState.debtWeeks[key] || 0) >= 3 &&
+        players.some(p => p.club === c.club && p.league === c.league && !myRoster.includes(p));
+    const type = canBankrupt ? 'bankruptcy' : (rng() < 0.5 ? 'coach' : 'arena');
+    return applyWorldEvent(key, type, rng);
+}
+
+// ============ ТРАНСФЕРНЫЕ СЛУХИ ============
+// Раз в 1–2 недели клуб «проявляет интерес» к клиенту агента или свободному агенту.
+// Отдельный seeded-RNG и собственный кулдаун: не расходует лимит мировых событий.
+const RUMOR_CHANCE = 0.7;
+const RUMOR_MAX_COOLDOWN = 2;
+
+function getRumorRng() {
+    return makeSeededRNG(matchSeed([agentName, agencyName, 'rumor', currentSeason, currentWeek]));
+}
+
+function generateTransferRumor(force) {
+    const now = worldClockKey();
+    if (!force && now < (worldState.rumorUntil || 0)) return null;
+
+    const rng = getRumorRng();
+    if (!force && rng() > RUMOR_CHANCE) {
+        worldState.rumorUntil = now + 1; // попробуем на следующей неделе
+        return null;
+    }
+
+    const clients = myRoster.filter(p => p && p.name);
+    const freeAgents = players.filter(p =>
+        !p.club && p.agentId === null && (p.isScouted || p.rating >= 40)
+    );
+    let target = null;
+    let isClient = false;
+    if (clients.length > 0 && (freeAgents.length === 0 || rng() < 0.7)) {
+        target = clients[Math.floor(rng() * clients.length)];
+        isClient = true;
+    } else if (freeAgents.length > 0) {
+        target = freeAgents[Math.floor(rng() * freeAgents.length)];
+    }
+    if (!target) return null;
+
+    // Клуб интересуется из той же лиги, что и игрок (если она известна).
+    const sameLeague = target.league
+        ? Object.keys(clubData).filter(k => clubData[k].league === target.league)
+        : [];
+    const pool = sameLeague.length > 0 ? sameLeague : Object.keys(clubData);
+    if (pool.length === 0) return null;
+    const clubKey = pool[Math.floor(rng() * pool.length)];
+    const c = clubData[clubKey];
+    if (!c) return null;
+
+    const text = (isClient
+        ? LANG.t('📣 {club} проявляет интерес к вашему клиенту {player}')
+        : LANG.t('📣 {club} проявляет интерес к свободному агенту {player}'))
+        .replace('{club}', c.club)
+        .replace('{player}', target.name);
+
+    pushWorldFeed(text, 'info', '📣');
+    addNews(text, 'info', 'world', true);
+    worldState.rumorUntil = now + 1 + Math.floor(rng() * RUMOR_MAX_COOLDOWN);
+    return {
+        type: 'rumor', clubKey, club: c.club, league: c.league,
+        player: target.name, isClient, text,
+        until: worldState.rumorUntil
+    };
 }
 
 function recalculateStockPrice(club) {
-    const lm = getLeagueStockMultiplier(club.league);
-    const basePrice = club.prestige * 1000 * lm;
-    const cashBonus = Math.round(club.budget / 500000) * 2;
-    const ti = getClubUpgradesTotal(club);
-    const infraBonus = ti * 500;
-    const wins = club.form.filter(f => f === 'W').length;
-    const losses = club.form.filter(f => f === 'L').length;
-    const formBonus = (wins - losses) * 3000;
-    const titlesBonus = club.titles * 100;
-    const noise = 0.95 + simRandom() * 0.1;
-    let np = Math.max(Math.round(1000 * lm), Math.round((basePrice + cashBonus + infraBonus + formBonus + titlesBonus) * noise));
-
-    const priceCap = Math.round((club.prestige * 1000 * lm) * 4 + 500000 * lm);
-    if (np > priceCap) np = priceCap;
-    const priceFloor = Math.round((club.prestige * 1000 * lm) * 0.3);
-    if (np < priceFloor) np = priceFloor;
+    // Один вызов simRandom() на шум — как раньше (детерминизм недели сохранён).
+    const noise = 0.97 + simRandom() * 0.06;
+    const target = Math.round(getClubEnterpriseValue(club, noise) / 100);
+    const bounds = getStockBounds(club);
+    let np = clampStockMove(club.stockPrice, target);
+    np = Math.max(bounds.floor, Math.min(bounds.ceiling, np));
 
     club.stockPrice = np;
     club.stockHistory.push(np);
@@ -2799,16 +3247,75 @@ function getTotalSharesCount() { let t = 0; for (const k of Object.keys(myPortfo
 function initializeStandings() {
     standings = {};
     teamStrengths = {};
+    teamInjuryPenalty = {};
     for (const [ln, ld] of Object.entries(LEAGUE_DATA)) {
         standings[ln] = [];
-        const bs = (ld.min + ld.max) / 200;
         ld.divisions.forEach(div => {
             div.clubs.forEach(club => {
                 standings[ln].push({club,division:div.name,gp:0,w:0,otW:0,sW:0,sL:0,otL:0,l:0,gf:0,ga:0,points:0});
-                teamStrengths[ln + "_" + club] = Math.max(0.35, Math.min(1.0, bs + (simRandom() - 0.5) * 0.35));
             });
         });
     }
+    // B15/Б6: сила клуба считается от реального состава (средний рейтинг,
+    // топ-6 полевых, лучший вратарь), а не от min/max лиги с шумом.
+    refreshTeamStrengths();
+    refreshTeamInjuryModifiers();
+}
+
+function getMedianRating(ratings) {
+    if (!ratings || ratings.length === 0) return 0;
+    const sorted = [...ratings].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// Чистая сила клуба 0.35…1.0 от состава. Без RNG — детерминизм сохраняется.
+function computeClubStrength(lk, club, rosterArg) {
+    const ld = LEAGUE_DATA[lk] || { min: 45, max: 80 };
+    const roster = rosterArg || players.filter(p => p.club === club && p.league === lk);
+    if (roster.length === 0) {
+        return Math.max(0.35, Math.min(1.0, (ld.min + ld.max) / 200));
+    }
+    const skaters = roster.filter(p => p.position !== 'G');
+    const goalies = roster.filter(p => p.position === 'G');
+    const avg = (arr) => arr.reduce((s, p) => s + p.rating, 0) / arr.length;
+    const top6 = skaters.slice().sort((a, b) => b.rating - a.rating).slice(0, 6);
+    const avgTop6 = top6.length ? avg(top6) : avg(roster);
+    const avgAll = avg(roster);
+    const bestG = goalies.length ? Math.max(...goalies.map(p => p.rating)) : Math.min(70, avgAll);
+    let raw = avgTop6 * 0.55 + avgAll * 0.20 + bestG * 0.25;
+    // Небольшая детерминированная вариативность вместо старого simRandom-шума.
+    raw += ((hashString(lk + '|' + club) % 1000) / 1000 - 0.5) * 2;
+    return Math.max(0.35, Math.min(1.0, Math.round(raw) / 100));
+}
+
+function refreshTeamStrengths() {
+    teamStrengths = {};
+    const index = buildClubPlayerIndex(false);
+    for (const lk of Object.keys(LEAGUE_DATA)) {
+        getAllClubs(lk).forEach(club => {
+            const roster = index.get(lk + '|' + club) || [];
+            teamStrengths[lk + '_' + club] = computeClubStrength(lk, club, roster);
+        });
+    }
+}
+
+// Штраф за травмированных: до −10% силы, взвешенно по рейтингу.
+function refreshTeamInjuryModifiers() {
+    const next = {};
+    const index = buildClubPlayerIndex(false);
+    for (const lk of Object.keys(LEAGUE_DATA)) {
+        getAllClubs(lk).forEach(club => {
+            const roster = index.get(lk + '|' + club) || [];
+            if (roster.length === 0) return;
+            const total = roster.reduce((s, p) => s + p.rating, 0);
+            const injured = roster.filter(p => p.injuryWeeks > 0).reduce((s, p) => s + p.rating, 0);
+            if (total > 0 && injured > 0) {
+                next[lk + '_' + club] = Math.min(0.10, (injured / total) * 0.25);
+            }
+        });
+    }
+    teamInjuryPenalty = next;
 }
 
 function sortStandingsFn(a,b) {
@@ -2821,6 +3328,7 @@ function sortStandingsFn(a,b) {
 function simulateStandingsWeek() {
     // Индекс «лига+клуб → игроки» строится один раз за неделю,
     // чтобы не фильтровать 4500+ игроков на каждый матч
+    refreshTeamInjuryModifiers();
     const index = buildClubPlayerIndex(true);
     for (const lk of Object.keys(standings)) {
         const weekMatches = (seasonSchedule[lk] || []).filter(m => m.week === currentWeek);
@@ -2860,8 +3368,8 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
     const dataH = clubData[lk + "_" + homeClub];
     const dataA = clubData[lk + "_" + awayClub];
 
-    let sH = teamStrengths[lk + "_" + homeClub] || 0.5;
-    let sA = teamStrengths[lk + "_" + awayClub] || 0.5;
+    let sH = getEffectiveTeamStrength(lk, homeClub);
+    let sA = getEffectiveTeamStrength(lk, awayClub);
 
     // Дом. бонус от стадиона
     if (dataH && dataH.upgrades) sH = Math.min(1.0, sH * (1 + getStadiumHomeBonus(dataH.upgrades.stadium || 1)));
@@ -4010,6 +4518,8 @@ function saveGame() {
         agentXP, agentLevel,
         transferOffers, activeCommissions, pendingClubReturn,
         playerNegotiations,
+        trainingAuto: { ...trainingAuto },
+        worldState: JSON.parse(JSON.stringify(worldState)),
         contractExtras: Object.fromEntries(players.map(p => {
             const years = Math.max(0, Math.round(p.contractYears || 0));
             return [p.name, [
@@ -4129,6 +4639,15 @@ async function loadGame() {
         upgrades = d.upgrades;
         transferOffers = d.transferOffers ?? {};
         playerNegotiations = d.playerNegotiations ?? {};
+        trainingAuto = {};
+        if (d.trainingAuto && typeof d.trainingAuto === 'object') {
+            Object.entries(d.trainingAuto).forEach(([name, attr]) => {
+                if (typeof name === 'string' && typeof attr === 'string' && getTrainingByAttr(attr)) {
+                    trainingAuto[name] = attr;
+                }
+            });
+        }
+        worldState = normalizeWorldState(d.worldState);
         activeCommissions = d.activeCommissions ?? [];
         pendingClubReturn = d.pendingClubReturn ?? [];
         poachedPlayersThisSeason = d.poachedPlayersThisSeason ?? {};
@@ -4197,7 +4716,26 @@ async function loadGame() {
         clubData = {};
         for (const k of Object.keys(d.clubs || {})) clubData[k] = unpackClub(d.clubs[k]);
         if (Object.keys(clubData).length === 0) generateClubData();
+        // Миграция биржи (этап 1.1): «космические» цены старых сейвов
+        // возвращаем к fair-коридору, историю чистим от выбросов.
+        let stockMigrated = 0;
+        for (const k of Object.keys(clubData)) {
+            const c = clubData[k];
+            const fair = getFairStockPrice(c);
+            const lo = Math.round(fair * 0.5), hi = Math.round(fair * 2);
+            if (!Number.isFinite(c.stockPrice) || c.stockPrice < lo || c.stockPrice > hi) {
+                c.stockPrice = fair;
+                stockMigrated++;
+            }
+            if (Array.isArray(c.stockHistory)) {
+                c.stockHistory = c.stockHistory.filter(v => Number.isFinite(v) && v >= lo && v <= hi);
+            }
+        }
+        if (stockMigrated > 0) addNews('📊 Рынок акций пересчитан', 'info');
         if (Object.keys(standings).length === 0) initializeStandings();
+        // B15: пересчитываем силы от загруженных составов (старые сейвы
+        // могли хранить силу из min/max лиги).
+        refreshTeamStrengths();
         if (d.championsHistory && Object.keys(d.championsHistory).length > 0) {
             championsHistory = d.championsHistory;
         } else {
@@ -4390,6 +4928,8 @@ function resetGame() {
     myPortfolio = {};
     transferOffers = {};
     playerNegotiations = {};
+    trainingAuto = {};
+    worldState = createEmptyWorldState();
     activeCommissions = [];
     pendingClubReturn = [];
     poachedPlayersThisSeason = {};
@@ -4430,6 +4970,7 @@ function resetGame() {
     matchQueue = null;
     matchQueueOnFinish = null;
     matchQueueIdx = 0;
+    resetEventModalQueue();
     pendingEvent = null;
     matchViewState = null;
     matchPlayback.reset();
@@ -4449,15 +4990,17 @@ function seedFreeAgents(count) {
 function inferNewsCategory(text) {
     if (myRoster.some(p => p && p.name && text.includes(p.name))) return 'clients';
     if (/\$|дивиденд|комисси|акци|баланс|бонус|доход|расход|зарплат|подписной/i.test(text)) return 'finance';
+    if (/банкрот|тренер|арен[ауы]|строительств/i.test(text)) return 'world';
     if (/чемпион|плей-офф|Кубок|драфт|перешёл|переманил|Малое ТО|Большое ТО|Неделя ТО|ТО закрыто/i.test(text)) return 'leagues';
     return 'general';
 }
 
-function addNews(text, type="info") {
-    const category = inferNewsCategory(text);
-    newsFeed.unshift({text, type, category, week:currentWeek, season:currentSeason});
+function addNews(text, type="info", category=null, silent=false) {
+    const cat = category || inferNewsCategory(text);
+    newsFeed.unshift({text, type, category: cat, week:currentWeek, season:currentSeason});
     if (newsFeed.length > 200) newsFeed.pop();
     if (careerCounters) careerCounters.newsCount = (careerCounters.newsCount || 0) + 1;
+    if (silent) return;
     // Живой отклик: toast + вибрация для важных событий
     if (type === 'positive') { playSound('event'); vibrate('event'); }
     else if (type === 'negative') { playSound('error'); vibrate('error'); }
@@ -4490,6 +5033,33 @@ function addXP(a) {
         vibrate('levelup');
         showToast(LANG.current === 'en' ? `⬆️ Level ${agentLevel}!` : `⬆️ Уровень ${agentLevel}!`, 'positive');
     }
+}
+
+// Б1: недельный XP за реальные результаты клиентов (очки, голы, сэйвы).
+// Вызывается раз в неделю после simulateWeekForPlayer; детерминизм не трогает
+// (никаких RNG-вызовов, только дельты уже посчитанной статистики).
+function awardWeeklyClientXP(beforeStats) {
+    if (!beforeStats || beforeStats.size === 0) return 0;
+    let xp = 0;
+    myRoster.forEach(p => {
+        const b = beforeStats.get(p);
+        if (!b || !p.stats) return;
+        const s = p.stats;
+        const dgp = (s.gp || 0) - b.gp;
+        if (dgp <= 0) return;
+        if (p.position === 'G') {
+            const dga = (s.goalsAgainst || 0) - b.goalsAgainst;
+            const dRating = (s.ratingSum || 0) - b.ratingSum;
+            xp += dgp * 3 + Math.max(0, dRating - dgp * 5) * 2 - Math.max(0, dga) * 2;
+        } else {
+            const dg = (s.goals || 0) - b.goals;
+            const da = (s.assists || 0) - b.assists;
+            xp += dgp * 2 + dg * 10 + da * 6;
+        }
+    });
+    xp = Math.max(0, Math.round(xp));
+    if (xp > 0) addXP(xp);
+    return xp;
 }
 
 function getXPProgress() {
@@ -4552,7 +5122,61 @@ function showMobileScreen(id) {
 
 // showStub удалён в v1.0 (мёртвый код — не вызывался)
 
-function closeEventModal() { eventModal.style.display = 'none'; }
+// ============ 28. ОЧЕРЕДЬ МОДАЛОК (B12) ============
+// Все окна на базе #event-modal открываются строго по одному.
+// В отличие от matchQueue, в очередь кладётся ФУНКЦИЯ отрисовки:
+// второй билдер не должен перезаписывать DOM первой модалки.
+let eventModalQueue = [];
+let eventModalBusy = false;
+
+function isEventModalOpen() {
+    return !!eventModal && eventModal.style.display === 'flex';
+}
+
+function isNegotiationModalOpen() {
+    const neg = document.getElementById('negotiation-modal');
+    return !!neg && neg.style.display === 'flex';
+}
+
+function queueEventModal(render) {
+    if (typeof render !== 'function') return false;
+    eventModalQueue.push(render);
+    drainEventModalQueue();
+    return true;
+}
+
+function drainEventModalQueue() {
+    if (eventModalBusy) return;
+    // Переговоры — отдельная блокирующая модалка: ждём её закрытия.
+    if (isEventModalOpen() || isNegotiationModalOpen()) return;
+    const next = eventModalQueue.shift();
+    if (!next) return;
+    eventModalBusy = true;
+    try {
+        next();
+    } catch (e) {
+        eventModalBusy = false;
+        if (window.DEBUG) console.log('event modal queue error:', e && e.message);
+        setTimeout(drainEventModalQueue, 0);
+        return;
+    }
+    // Билдер мог ничего не открыть (нет данных) — сразу идём дальше.
+    if (!isEventModalOpen()) {
+        eventModalBusy = false;
+        setTimeout(drainEventModalQueue, 0);
+    }
+}
+
+function closeEventModal() {
+    if (eventModal) eventModal.style.display = 'none';
+    eventModalBusy = false;
+    setTimeout(drainEventModalQueue, 0);
+}
+
+function resetEventModalQueue() {
+    eventModalQueue = [];
+    eventModalBusy = false;
+}
 
 // ============ 16. ОФИС ============
 function renderOffice() {
@@ -4685,7 +5309,7 @@ function renderOffice() {
     const mini = document.getElementById('mini-news');
     if (mini) {
         const latest = newsFeed.slice(0, 3);
-        mini.innerHTML = latest.length === 0 ? '<p style="color:#606070;">' + LANG.t('Новостей пока нет...') + '</p>' : latest.map(i => '<p>' + i.text + '</p>').join('');
+        mini.innerHTML = latest.length === 0 ? '<p style="color:#606070;">' + LANG.t('Новостей пока нет...') + '</p>' : latest.map(i => '<p>' + escapeHtml(i.text) + '</p>').join('');
     }
 
     // Иконка ✉️ "Новое событие" (стиль мессенджера: событие ждёт в офисе)
@@ -5024,7 +5648,7 @@ function renderBranchDetail() {
         } else if (done) {
             let rewardStr = [];
             if (goal.reward?.xp) rewardStr.push(`+${goal.reward.xp} XP`);
-            if (goal.reward?.money) rewardStr.push(`+${formatMoney(goal.reward.money)}`);
+            if (goal.reward?.money) rewardStr.push(`+${formatMoney(getCareerGoalMoney(goal))}`);
             if (goal.reward?.slot) rewardStr.push(`+${goal.reward.slot} слот`);
             if (goal.reward?.rep) rewardStr.push(`+${goal.reward.rep} реп`);
             if (goal.reward?.title) rewardStr.push(`🏅 ${goal.reward.title}`);
@@ -5685,6 +6309,8 @@ function buildClubUpgradeCard(club, cardKey) {
     const cost = isMax ? 0 : clubUpgradeCost(cardKey, lvl, club.league);
     const canAfford = !isMax && club.budget >= cost && club.budget >= 0;
     const expanded = !!expandedInfraCards[cardKey];
+    const costShare = isMax ? 0 : getClubUpgradeBudgetShare(cost, club);
+    const costShareText = costShare >= 1 ? costShare.toFixed(1) : costShare.toFixed(2);
 
     const div = document.createElement('div');
     div.className = 'infra-card' + (isMax ? ' maxed' : '') + (expanded ? ' expanded' : '');
@@ -5721,7 +6347,7 @@ function buildClubUpgradeCard(club, cardKey) {
         <div class="infra-card-footer">
             ${isMax
                 ? '<div class="infra-max-badge">⭐ МАКСИМУМ</div>'
-                : `<div class="infra-cost">💰 ${formatMoney(cost)}</div>
+                : `<div class="infra-cost">💰 ${formatMoney(cost)}<span class="infra-cost-pct">${costShareText}% ${LANG.t('от бюджета клуба')}</span></div>
                    <button class="infra-upgrade-btn ${canAfford ? '' : 'disabled'}" ${canAfford ? '' : 'disabled'} data-upgrade="${cardKey}">⬆</button>`}
         </div>
     `;
@@ -5870,7 +6496,7 @@ function renderNewsFeedScreen() {
 
     let list = newsFeed;
     if (newsTab === 'clients') list = newsFeed.filter(n => getNewsCategoryFor(n) === 'clients');
-    else if (newsTab === 'leagues') list = newsFeed.filter(n => getNewsCategoryFor(n) === 'leagues');
+    else if (newsTab === 'leagues') list = newsFeed.filter(n => ['leagues', 'world'].includes(getNewsCategoryFor(n)));
     else if (newsTab === 'finance') list = newsFeed.filter(n => getNewsCategoryFor(n) === 'finance');
 
     if (list.length === 0) {
@@ -5883,18 +6509,24 @@ function renderNewsFeedScreen() {
         const item = document.createElement('div');
         item.className = 'news-item news-' + (n.type || 'info');
         const icon = n.type === 'positive' ? '✅' : n.type === 'negative' ? '❌' : '📰';
-        // Оборачиваем имена клиентов в кликабельные span-ы
-        let htmlText = n.text;
-        myRoster.forEach(p => {
-            if (htmlText.includes(p.name)) {
-                htmlText = htmlText.split(p.name).join(
-                    `<span class="news-client-link" data-player="${p.name}">${p.name}</span>`
-                );
-            }
-        });
+        const catIcon = getNewsCategoryFor(n) === 'world' ? '🌍' : icon;
+        // Оборачиваем имена клиентов в кликабельные span-ы.
+        // B11: сортировка по убыванию длины (длинные имена первыми) + экранирование,
+        // иначе короткое имя ломает разметку и вложенные имена дублируются.
+        let htmlText = escapeHtml(n.text);
+        const safeNames = myRoster
+            .map(p => escapeHtml(p && p.name))
+            .filter(Boolean)
+            .sort((a, b) => b.length - a.length);
+        if (safeNames.length > 0) {
+            const re = new RegExp(safeNames.map(escapeRegExp).join('|'), 'g');
+            htmlText = htmlText.replace(re, (m) =>
+                `<span class="news-client-link" data-player="${m}">${m}</span>`
+            );
+        }
         item.innerHTML = `
             <div class="news-item-head">
-                <span class="news-item-icon">${icon}</span>
+                <span class="news-item-icon">${catIcon}</span>
                 <span class="news-item-meta">${LANG.t('Сезон')} ${n.season} • ${LANG.t('Неделя')} ${n.week}</span>
             </div>
             <div class="news-item-text">${htmlText}</div>
@@ -6033,7 +6665,10 @@ function renderSearchClients(c) {
         const card = document.createElement('div');
         card.className = 'talent-card-wrap';
         card.innerHTML = buildTalentCard(p);
-        card.addEventListener('click', () => openPlayerScreen(p, 'search'));
+        card.addEventListener('click', (e) => {
+            if (e.target.closest && e.target.closest('[data-attr-help]')) return;
+            openPlayerScreen(p, 'search');
+        });
         frag.appendChild(card);
     });
     c.appendChild(frag);
@@ -6094,8 +6729,8 @@ function buildTalentCard(p) {
     const arch = getArchetypeInfo(p);
     const pot = getPotentialView(p);
     const potBar = pot.num === null ? parseInt(pot.text, 10) || 0 : pot.num;
-    const bar = (label, value) => `<div class="talent-stat">
-        <div class="talent-stat-head"><span>${label}</span><b>${value}</b></div>
+    const bar = (attrKey, label, value) => `<div class="talent-stat" data-attr="${attrKey}">
+        <div class="talent-stat-head"><span>${label}${attrHelpButton(attrKey)}</span><b>${value}</b></div>
         <div class="talent-stat-bar"><i style="width:${Math.max(0, Math.min(100, value))}%"></i></div>
     </div>`;
     return `<div class="talent-card" data-player="${p.name}">
@@ -6113,9 +6748,9 @@ function buildTalentCard(p) {
         </div>
         <div class="talent-skills-head"><span>${LANG.t('Скиллы')}</span><span>${p.isScouted ? '✓ ' + LANG.t('Отсканирован') : ''}</span></div>
         <div class="talent-stats">
-            ${bar(LANG.t('Атака'), a.attack)}
-            ${bar(LANG.t('Защита'), a.defense)}
-            ${bar(LANG.t('Потенциал'), potBar)}
+            ${bar('attack', LANG.t('Атака'), a.attack)}
+            ${bar('defense', LANG.t('Защита'), a.defense)}
+            ${bar('potential', LANG.t('Потенциал'), potBar)}
         </div>
         <div class="talent-card-foot"><span>📈 ${LANG.t('Потенциал')}: <b>${pot.text}</b></span><span>${arch.icon} ${LANG.t(arch.label)}</span></div>
     </div>`;
@@ -6244,12 +6879,12 @@ function renderPlayerInfo(c, p) {
             <div class="pp-rating-block"><div class="pp-potential">${potText}</div><div class="pp-rating-lbl">${LANG.t('Потенциал')}</div></div>
         </div>
         <div class="pp-attrs">
-            ${ppAttrBar(LANG.t('Атака'), a.attack)}
-            ${ppAttrBar(LANG.t('Защита'), a.defense)}
-            ${ppAttrBar(LANG.t('Техника'), a.technique)}
-            ${ppAttrBar(LANG.t('Психика'), a.psyche)}
-            ${ppAttrBar(LANG.t('Физика'), a.physics)}
-            ${ppAttrBar(LANG.t('Скорость'), a.speed)}
+            ${ppAttrBar(LANG.t('Атака'), a.attack, 'attack')}
+            ${ppAttrBar(LANG.t('Защита'), a.defense, 'defense')}
+            ${ppAttrBar(LANG.t('Техника'), a.technique, 'technique')}
+            ${ppAttrBar(LANG.t('Психика'), a.psyche, 'psyche')}
+            ${ppAttrBar(LANG.t('Физика'), a.physics, 'physics')}
+            ${ppAttrBar(LANG.t('Скорость'), a.speed, 'speed')}
         </div>
         <div class="pp-section-title">📝 ${LANG.t('Контракт')}</div>
         <div class="pp-row-2">
@@ -6276,10 +6911,12 @@ function renderPlayerInfo(c, p) {
     if (signBtn) signBtn.addEventListener('click', () => signPlayerFromScreen(p));
 }
 
-function ppAttrBar(label, val) {
+function ppAttrBar(label, val, attrKey) {
     const v = val || 0;
     const cls = v >= 80 ? 'attr-high' : v >= 65 ? 'attr-mid' : 'attr-low';
-    return `<div class="pp-attr"><div class="pp-attr-head"><span class="pp-attr-label">${label}</span><span class="pp-attr-val ${cls}">${v}</span></div><div class="pp-attr-bar"><div class="pp-attr-fill ${cls}" style="width:${Math.min(100,v)}%"></div></div></div>`;
+    const attr = attrKey || '';
+    const help = attrKey ? attrHelpButton(attrKey) : '';
+    return `<div class="pp-attr" ${attr ? `data-attr="${attr}"` : ''}><div class="pp-attr-head"><span class="pp-attr-label">${label}${help}</span><span class="pp-attr-val ${cls}">${v}</span></div><div class="pp-attr-bar"><div class="pp-attr-fill ${cls}" style="width:${Math.min(100,v)}%"></div></div></div>`;
 }
 
 function buildSkaterStatsHTML(s, pts) {
@@ -6428,12 +7065,14 @@ function renderSavedOffersInPhone(player, entry) {
         });
     });
 
-    eventModal.style.display = 'none';
+    closeEventModal();
     negotiationModal.style.display = 'flex';
 }
 
 function closeNegotiationModal() {
     negotiationModal.style.display = 'none';
+    // Переговоры закрылись — отдаём ход очереди модалок.
+    setTimeout(drainEventModalQueue, 0);
 }
 
 // v1.0: тап вне модалки закрывает переговоры; сессия сохраняется и продолжается позже
@@ -6675,7 +7314,7 @@ function renderNegotiationModal(player) {
     renderNegotiationGauges(player);
     renderNegotiationChatBody(player);
     renderPhoneActions(player);
-    eventModal.style.display = 'none';
+    closeEventModal();
     negotiationModal.style.display = 'flex';
     scrollChatToBottom();
 }
@@ -7048,10 +7687,11 @@ function getTrainingByAttr(attr) {
 function renderPlayerDevelopment(c, p) {
     const isMyClient = currentPlayerSource === 'my' || myRoster.some(x => x.name === p.name);
     const html = [];
+    const trainingCost = getTrainingCost(p);
 
     // Заголовок блока
     html.push(`<div class="dev-section-title">🏋️ ${LANG.t('Личные тренировки')}</div>`);
-    html.push(`<div class="dev-hint">${LANG.t('Стоимость тренировки: {c}. Длительность: {w}. Успех зависит от уровня Личного тренера ({ch}%).').replace('{c}', formatMoney(TRAINING_COST)).replace('{w}', LANG.t('{n} нед.').replace('{n}', TRAINING_WEEKS)).replace('{ch}', Math.round(getTrainerSuccessChance() * 100))}</div>`);
+    html.push(`<div class="dev-hint">${LANG.t('Стоимость тренировки: {c}. Длительность: {w}. Успех зависит от уровня Личного тренера ({ch}%).').replace('{c}', formatMoney(trainingCost)).replace('{w}', LANG.t('{n} нед.').replace('{n}', TRAINING_WEEKS)).replace('{ch}', Math.round(getTrainerSuccessChance() * 100))}</div>`);
 
     if (!isMyClient) {
         html.push(`<div class="pp-empty-block"><div class="pp-empty-icon">🔒</div><div class="pp-empty-title">${LANG.t('Недоступно')}</div><div class="pp-empty-desc">${LANG.t('Тренировать можно только своих клиентов')}</div></div>`);
@@ -7079,12 +7719,32 @@ function renderPlayerDevelopment(c, p) {
     html.push(`<div class="dev-attrs">${TRAINING_OPTIONS.map(t => {
         const val = a[t.attr] || 0;
         const cls = val >= 80 ? 'attr-high' : val >= 65 ? 'attr-mid' : 'attr-low';
-        return `<div class="dev-attr-chip">
+        return `<div class="dev-attr-chip" data-attr="${t.attr}">
             <span class="dev-attr-icon">${t.icon}</span>
-            <span class="dev-attr-label">${LANG.t({attack:'Атака',speed:'Скорость',defense:'Защита',technique:'Техника',psyche:'Психика',physics:'Физика'}[t.attr])}</span>
+            <span class="dev-attr-label">${LANG.t({attack:'Атака',speed:'Скорость',defense:'Защита',technique:'Техника',psyche:'Психика',physics:'Физика'}[t.attr])}${attrHelpButton(t.attr)}</span>
             <span class="dev-attr-val ${cls}">${val}</span>
         </div>`;
     }).join('')}</div>`);
+
+    // Автотренировка: выбранный атрибут + вкл/выкл.
+    const autoAttr = trainingAuto[p.name] || null;
+    const autoOn = !!autoAttr;
+    const autoTarget = autoAttr ? getTrainingByAttr(autoAttr) : null;
+    html.push(`<div class="dev-auto ${autoOn ? 'on' : ''}">
+        <div class="dev-auto-head">
+            <span class="dev-auto-title">🤖 ${LANG.t('Автотренировка')}</span>
+            <button class="dev-auto-toggle ${autoOn ? 'on' : ''}" data-auto-toggle>${autoOn ? LANG.t('Вкл') : LANG.t('Выкл')}</button>
+        </div>
+        <div class="dev-auto-hint">${LANG.t('Автоматически запускает новый блок, когда клиент свободен и хватает денег.')}</div>
+        <div class="dev-auto-attrs">
+            ${TRAINING_OPTIONS.map(t => {
+                const atMax = (a[t.attr] || 0) >= 99;
+                const active = autoAttr === t.attr;
+                return `<button class="dev-auto-attr ${active ? 'active' : ''} ${atMax ? 'disabled' : ''}" data-auto-attr="${t.attr}" ${atMax ? 'disabled' : ''}>${t.icon} ${LANG.t(t.name)}</button>`;
+            }).join('')}
+        </div>
+        ${autoOn ? `<div class="dev-auto-status">${LANG.t('Цель')}: ${autoTarget ? LANG.t(autoTarget.name) : autoAttr} · ${formatMoney(trainingCost)} / ${LANG.t('{n} нед.').replace('{n}', TRAINING_WEEKS)}</div>` : ''}
+    </div>`);
 
     // Кнопки тренировок
     if (p.trainingWeeks > 0) {
@@ -7094,16 +7754,16 @@ function renderPlayerDevelopment(c, p) {
         TRAINING_OPTIONS.forEach(t => {
             const attrVal = a[t.attr] || 0;
             const atMax = attrVal >= 99;
-            const canAfford = agentMoney >= TRAINING_COST;
+            const canAfford = agentMoney >= trainingCost;
             const disabled = atMax || !canAfford;
             html.push(`<button class="dev-train-btn ${disabled ? 'disabled' : ''}" data-attr="${t.attr}" ${disabled ? 'disabled' : ''}>
                 <span class="dtb-icon">${t.icon}</span>
                 <span class="dtb-name">${LANG.t(t.name)}</span>
-                <span class="dtb-cost">${atMax ? 'MAX' : formatMoney(TRAINING_COST)}</span>
+                <span class="dtb-cost">${atMax ? 'MAX' : formatMoney(trainingCost)}</span>
             </button>`);
         });
         html.push(`</div>`);
-        if (agentMoney < TRAINING_COST) {
+        if (agentMoney < trainingCost) {
             html.push(`<div class="dev-warning">⚠️ ${LANG.t('Недостаточно средств')}</div>`);
         }
     }
@@ -7120,23 +7780,94 @@ function renderPlayerDevelopment(c, p) {
     c.querySelectorAll('.dev-train-btn:not(.disabled)').forEach(btn => {
         btn.addEventListener('click', () => startPlayerTraining(p, btn.getAttribute('data-attr')));
     });
+    c.querySelectorAll('.dev-auto-attr:not(.disabled)').forEach(btn => {
+        btn.addEventListener('click', () => toggleAutoTraining(p, btn.getAttribute('data-auto-attr')));
+    });
+    const autoToggle = c.querySelector('[data-auto-toggle]');
+    if (autoToggle) autoToggle.addEventListener('click', () => toggleAutoTraining(p, null));
 }
 
 function startPlayerTraining(p, attr) {
     if (!myRoster.some(x => x.name === p.name)) return;
     if (p.trainingWeeks > 0) return;
-    if (agentMoney < TRAINING_COST) { uiAlert(LANG.t('Недостаточно средств')); return; }
     if (!getTrainingByAttr(attr)) return;
+    const cost = getTrainingCost(p);
+    if (agentMoney < cost) { uiAlert(LANG.t('Недостаточно средств')); return; }
 
-    agentMoney -= TRAINING_COST;
+    agentMoney -= cost;
     p.trainingWeeks = TRAINING_WEEKS;
     p.trainingAttr = attr;
 
     const t = getTrainingByAttr(attr);
-    addNews(`🏋️ ${LANG.t('Начата тренировка')}: ${p.name} — ${LANG.t(t.name)} (${formatMoney(TRAINING_COST)})`, "info");
+    addNews(`🏋️ ${LANG.t('Начата тренировка')}: ${p.name} — ${LANG.t(t.name)} (${formatMoney(cost)})`, "info");
     saveGame();
     updateAllDisplays();
     renderPlayerScreen();
+}
+
+// Включение/выключение автотренировки. attr=null — переключатель on/off.
+function toggleAutoTraining(p, attr) {
+    if (!myRoster.some(x => x.name === p.name)) return;
+    let changed = false;
+    if (!attr) {
+        if (trainingAuto[p.name]) {
+            delete trainingAuto[p.name];
+            addNews(`🛑 ${LANG.t('Автотренировка отключена')}: ${p.name}`, "info");
+            changed = true;
+        } else {
+            const a = p.attributes || {};
+            const first = TRAINING_OPTIONS.find(t => (a[t.attr] || 0) < 99);
+            if (!first) { uiAlert(LANG.t('Все атрибуты на максимуме')); return; }
+            trainingAuto[p.name] = first.attr;
+            addNews(`🤖 ${LANG.t('Автотренировка включена')}: ${p.name} — ${LANG.t(first.name)}`, "info");
+            changed = true;
+        }
+    } else if (trainingAuto[p.name] === attr) {
+        delete trainingAuto[p.name];
+        addNews(`🛑 ${LANG.t('Автотренировка отключена')}: ${p.name}`, "info");
+        changed = true;
+    } else {
+        trainingAuto[p.name] = attr;
+        const t = getTrainingByAttr(attr);
+        addNews(`🤖 ${LANG.t('Автотренировка включена')}: ${p.name} — ${t ? LANG.t(t.name) : attr}`, "info");
+        changed = true;
+    }
+
+    // Клиент свободен — запускаем блок сразу, не дожидаясь недельного тика.
+    if (trainingAuto[p.name]) tryStartAutoTraining(p);
+    if (changed) { saveGame(); updateAllDisplays(); renderPlayerScreen(); }
+}
+
+// Запускает следующий блок автотренировки. Возвращает true, если блок стартовал.
+// Никаких simRandom() вызовов — результат тренировки не сдвигается.
+function tryStartAutoTraining(p) {
+    const attr = trainingAuto[p.name];
+    if (!attr) return false;
+    if (!myRoster.some(x => x.name === p.name)) { delete trainingAuto[p.name]; return false; }
+    if (!getTrainingByAttr(attr)) { delete trainingAuto[p.name]; return false; }
+
+    if (p.trainingWeeks > 0) return false;
+
+    if (!p.attributes) p.attributes = generateAttributes(p.position, p.rating, p.name);
+    if ((p.attributes[attr] || 0) >= 99) {
+        delete trainingAuto[p.name];
+        addNews(`🛑 ${LANG.t('Автотренировка остановлена')}: ${p.name} — ${LANG.t('атрибут достиг максимума')}`, "info");
+        return false;
+    }
+
+    const cost = getTrainingCost(p);
+    if (agentMoney < cost) {
+        delete trainingAuto[p.name];
+        addNews(`🛑 ${LANG.t('Автотренировка остановлена')}: ${p.name} — ${LANG.t('недостаточно средств')}`, "negative");
+        return false;
+    }
+
+    agentMoney -= cost;
+    p.trainingWeeks = TRAINING_WEEKS;
+    p.trainingAttr = attr;
+    const t = getTrainingByAttr(attr);
+    addNews(`🤖 ${LANG.t('Автотренировка начата')}: ${p.name} — ${t ? LANG.t(t.name) : attr} (${formatMoney(cost)})`, "info");
+    return true;
 }
 
 // Тик тренировок — вызывается каждую неделю (и в регулярке, и в ТО)
@@ -7162,6 +7893,13 @@ function processWeeklyTrainings() {
             const t = getTrainingByAttr(attr);
             addNews(`❌ ${p.name}: ${LANG.t('тренировка не дала результата')} (${t ? LANG.t(t.name) : attr})`, "negative");
         }
+    });
+
+    // Автотренировка: свободные клиенты со включённым режимом начинают новый блок.
+    Object.keys(trainingAuto).forEach(name => {
+        const p = myRoster.find(x => x.name === name);
+        if (!p) { delete trainingAuto[name]; return; }
+        tryStartAutoTraining(p);
     });
 }
 
@@ -7601,18 +8339,21 @@ function signPlayerFromScreen(p) {
     renderClientsScreen();
 }
 
-// Простая информационная модалка в стиле игры (использует event-modal)
+// Простая информационная модалка в стиле игры (использует event-modal).
+// Встаёт в общую очередь: одновременно открыта только одна модалка.
 function openSimpleInfoModal(title, text) {
-    eventTitle.textContent = title;
-    eventText.textContent = text;
-    eventDetails.innerHTML = '';
-    eventActions.innerHTML = '';
-    const okBtn = document.createElement('button');
-    okBtn.className = 'btn-primary';
-    okBtn.textContent = 'OK';
-    okBtn.addEventListener('click', closeEventModal);
-    eventActions.appendChild(okBtn);
-    eventModal.style.display = 'flex';
+    queueEventModal(() => {
+        eventTitle.textContent = title;
+        eventText.textContent = text;
+        eventDetails.innerHTML = '';
+        eventActions.innerHTML = '';
+        const okBtn = document.createElement('button');
+        okBtn.className = 'btn-primary';
+        okBtn.textContent = 'OK';
+        okBtn.addEventListener('click', closeEventModal);
+        eventActions.appendChild(okBtn);
+        eventModal.style.display = 'flex';
+    });
 }
 
 function closePlayerScreen() {
@@ -8430,8 +9171,8 @@ function startPlayoffs() {
 
 function simulateOneSeries(s) {
     const lk = s.leagueKey;
-    const sA = teamStrengths[lk + "_" + s.teamA.name] || 0.5;
-    const sB = teamStrengths[lk + "_" + s.teamB.name] || 0.5;
+    const sA = getEffectiveTeamStrength(lk, s.teamA.name);
+    const sB = getEffectiveTeamStrength(lk, s.teamB.name);
     while (s.winsA < 4 && s.winsB < 4) {
         const gA = Math.max(0, Math.floor(simRandom() * 4 * sA + simRandom() * 3 - 0.5));
         const gB = Math.max(0, Math.floor(simRandom() * 4 * sB + simRandom() * 3 - 0.5));
@@ -8744,6 +9485,59 @@ function simulatePlayoffRound() {
     if (isFinal) { finishPlayoffs(); return; }
 }
 
+// ============ ПОЛИТИКА ПРОСМОТРА МАТЧЕЙ (настройка) ============
+// full  — открывать play-by-play как раньше;
+// score — открыть экран и сразу перемотать к финальному счёту;
+// off   — не открывать экран, пометить матчи просмотренными и продолжить.
+function normalizeMatchViewMode(mode) {
+    return mode === 'score' || mode === 'off' ? mode : 'full';
+}
+
+function applyMatchViewPolicy() {
+    return normalizeMatchViewMode(gameSettings && gameSettings.matchView);
+}
+
+function shouldOpenMatchView() {
+    return applyMatchViewPolicy() !== 'off';
+}
+
+function markMatchItemViewed(item) {
+    if (!item) return;
+    if (item.match) item.match.viewed = true;
+    item.viewed = true;
+}
+
+// Возврат в офис после очереди матчей (без callback).
+function showOfficeAfterMatchQueue() {
+    hidePagination();
+    document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
+    const os = document.getElementById('office-screen');
+    if (os) os.style.display = 'flex';
+    showBottomNav();
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    const navO = document.querySelector('.nav-item[data-nav="office"]');
+    if (navO) navO.classList.add('active');
+}
+
+// Единая точка завершения очереди: callback ровно один раз, без потери onFinish.
+function completeMatchQueue() {
+    matchQueue = null;
+    matchQueueIdx = 0;
+    if (matchQueueOnFinish) {
+        const cb = matchQueueOnFinish;
+        matchQueueOnFinish = null;
+        try { cb(); } catch (e) { console.error('matchQueueOnFinish error:', e); }
+        const anyVisible = Array.from(document.querySelectorAll('.mobile-screen'))
+            .some(s => s.style.display === 'flex');
+        if (!anyVisible) showOfficeAfterMatchQueue();
+        updateAllDisplays();
+        return;
+    }
+    showOfficeAfterMatchQueue();
+    updateAllDisplays();
+    saveGame();
+}
+
 function openMatchQueueFromData(list, onFinish) {
     if (!list || list.length === 0) {
         if (onFinish) onFinish();
@@ -8773,30 +9567,32 @@ function openMatchQueue(matches, lk) {
 
 function openNextMatchInQueue() {
     if (!matchQueue || matchQueueIdx >= matchQueue.length) {
-        matchQueue = null;
-        matchQueueIdx = 0;
-        if (matchQueueOnFinish) {
-            const cb = matchQueueOnFinish;
-            matchQueueOnFinish = null;
-            cb();
-            return;
-        }
-        // Возврат в офис
-        document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
-        const os = document.getElementById('office-screen');
-        if (os) os.style.display = 'flex';
-        showBottomNav();
-        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-        const navO = document.querySelector('.nav-item[data-nav="office"]');
-        if (navO) navO.classList.add('active');
-        updateAllDisplays();
-        saveGame();
+        completeMatchQueue();
         return;
     }
+
+    const mode = applyMatchViewPolicy();
+
+    // off: очередь не показываем — помечаем все матчи viewed и сразу завершаем.
+    if (mode === 'off') {
+        for (let i = matchQueueIdx; i < matchQueue.length; i++) markMatchItemViewed(matchQueue[i]);
+        matchQueueIdx = matchQueue.length;
+        completeMatchQueue();
+        return;
+    }
+
     const item = matchQueue[matchQueueIdx];
     matchQueueIdx++;
+    if (!item || !item.match || !item.match.result) {
+        openNextMatchInQueue();
+        return;
+    }
+
     openMatchView(item.match, item.lk);
+    // score: экран открыт, но сразу показываем финальный счёт и оценки.
+    if (mode === 'score') matchPlayback.skip();
 }
+
 
 // ============ ЭКРАН ПРОСМОТРА МАТЧА ============
 function openMatchView(match, lk) {
@@ -9418,14 +10214,20 @@ function mvOnEventShown(e) {
             puck.style.setProperty('--goal-y', '50%');
             setTimeout(() => puck.classList.remove('puck-shooting'), 1200);
         }
+        // Сирена звучит на любой гол; вибрация/toast — только за клиента.
+        playSound('siren');
         if (e.isClient) {
-            playSound('goal');
-            vibrate('goal');
+            vibrate('siren');
             showToast('🥅 ' + mvEventText(st, e).replace(/<[^>]+>/g, ''), 'positive');
         }
+    } else if (e.type === 'penalty') {
+        playSound('whistle');
+        vibrate('whistle');
+    } else if (e.type === 'period' || e.type === 'start') {
+        playSound('whistle');
     } else if (e.type === 'end') {
-        playSound('event');
-        vibrate('event');
+        playSound('siren');
+        vibrate('goal');
         showToast(`🏁 ${st.match.home} ${st.homeScore}:${st.awayScore} ${st.match.away}`, 'info');
     }
 }
@@ -10955,6 +11757,12 @@ function evaluateCouncilSeason() {
     // Совет должен быть от только что завершившегося сезона
     if (prev.season !== currentSeason - 1) return;
 
+    // B13: кубок определяется в плей-офф, поэтому проверяем его здесь,
+    // когда championsHistory уже содержит чемпиона завершившегося сезона.
+    prev.tasks.forEach(t => {
+        if (!t.done && t.check === 'champion' && checkTaskProgress(club, t, prev.season) === 1) t.done = true;
+    });
+
     let doneCount = 0;
     prev.tasks.forEach(t => { if (t.done) doneCount++; });
 
@@ -10984,7 +11792,7 @@ function evaluateCouncilSeason() {
 }
 
 function processEndOfSeasonContracts() {
-    const becameFreeAgent = new Set();
+    const rosterSet = new Set(myRoster);
     myRoster.forEach(p => {
         if (p.club && p.contractYears === 1) {
             p.contractYears = 0;
@@ -10997,18 +11805,19 @@ function processEndOfSeasonContracts() {
             p.club = '';
             p.league = '';
             p.salary = 25;
-            becameFreeAgent.add(p);
             addNews(`🕊️ ${p.name} стал свободным агентом`, "info");
         } else if (p.contractYears > 0) {
             p.contractYears--;
             p.guaranteedYears = Math.max(0, Math.min(p.contractYears, (p.guaranteedYears || 0) - 1));
         }
     });
-    // Миру продлеваем контракты, но НЕ тем, кто уже без клуба
-    // и не тем, кто только что стал свободным агентом
+    // Миру продлеваем контракты. Клиентов пропускаем ПОЛНОСТЬЮ: myRoster хранит
+    // ссылки на объекты из players, и первый цикл уже уменьшил их срок —
+    // иначе контракт клиента списывался бы дважды за сезон, а 2-летний
+    // контракт сразу «продлевался» со сбросом negotiated-бонусов.
     players.forEach(p => {
         if (!p.club) return;
-        if (becameFreeAgent.has(p)) return;
+        if (rosterSet.has(p)) return;
         if (p.contractYears > 0) {
             p.contractYears--;
             p.guaranteedYears = Math.max(0, Math.min(p.contractYears, (p.guaranteedYears || 0) - 1));
@@ -11164,6 +11973,7 @@ function processRetirements() {
         });
     }
     Object.keys(poachedPlayersThisSeason || {}).forEach(n => { if (retiredNames.has(n)) delete poachedPlayersThisSeason[n]; });
+    refreshTeamStrengths();
 }
 
 function replenishYouth() {
@@ -11201,6 +12011,7 @@ function replenishYouth() {
         }
     }
     rebalanceClubRosters();
+    refreshTeamStrengths();
     return total;
 }
 
@@ -11247,11 +12058,18 @@ function rebalanceClubRosters(minSize) {
         getAllClubs(lk).forEach(club => {
             const k = lk + '|' + club;
             let have = counts.get(k) || 0;
+            if (have >= MIN) return;
+            // B17: добиваем состав по медиане уже имеющихся игроков ±6.
+            const existingRatings = players
+                .filter(p => p.league === lk && p.club === club)
+                .map(p => p.rating);
+            const medianRating = existingRatings.length
+                ? getMedianRating(existingRatings)
+                : (ld.min + ld.max) / 2;
             while (have < MIN) {
                 const pos = simChoice(["G","D","D","C","C","LW","LW","RW"]);
                 const age = (lk === 'MHL' || lk === 'Belarus_Vysshaya') ? simInt(14, 20) : simInt(18, 24);
-                const base = simInt(ld.min, ld.max);
-                const rating = Math.max(1, Math.min(100, base + simInt(-8, 2)));
+                const rating = Math.max(1, Math.min(100, Math.round(medianRating) + simInt(-6, 6)));
                 const g = generatePlayerName(lk);
                 const name = makeUniqueName(g.name, lk, usedNames);
                 players.push(createPlayer(name, club, lk, pos, age, rating, null, g.nationality));
@@ -11601,12 +12419,115 @@ const FAIL_PHRASES = {
     loyal: ['Он мой друг. Я не уйду.', 'Мы вместе с самого начала.', 'Никогда. Даже за миллион.']
 };
 
+// ============ ПЕРЕМАНИВАНИЕ: ПРЕСЕТЫ ОФФЕРА И ЧИСТЫЙ ШАНС ============
+// Три предложения игроку с разной ценой для агента и разным качеством.
+// salary/commission/signingBonus/promises напрямую влияют на offerQuality.
+const POACH_OFFER_PRESETS = [
+    {
+        id: 'standard', name: 'Стандарт', desc: 'Базовые условия без вложений', cost: 0,
+        build: (p) => ({
+            newSalary: Math.round((p.salary || 1) * 1.1),
+            agentCommissionRate: 0.08,
+            signingBonus: 0,
+            promises: []
+        })
+    },
+    {
+        id: 'star', name: 'Агент года', desc: 'Максимальная зарплата, низкая комиссия и обещания топ-клуба', cost: 5000,
+        build: (p) => ({
+            newSalary: Math.round((p.salary || 1) * 1.4),
+            agentCommissionRate: 0.05,
+            signingBonus: Math.round((p.salary || 1) * 1000 * 1.5),
+            promises: ['nhl', 'star']
+        })
+    },
+    {
+        id: 'media', name: 'Медийный', desc: 'Медийное продвижение и подъёмные', cost: 2500,
+        build: (p) => ({
+            newSalary: Math.round((p.salary || 1) * 1.2),
+            agentCommissionRate: 0.07,
+            signingBonus: Math.round((p.salary || 1) * 1000 * 0.5),
+            promises: ['media']
+        })
+    }
+];
+
+function clampOfferQuality(v) {
+    if (!Number.isFinite(v)) return 0;
+    return Math.max(0, Math.min(1, v));
+}
+
+// Качество предложения 0..1: прибавка к зарплате, комиссия, подъёмные, обещания.
+function getPoachOfferQuality(player, offer) {
+    if (!offer) return 0;
+    if (Number.isFinite(offer.quality)) return clampOfferQuality(offer.quality);
+
+    const currentSalary = Math.max(1, (player && player.salary) || 1);
+    const annual = currentSalary * 1000;
+    const newSalary = Number.isFinite(offer.newSalary) ? offer.newSalary : currentSalary;
+
+    const salaryPart = clampOfferQuality((newSalary - currentSalary) / (currentSalary * 0.5));
+    const rate = Number.isFinite(offer.agentCommissionRate) ? offer.agentCommissionRate : 0.10;
+    const commissionPart = clampOfferQuality((0.20 - rate) / 0.17); // 3% → 1, 20% → 0
+    const bonusPart = clampOfferQuality((offer.signingBonus || 0) / (annual * 0.5));
+    const promisePart = clampOfferQuality((Array.isArray(offer.promises) ? offer.promises.length : 0) / 2);
+
+    return clampOfferQuality(salaryPart * 0.35 + commissionPart * 0.25 + bonusPart * 0.2 + promisePart * 0.2);
+}
+
+// Список пресетов с уже посчитанным качеством (для диалога и тестов).
+function getPoachOfferPresets(player) {
+    return POACH_OFFER_PRESETS.map((preset) => {
+        const offer = {
+            id: preset.id,
+            name: preset.name,
+            desc: preset.desc,
+            cost: preset.cost,
+            ...preset.build(player)
+        };
+        offer.quality = getPoachOfferQuality(player, offer);
+        return offer;
+    });
+}
+
+// Чистый шанс переманивания. myRep можно передать явно (тесты/симуляции);
+// без него используется реальная репутация агента.
+function getPoachChance(player, agency, reply, offer, myRep = null) {
+    const p = player || {};
+    const rep = Number.isFinite(myRep) ? myRep : getMyAgentReputation();
+    const agencyRep = agency && Number.isFinite(agency.rep) ? agency.rep : 50;
+
+    const loyalty = Number.isFinite(p.loyalty) ? p.loyalty : 50;
+    const age = Number.isFinite(p.age) ? p.age : 25;
+    const agePart = age <= 18 ? 1.1 : age <= 24 ? 1.0 : age <= 27 ? 0.95 : 0.9;
+
+    const quality = getPoachOfferQuality(p, offer);
+    const replyType = reply && reply.type ? reply.type : 'neutral';
+
+    const base = 20;
+    const repPart = (rep - agencyRep) * 0.8;
+    const qualityPart = quality * 30;
+    const replyPart = replyType === 'correct' ? 25 : replyType === 'wrong' ? -20 : 0;
+    const loyaltyPart = -(loyalty / 100) * 25;
+
+    let chance = (base + repPart + qualityPart + replyPart + loyaltyPart) * agePart;
+
+    // Частные случаи вместо жёстких потолков 3/8/18/30/45/60/75.
+    if (rep < 20 && (p.rating || 0) >= 80) return 5;
+    if (agencyRep - rep > 60) chance = Math.min(chance, 10);
+    if (!Number.isFinite(chance)) chance = 5;
+
+    return Math.max(5, Math.min(85, Math.round(chance)));
+}
+
 function openPoachDialog(player, npcAgency) {
     const modal = document.getElementById('poach-dialog-modal');
     const body = document.getElementById('poach-dialog-body');
     const actions = document.getElementById('poach-dialog-actions');
     const country = getPlayerCountry(player);
     const agencyFlag = npcAgency.country.split(' ')[0];
+    const presets = getPoachOfferPresets(player);
+    let selectedOffer = presets[0];
 
     const isTruth = simRandom() < 0.8;
     const rumorKeys = ['ambitious', 'calm', 'pragmatic', 'capricious', 'loyal'];
@@ -11628,10 +12549,13 @@ function openPoachDialog(player, npcAgency) {
             <div class="pd-stats">
                 <div class="pd-stat"><span>⭐ ${LANG.t('Рейтинг')}</span><b>${player.rating}</b></div>
                 <div class="pd-stat"><span>🎯 ${LANG.t('Потенциал')}</span><b>${potHTML}</b></div>
+                <div class="pd-stat"><span>💵 ${LANG.t('Зарплата')}</span><b>${formatSalary(player.salary)}</b></div>
             </div>
             <div class="pd-current-agent">${agencyFlag} ${npcAgency.name} (⭐ ${npcAgency.rep})</div>
         </div>
         <div class="pd-rumor">💬 ${LANG.t('Слухи')}: ${rumorText}</div>
+        <div class="pd-dialog-title">💰 ${LANG.t('Предложение игроку')}</div>
+        <div class="pd-offer-presets" id="pd-offer-presets"></div>
         <div class="pd-dialog-title">🗣 ${LANG.t('Ты обращаешься к игроку')}:</div>
         <div class="pd-replies" id="pd-replies"></div>
     `;
@@ -11641,6 +12565,26 @@ function openPoachDialog(player, npcAgency) {
     closeBtn.textContent = LANG.t('Отмена');
     closeBtn.addEventListener('click', () => modal.style.display = 'none');
     actions.appendChild(closeBtn);
+
+    const offerCont = document.getElementById('pd-offer-presets');
+    presets.forEach((o) => {
+        const canPay = o.cost <= agentMoney;
+        const btn = document.createElement('button');
+        btn.className = 'pd-offer-preset' + (o.id === selectedOffer.id ? ' active' : '') + (canPay ? '' : ' disabled');
+        btn.disabled = !canPay;
+        btn.setAttribute('data-offer', o.id);
+        btn.innerHTML = `
+            <span class="pop-head"><span class="pop-name">${LANG.t(o.name)}</span><span class="pop-quality">${Math.round(o.quality * 100)}%</span></span>
+            <span class="pop-meta">${formatSalary(o.newSalary)} · ${Math.round(o.agentCommissionRate * 100)}% · ${o.cost ? formatMoney(o.cost) : LANG.t('Бесплатно')}</span>
+        `;
+        btn.addEventListener('click', () => {
+            if (!canPay) return;
+            selectedOffer = o;
+            offerCont.querySelectorAll('.pd-offer-preset').forEach(x => x.classList.remove('active'));
+            btn.classList.add('active');
+        });
+        offerCont.appendChild(btn);
+    });
 
     const pool = [];
     const charData = CHARACTERS[player.character];
@@ -11659,15 +12603,23 @@ function openPoachDialog(player, npcAgency) {
         const btn = document.createElement('button');
         btn.className = 'pd-reply-btn';
         btn.textContent = r.text;
-        btn.addEventListener('click', () => resolvePoach(player, npcAgency, r));
+        btn.addEventListener('click', () => resolvePoach(player, npcAgency, r, selectedOffer));
         cont.appendChild(btn);
     });
     modal.style.display = 'flex';
 }
 
-function resolvePoach(player, npcAgency, reply) {
+function resolvePoach(player, npcAgency, reply, offer) {
     const modal = document.getElementById('poach-dialog-modal');
     const body = document.getElementById('poach-dialog-body');
+    const chosenOffer = offer || getPoachOfferPresets(player)[0];
+    const offerCost = Math.max(0, Math.round(chosenOffer.cost || 0));
+
+    // Цена оффера списывается только если хватает денег — в минус не уходим.
+    if (offerCost > agentMoney) {
+        uiAlert(LANG.t('Недостаточно средств для этого предложения'));
+        return;
+    }
 
     // ОДНА ПОПЫТКА ЗА СЕЗОН — помечаем сразу, чтобы нельзя было долбить одного и того же
     poachedPlayersThisSeason[player.name] = true;
@@ -11681,41 +12633,10 @@ function resolvePoach(player, npcAgency, reply) {
         addNews(`🚨 ${npcAgency.name} закрыло доступ к своим игрокам до конца сезона!`, "negative");
     }
 
-    const myRep = upgrades.reputation * 3;
-    const diff = myRep - npcAgency.rep;
-    let chance = 5 + diff * 0.7;
-    chance *= (1 - (player.loyalty || 50) / 200);
-    if (player.age <= 18) chance *= 1.2;
-    else if (player.age <= 24) chance *= 1.0;
-    else if (player.age <= 27) chance *= 0.9;
-    else chance *= 0.8;
-    chance *= (1 - npcAgency.rep / 200);
+    if (offerCost > 0) agentMoney -= offerCost;
 
-    if (reply.type === 'correct') chance += 30;
-    else if (reply.type === 'wrong') chance -= 20;
-    if (player.character === 'capricious' && simRandom() < 0.3) chance += simInt(-15, 15);
-
-    // ЖЁСТКИЙ ПОТОЛОК: против сильного агентства шансов почти нет
-    const rawDiff = myRep - npcAgency.rep;
-    let minChance = 0;
-    let maxChance = 15;
-
-    if (rawDiff <= -70) { minChance = 0; maxChance = 3; }    // топ-агентство почти недосягаемо
-    else if (rawDiff <= -50) { minChance = 0; maxChance = 8; }
-    else if (rawDiff <= -30) { minChance = 0; maxChance = 18; }
-    else if (rawDiff <= -15) { minChance = 1; maxChance = 30; }
-    else if (rawDiff <= 0) { minChance = 3; maxChance = 45; }
-    else if (rawDiff <= 15) { minChance = 6; maxChance = 60; }
-    else { minChance = 10; maxChance = 75; }
-
-    chance = Math.max(minChance, Math.min(maxChance, chance));
-    let success = simRandom() * 100 < chance;
-
-    // СТРАХОВКА: если у топ-агентства репутация на 40+ выше твоей — никогда не переманить
-    if (npcAgency.rep - myRep >= 40) success = false;
-
-    // СТРАХОВКА 2: игроки рейтингом 80+ к нулевой репутации не идут
-    if (player.rating >= 80 && myRep < 30) success = false;
+    const chance = getPoachChance(player, npcAgency, reply, chosenOffer);
+    const success = simRandom() * 100 < chance;
 
     if (success) {
         player.agentId = -1;
@@ -11724,7 +12645,7 @@ function resolvePoach(player, npcAgency, reply) {
         careerCounters.poachSuccess = (careerCounters.poachSuccess || 0) + 1;
         if (npcAgency.rep >= 85) careerCounters.poachTopSuccess = (careerCounters.poachTopSuccess || 0) + 1;
         const phrases = SUCCESS_PHRASES[player.character] || SUCCESS_PHRASES.calm;
-        body.innerHTML = `<div class="pd-result success"><div class="pd-result-icon">✅</div><div class="pd-player-line">${player.name}</div><div class="pd-phrase">${LANG.t(simChoice(phrases))}</div><div class="pd-result-text">${LANG.t('Игрок стал твоим клиентом!')}</div></div>`;
+        body.innerHTML = `<div class="pd-result success"><div class="pd-result-icon">✅</div><div class="pd-player-line">${player.name}</div><div class="pd-phrase">${LANG.t(simChoice(phrases))}</div><div class="pd-result-text">${LANG.t('Игрок стал твоим клиентом!')} (${LANG.t('шанс')} ${chance}%)</div></div>`;
         addNews(`🎉 Вы переманили ${player.name}!`, "positive");
         addXP(player.rating * 5);
         updateAllDisplays();
@@ -11732,8 +12653,9 @@ function resolvePoach(player, npcAgency, reply) {
     } else {
         careerCounters.poachFails = (careerCounters.poachFails || 0) + 1;
         const phrases = FAIL_PHRASES[player.character] || FAIL_PHRASES.calm;
-        body.innerHTML = `<div class="pd-result fail"><div class="pd-result-icon">❌</div><div class="pd-player-line">${player.name}</div><div class="pd-phrase">${LANG.t(simChoice(phrases))}</div><div class="pd-result-text">${LANG.t('До конца сезона к нему не подойти')}</div></div>`;
+        body.innerHTML = `<div class="pd-result fail"><div class="pd-result-icon">❌</div><div class="pd-player-line">${player.name}</div><div class="pd-phrase">${LANG.t(simChoice(phrases))}</div><div class="pd-result-text">${LANG.t('До конца сезона к нему не подойти')} (${LANG.t('шанс')} ${chance}%)</div></div>`;
         addNews(`❌ Не удалось переманить ${player.name}`, "negative");
+        updateAllDisplays();
         saveGame();
     }
 
@@ -11843,12 +12765,13 @@ function finishTournament() {
 }
 
 function getWealthTax() {
-    // Налог на богатство: 0.4%/нед от суммы свыше $250K
-    // На высоких уровнях порог поднимается — можно копить больше
-    const threshold = 250000 + (agentLevel - 1) * 100000;
+    // Налог на богатство (v1.1): 0.15%/нед от суммы свыше порога.
+    // Порог растёт с уровнем агента, чтобы лонг-ран капитал был достижим.
+    // При $75M и пороге $1.5M это ≈ $110K/нед — заметно, но не тупик.
+    const threshold = 500000 + (agentLevel - 1) * 100000;
     if (agentMoney <= threshold) return 0;
     const over = agentMoney - threshold;
-    return Math.round(over * 0.004);
+    return Math.round(over * 0.0015);
 }
 
 function playRegularWeek() {
@@ -11873,7 +12796,16 @@ function playRegularWeek() {
     agentMoney += calculatePassiveIncome();
 
     // Симуляция
+    const weeklyStatsBefore = new Map();
+    myRoster.forEach(p => {
+        const s = (p && p.stats) || {};
+        weeklyStatsBefore.set(p, {
+            gp: s.gp || 0, goals: s.goals || 0, assists: s.assists || 0,
+            ratingSum: s.ratingSum || 0, goalsAgainst: s.goalsAgainst || 0
+        });
+    });
     myRoster.forEach(p => simulateWeekForPlayer(p));
+    awardWeeklyClientXP(weeklyStatsBefore);
     processWeeklyTrainings(); // тик индивидуальных тренировок
     // Живой мир: AI-трансферы раз в месяц в регулярке
     if (currentWeek % 4 === 0) simulateAITransfers();
@@ -11886,6 +12818,8 @@ function playRegularWeek() {
         }
     }
     simulateClubActions();
+    simulateWorldEvents();
+    generateTransferRumor(false);
     updateAllStockPrices();
     calculateDividends();
 
@@ -11932,7 +12866,8 @@ function playRegularWeek() {
             'national_team_chain', 'media_mogul_chain'
         ];
         const pick = chainPool[Math.floor(simRandom() * chainPool.length)];
-        if (!activeChains.some(c => c.chainId === pick)) {
+        const nowChainKey = currentSeason * 100 + currentWeek;
+        if ((eventCooldowns[pick] || 0) <= nowChainKey && !activeChains.some(c => c.chainId === pick)) {
             triggerChainStart(pick);
         }
     }
@@ -12368,11 +13303,11 @@ const EVENT_POOL = [
     // ============ КАТЕГОРИЯ 5. Личная жизнь ============
     {
         id: 'family_home', icon: '🏠', title: 'СЕМЕЙНЫЕ ОБСТОЯТЕЛЬСТВА',
-        condition: () => myRoster.some(p => p.club && getPlayerCountry(p) !== '🇷🇺' ? !isInHomeCountry(p) : false),
-        getPlayer: () => myRoster.find(p => p.club && !isInHomeCountry(p)),
+        condition: () => myRoster.some(p => p.club && !isInHomeCountry(p)),
+        getPlayer: () => myRoster.find(p => p.club && !isInHomeCountry(p) && !activeTasks.some(t => t.type === 'find_club_home' && t.playerName === p.name)),
         text: (p) => `У <b>${p.name}</b> жена беременна. Хочет вернуться в родную страну. Просит найти клуб ближе к дому.`,
         choices: [
-{ icon: '✅', label: 'Пообещать помочь', desc: 'Найти клуб дома (12 недель)', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 15); createTask({ type: 'find_club_home', playerName: p.name, description: `Вернуть ${p.name} домой`, icon: '🏠', deadlineWeeks: 12, reward: { loyalty: 15, rep: 3, xp: 500 }, penalty: { loyalty: -25 }, params: { originalClub: p.club, originalLeague: p.league } }); return { text: 'Обещание принято. Найди клуб в родной стране.', type: 'positive' }; } },
+{ icon: '✅', label: 'Пообещать помочь', desc: 'Найти клуб дома (12 недель)', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 15); createHomeTask(p, { deadlineWeeks: 12, reward: { loyalty: 15, rep: 3, xp: 500 }, penalty: { loyalty: -25 } }); return { text: 'Обещание принято. Найди клуб в родной стране.', type: 'positive' }; } },
             { icon: '🤝', label: 'Уговорить остаться', desc: 'Попробовать переубедить', apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 5); return { text: 'Остался. Лояльность +5.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 20); return { text: 'Обиделся. Лояльность −20.', type: 'negative' }; } },
             { icon: '💰', label: 'Оплатить перелёты семьи ($15K)', desc: 'Пусть семья приедет', apply: (p) => { if (agentMoney < 15000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 15000; p.loyalty = Math.min(100, p.loyalty + 25); return { text: 'Семья рядом! −$15K, лояльность +25.', type: 'positive' }; } },
             { icon: '❌', label: 'Игнорировать', desc: 'Не наше дело', apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 25); return { text: 'Клиент в ярости. Лояльность −25.', type: 'negative' }; } }
@@ -12596,7 +13531,7 @@ const EVENT_POOL = [
         text: (p) => `У <b>${p.name}</b> проблемы с визой. Может потерять право на работу.`,
         choices: [
             { icon: '⚖️', label: 'Адвокат ($20K)', desc: 'Профессиональная помощь', apply: (p) => { if (agentMoney < 20000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 20000; if (simRandom() < 0.8) return { text: 'Виза получена! −$20K.', type: 'positive' }; return { text: 'Не помогло.', type: 'negative' }; } },
-            { icon: '🏠', label: 'Вернуться домой', desc: 'Решить кардинально', apply: (p) => { p.rating = Math.max(1, p.rating - 5); createTask({ type: 'find_club_home', playerName: p.name, description: `Найти ${p.name} клуб дома`, icon: '🏠', deadlineWeeks: 12, reward: { loyalty: 10 }, penalty: { loyalty: -15 } }); return { text: 'Ищем клуб дома. Рейтинг −5.', type: 'negative' }; } },
+            { icon: '🏠', label: 'Вернуться домой', desc: 'Решить кардинально', apply: (p) => { p.rating = Math.max(1, p.rating - 5); createHomeTask(p, { description: `Найти ${p.name} клуб дома`, deadlineWeeks: 12, reward: { loyalty: 10 }, penalty: { loyalty: -15 } }); return { text: 'Ищем клуб дома. Рейтинг −5.', type: 'negative' }; } },
             { icon: '💰', label: 'Заплатить ($50K)', desc: 'Дорого, но быстро', apply: (p) => { if (agentMoney < 50000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 50000; return { text: 'Виза ускорена. −$50K.', type: 'positive' }; } },
             { icon: '🔄', label: 'Сменить клуб', desc: 'Найти в другой стране', apply: (p) => { createTask({ type: 'find_club_same', playerName: p.name, description: `Перевести ${p.name} в другой клуб`, icon: '🔄', deadlineWeeks: 4, reward: { loyalty: 5 }, penalty: { loyalty: -10 } }); return { text: 'Ищем новый клуб.', type: 'positive' }; } }
         ]
@@ -12768,17 +13703,20 @@ EVENT_CHAINS.doping_chain = {
 // Ц4. Возвращение домой (4 этапа)
 EVENT_CHAINS.home_return_chain = {
     id: 'home_return_chain', title: 'Возвращение домой',
+    canStart: () => myRoster.some(p => p.club && !isInHomeCountry(p)),
     stages: [
         { icon: '🏠', title: 'СЕМЕЙНЫЕ ОБСТОЯТЕЛЬСТВА', triggerWeek: 0,
+          playerCondition: (p) => !!p.club && !isInHomeCountry(p),
           getPlayer: () => myRoster.find(p => p.club && !isInHomeCountry(p)),
           text: (p) => `У <b>${p.name}</b> жена беременна. Хочет вернуться в родную страну.`,
           choices: [
 { icon: '✅', label: 'Пообещать помочь', desc: 'Найти клуб дома',
-  apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 15); createTask({ type: 'find_club_home', playerName: p.name, description: `Вернуть ${p.name} домой`, icon: '🏠', deadlineWeeks: 16, reward: { loyalty: 20, xp: 400 }, penalty: { loyalty: -25 }, params: { originalClub: p.club, originalLeague: p.league } }); return { text: 'Обещание дано. Задача в активных.', type: 'positive' }; } },
+  apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 15); createHomeTask(p, { deadlineWeeks: 16, reward: { loyalty: 20, xp: 400 }, penalty: { loyalty: -25 } }); return { text: 'Обещание дано. Задача в активных.', type: 'positive' }; } },
             { icon: '💰', label: 'Оплатить перелёты ($15K)', desc: 'Пусть семья приедет',
               apply: (p) => { if (agentMoney < 15000) return { text: 'Недостаточно денег.', skip: true }; agentMoney -= 15000; p.loyalty = Math.min(100, p.loyalty + 25); return { text: 'Семья рядом. −$15K, лояльность +25.', type: 'positive' }; } }
           ] },
         { icon: '📞', title: 'ПЕРВЫЙ ЗВОНОК', triggerWeek: 3,
+          playerCondition: (p) => !!p.club && !isInHomeCountry(p),
           getPlayer: () => myRoster.find(p => p.club && !isInHomeCountry(p)),
           text: (p) => `<b>${p.name}</b> звонит: «Ты нашёл клуб? Семья ждёт».`,
           choices: [
@@ -12788,6 +13726,7 @@ EVENT_CHAINS.home_return_chain = {
               apply: (p) => { if (simRandom() < 0.5) { p.loyalty = Math.min(100, p.loyalty + 3); return { text: 'Понял. Лояльность +3.', type: 'positive' }; } p.loyalty = Math.max(0, p.loyalty - 15); return { text: 'Обиделся. Лояльность −15.', type: 'negative' }; } }
           ] },
         { icon: '🏒', title: 'ПРЕДЛОЖЕНИЕ ОТ СТАРОГО КЛУБА', triggerWeek: 7,
+          playerCondition: (p) => !!p.club && !isInHomeCountry(p),
           getPlayer: () => myRoster.find(p => p.club && !isInHomeCountry(p)),
           text: (p) => `Старый клуб <b>${p.name}</b> из родной страны предлагает контракт.`,
           choices: [
@@ -12797,6 +13736,7 @@ EVENT_CHAINS.home_return_chain = {
               apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 5); return { text: 'Клиент нервничает. Лояльность −5.', type: 'negative' }; } }
           ] },
         { icon: '🏡', title: 'ФИНАЛ', triggerWeek: 12,
+          playerCondition: (p) => !!p.club && !isInHomeCountry(p),
           getPlayer: () => myRoster.find(p => p.club && !isInHomeCountry(p)),
           text: (p) => `Что решил <b>${p.name}</b>.`,
           choices: [
@@ -13170,6 +14110,23 @@ function getTaskWeeksLeft(task) {
     return Math.max(0, deadline - now);
 }
 
+// Задача «вернуть домой» без дублей (этап 1.2): если у игрока уже есть
+// активная find_club_home — возвращаем существующую, новую не создаём.
+function createHomeTask(p, config) {
+    const existing = activeTasks.find(t => t.type === 'find_club_home' && t.playerName === p.name && !t.completed && !t.failed);
+    if (existing) return existing;
+    return createTask({
+        type: 'find_club_home',
+        playerName: p.name,
+        description: config.description || `Вернуть ${p.name} домой`,
+        icon: '🏠',
+        deadlineWeeks: config.deadlineWeeks || 12,
+        reward: config.reward || {},
+        penalty: config.penalty || {},
+        params: { originalClub: p.club, originalLeague: p.league }
+    });
+}
+
 function findTaskPlayer(task) {
     if (!task.playerName) return null;
     return myRoster.find(p => p.name === task.playerName) || null;
@@ -13224,15 +14181,17 @@ function checkActiveTasks() {
             } else if (weeksLeft <= 0) failTask(task);
         }else if (task.type === 'find_club_home') {
             const p = findTaskPlayer(task);
-            if (!p) { failTask(task); return; }
+            if (!p) { failTask(task); closeHomeChainFor(task.playerName); return; }
             const homeFlag = getPlayerCountry(p);
             const homeLeagues = { '🇷🇺':['KHL','VHL'], '🇧🇾':['Belarus_Extraliga','Belarus_Vysshaya'], '🇸🇪':['SHL'], '🇫🇮':['Liiga'], '🇨🇿':['Czech_Extraliga'], '🇨🇦':['NHL','AHL'], '🇺🇸':['NHL','AHL'], '🇩🇪':['DEL'], '🇨🇭':['NL_Switzerland'], '🇰🇿':['KHL'], '🇸🇰':['Czech_Extraliga'] };
             const targets = homeLeagues[homeFlag] || [];
             const origClub = task.params && task.params.originalClub;
             if (p.club && targets.includes(p.league) && (!origClub || p.club !== origClub)) {
                 completeTask(task, `✅ ${p.name} вернулся домой — ${p.club}!`);
+                closeHomeChainFor(p.name);
             } else if (p.club && targets.includes(p.league) && origClub && p.club === origClub) {
                 completeTask(task, `✅ ${p.name} уже играет дома — ${p.club}`);
+                closeHomeChainFor(p.name);
             } else if (weeksLeft <= 0) {
                 // Если родная лига не существует или клиент слишком слаб — авторешение
                 const allLeagueData = targets.map(lk => LEAGUE_DATA[lk]).filter(Boolean);
@@ -13247,6 +14206,7 @@ function checkActiveTasks() {
                 } else {
                     failTask(task);
                 }
+                closeHomeChainFor(p.name);
             }
         } else if (task.type === 'find_club_same') {
             const p = findTaskPlayer(task);
@@ -13314,15 +14274,58 @@ function addEventHistory(entry) {
 // ============ ДВИЖОК ЦЕПОЧЕК ============
 function startChain(chainId) {
     const chain = EVENT_CHAINS[chainId];
-    if (!chain) return;
+    if (!chain) return false;
+    // Условие старта (этап 1.2): история не начинается, если некому её играть.
+    if (typeof chain.canStart === 'function') {
+        let ok = false;
+        try { ok = !!chain.canStart(); } catch (e) { ok = false; }
+        if (!ok) return false;
+    }
+    // Фиксируем игрока на старте — стадии не должны «подменять» его другим.
+    let playerName = null;
+    const first = chain.stages && chain.stages[0];
+    if (first && typeof first.getPlayer === 'function') {
+        let p = null;
+        try { p = first.getPlayer(); } catch (e) {}
+        if (p && (!first.playerCondition || first.playerCondition(p))) playerName = p.name;
+    }
     activeChains.push({
         chainId,
         stage: 0,
-        playerName: null,
+        playerName,
         startedWeek: currentWeek,
         startedSeason: currentSeason
     });
     addNews(`📖 Началась история: ${chain.title}`, "info");
+    return true;
+}
+
+// Игрок стадии: привязанный ac.playerName приоритетнее любого getPlayer —
+// подмена уже привязанного игрока запрещена (этап 1.2).
+function getChainPlayer(ac, stage) {
+    if (ac.playerName) {
+        const p = myRoster.find(x => x.name === ac.playerName);
+        if (!p) return null;
+        if (stage.playerCondition && !stage.playerCondition(p)) return null;
+        return p;
+    }
+    if (typeof stage.getPlayer === 'function') {
+        let p = null;
+        try { p = stage.getPlayer(); } catch (e) {}
+        if (p && stage.playerCondition && !stage.playerCondition(p)) return null;
+        return p || null;
+    }
+    return null;
+}
+
+// Корректное завершение цепочки без выбора и без изменения лояльности.
+function finishChain(chainId, reason) {
+    const idx = activeChains.findIndex(c => c.chainId === chainId);
+    if (idx === -1) return;
+    const chain = EVENT_CHAINS[chainId];
+    activeChains.splice(idx, 1);
+    if (reason) addNews(`📖 История закрыта: ${reason}`, "info");
+    else if (chain) addNews(`📖 История завершена: ${chain.title}`, "info");
 }
 
 function advanceChain(chainId) {
@@ -13332,8 +14335,7 @@ function advanceChain(chainId) {
     c.stage++;
     const chain = EVENT_CHAINS[chainId];
     if (c.stage >= chain.stages.length) {
-        activeChains.splice(idx, 1);
-        addNews(`📖 История завершена: ${chain.title}`, "info");
+        finishChain(chainId);
     }
 }
 
@@ -13346,11 +14348,12 @@ function tryChainEvent() {
         if (!stage) continue;
         const weeksSince = (currentWeek - ac.startedWeek) + (currentSeason - ac.startedSeason) * 52;
         if (weeksSince < (stage.triggerWeek || 0)) continue;
-        let player = null;
-        if (stage.getPlayer) player = stage.getPlayer();
-        else if (ac.playerName) player = myRoster.find(p => p.name === ac.playerName);
+        const player = getChainPlayer(ac, stage);
         if (!player && stage.requiresPlayer !== false) {
-            activeChains.splice(i, 1);
+            // Игрок ушёл/уже дома — закрываем историю корректно, без splice
+            // «в никуда» и без подмены другим клиентом.
+            finishChain(ac.chainId, ac.playerName ? 'игрок уже дома' : null);
+            i--;
             continue;
         }
         showChainStage(chain, stage, player);
@@ -13360,6 +14363,10 @@ function tryChainEvent() {
 }
 
 function showChainStage(chain, stage, player) {
+    queueEventModal(() => renderChainStage(chain, stage, player));
+}
+
+function renderChainStage(chain, stage, player) {
     eventTitle.textContent = `${stage.icon} ${stage.title}`;
     eventText.innerHTML = stage.text(player);
     eventDetails.innerHTML = `<div class="chain-progress">📖 ${chain.title} • Этап ${activeChains.find(c => c.chainId === chain.id).stage + 1}/${chain.stages.length}</div>`;
@@ -13391,7 +14398,7 @@ function showChainStage(chain, stage, player) {
             okBtn.className = 'btn-neutral';
             okBtn.textContent = 'OK';
             okBtn.addEventListener('click', () => {
-                eventModal.style.display = 'none';
+                closeEventModal();
                 const ac = activeChains.find(c => c.chainId === chain.id);
                 if (ac) {
                     ac.startedWeek = currentWeek;
@@ -13417,9 +14424,28 @@ function checkChains() {
 
 function triggerChainStart(chainId) {
     if (activeChains.some(c => c.chainId === chainId)) return;
-    startChain(chainId);
+    const chain = EVENT_CHAINS[chainId];
+    if (!chain) return;
+    // Кулдаун после закрытия истории (этап 1.2) — не перезапускаем сразу.
+    const nowKey = currentSeason * 100 + currentWeek;
+    if ((eventCooldowns[chainId] || 0) > nowKey) return;
+    // canStart проверяется и здесь — до создания записи (этап 1.2).
+    if (typeof chain.canStart === 'function') {
+        let ok = false;
+        try { ok = !!chain.canStart(); } catch (e) { ok = false; }
+        if (!ok) return;
+    }
+    if (!startChain(chainId)) return;
     const ac = activeChains.find(c => c.chainId === chainId);
     if (ac) ac.startedWeek = currentWeek - 100;
+}
+
+// Задача «домой» закрыта (успех/провал) — закрываем привязанную цепочку
+// и кулдауним её перезапуск, чтобы история не стартовала сразу снова.
+function closeHomeChainFor(playerName) {
+    const ac = activeChains.find(c => c.chainId === 'home_return_chain' && c.playerName === playerName);
+    if (ac) finishChain('home_return_chain', 'обещание закрыто');
+    eventCooldowns['home_return_chain'] = currentSeason * 100 + currentWeek + 4;
 }
 
 // ============ ДВИЖОК СОБЫТИЙ ============
@@ -13475,7 +14501,7 @@ function renderEventInPhone(ev, player) {
                 // Выбор невозможен (нет денег и т.п.) — показываем причину,
                 // событие остаётся в «почте», варианты не сгорают
                 const resText = eventText.innerHTML;
-                eventModal.style.display = 'none';
+                closeEventModal();
                 phoneChatBody.innerHTML += `
                     <div class="neg-msg neg-msg-agent">
                         <div class="neg-bubble">${LANG.t(choice.label)}</div>
@@ -13492,7 +14518,7 @@ function renderEventInPhone(ev, player) {
             // Результат показываем в той же "телефонной" модалке
             const resTitle = eventTitle.textContent;
             const resText = eventText.innerHTML;
-            eventModal.style.display = 'none';
+            closeEventModal();
             phoneChatName.textContent = resTitle.replace(/^.\s*/, '');
             phoneChatBody.innerHTML += `
                 <div class="neg-msg neg-msg-agent">
@@ -13519,7 +14545,7 @@ function renderEventInPhone(ev, player) {
         phoneInputBar.appendChild(btn);
     });
 
-    eventModal.style.display = 'none';
+    closeEventModal();
     negotiationModal.style.display = 'flex';
     scrollChatToBottom();
 }
@@ -13615,7 +14641,7 @@ function simulateAITransfers() {
         });
     }
     // AI-клубы не должны «оголяться» после серии трансферов
-    if (transfers > 0) rebalanceClubRosters();
+    if (transfers > 0) { rebalanceClubRosters(); refreshTeamStrengths(); }
     return transfers;
 }
 
@@ -13624,7 +14650,9 @@ function tryWeeklyEvent() {
     const weeksSinceLast = lastEventWeek > 0 ? (currentWeek - lastEventWeek) : 999;
     if (lastEventWeek > 0 && weeksSinceLast < EVENT_MIN_COOLDOWN) return false;
     let chance = 0.20;
-    if (weeksSinceLast >= EVENT_MAX_COOLDOWN) chance = 0.9;
+    // v1.1: не гарантируем событие после кулдауна — иначе лимит 12/сезон
+    // выбирался всегда. Теперь это лишь повышенный шанс, а не детерминизм.
+    if (weeksSinceLast >= EVENT_MAX_COOLDOWN) chance = 0.35;
     if (simRandom() > chance) return false;
     const nowKey = currentSeason * 100 + currentWeek;
     const available = EVENT_POOL.filter(e => {
@@ -13664,7 +14692,7 @@ function applyEventChoice(ev, choice, player) {
         const cancelBtn = document.createElement('button');
         cancelBtn.className = 'btn-neutral';
         cancelBtn.textContent = 'OK';
-        cancelBtn.addEventListener('click', () => { eventModal.style.display = 'none'; });
+        cancelBtn.addEventListener('click', () => { closeEventModal(); });
         eventActions.appendChild(cancelBtn);
         return false;
     }
@@ -13684,7 +14712,7 @@ function applyEventChoice(ev, choice, player) {
     closeBtn.className = 'btn-neutral';
     closeBtn.textContent = 'OK';
     closeBtn.addEventListener('click', () => {
-        eventModal.style.display = 'none';
+        closeEventModal();
         updateAllDisplays();
         saveGame();
     });
@@ -13716,6 +14744,10 @@ function tryNpcPoaching() {
 }
 
 function showPoachingEvent(player, agent, newSalary, compensation) {
+    queueEventModal(() => renderPoachingEvent(player, agent, newSalary, compensation));
+}
+
+function renderPoachingEvent(player, agent, newSalary, compensation) {
     eventTitle.textContent = "Агент-конкурент!";
     eventText.textContent = `${agent.country.split(' ')[0]} ${agent.name} предлагает вашему клиенту новый контракт!`;
     eventDetails.innerHTML = `<div class="event-detail-box"><b>Игрок:</b> ${player.name}<br><b>Клуб:</b> ${player.club}<br><b>Рейтинг:</b> ${player.rating}<br><br><b>Зарплата:</b> ${formatSalary(player.salary)}<br><b>Предложение:</b> ${formatSalary(newSalary)}</div>`;
@@ -14225,6 +15257,10 @@ function getAdvisorReport(player, offer) {
 }
 
 function openTransferOfferModal(player, offer) {
+    queueEventModal(() => renderTransferOfferModal(player, offer));
+}
+
+function renderTransferOfferModal(player, offer) {
     currentOffer = {player, offer};
     const fl = LEAGUE_DATA[offer.league]?.country.split(' ')[0] || '';
     const ls = getLeagueName(offer.league);
@@ -14369,6 +15405,10 @@ function tryPassiveTransferOffer() {
 }
 
 function showPassiveOffer(player, bestOffer, allOffers) {
+    queueEventModal(() => renderPassiveOffer(player, bestOffer, allOffers));
+}
+
+function renderPassiveOffer(player, bestOffer, allOffers) {
     const fl = LEAGUE_DATA[bestOffer.league]?.country.split(' ')[0] || '';
     const ls = getLeagueName(bestOffer.league);
     const sD = Math.round((bestOffer.salaryBoost - 1) * 100);
@@ -14537,6 +15577,10 @@ function tryContractRenewal() {
 }
 
 function showContractRenewalModal(player, offer, wantsLeave) {
+    queueEventModal(() => renderContractRenewalModal(player, offer, wantsLeave));
+}
+
+function renderContractRenewalModal(player, offer, wantsLeave) {
     const fl = LEAGUE_DATA[offer.league]?.country.split(' ')[0] || '';
     const ls = getLeagueName(offer.league);
     const sD = Math.round((offer.salaryBoost - 1) * 100);
@@ -15051,12 +16095,16 @@ function openDatapackModal() {
 updateDatapackButton();
 if (btnSettingsClose) btnSettingsClose.addEventListener('click', () => settingsModal.style.display = 'none');
 if (settingsModal) settingsModal.addEventListener('click', e => { if (e.target === settingsModal) settingsModal.style.display = 'none'; });
-if (btnAbout) btnAbout.addEventListener('click', () => aboutModal.style.display = 'flex');
+if (btnAbout) btnAbout.addEventListener('click', () => {
+    renderAttributeHelpInto(document.getElementById('about-attributes'));
+    aboutModal.style.display = 'flex';
+});
 if (btnAboutClose) btnAboutClose.addEventListener('click', () => aboutModal.style.display = 'none');
 if (aboutModal) aboutModal.addEventListener('click', e => { if (e.target === aboutModal) aboutModal.style.display = 'none'; });
 
 const SETTINGS_KEY = 'hockeyLegendSettings';
-let gameSettings = {sound: true, vibration: true, notifications: true};
+const MATCH_VIEW_DEFAULT = 'full';
+let gameSettings = {sound: true, vibration: true, notifications: true, matchView: MATCH_VIEW_DEFAULT};
 
 // ============ ЗВУК (Web Audio API, без файлов) ============
 let _audioCtx = null;
@@ -15077,35 +16125,66 @@ document.addEventListener('pointerdown', () => {
 }, { once: false, passive: true });
 
 /**
+ * Короткие синтезированные звуки. Без внешних файлов.
+ * click | levelup | goal | event | error | whistle | siren
+ * attack/release — плавная огибающая, filter — срез резких высоких частот.
+ */
+const SOUND_MASTER_VOLUME = 0.62;
+const SOUND_PRESETS = {
+    click:   { freq: 520,  dur: 0.06, type: 'sine',     vol: 0.030, attack: 0.012, release: 0.045, filter: 2400 },
+    levelup: { freq: 660,  dur: 0.42, type: 'triangle', vol: 0.060, attack: 0.035, release: 0.28,  filter: 2800, arp: [523, 659, 784, 1047] },
+    goal:    { freq: 440,  dur: 0.38, type: 'triangle', vol: 0.055, attack: 0.03,  release: 0.25,  filter: 2600, arp: [440, 554, 659] },
+    event:   { freq: 740,  dur: 0.22, type: 'sine',     vol: 0.048, attack: 0.025, release: 0.14,  filter: 3000, arp: [740, 988] },
+    error:   { freq: 220,  dur: 0.26, type: 'sine',     vol: 0.045, attack: 0.02,  release: 0.18,  filter: 1800 },
+    // Свисток судьи: мягкий высокий сигнал, но без «режущего» пика.
+    whistle: { freq: 1800, dur: 0.26, type: 'sine',     vol: 0.042, attack: 0.03,  release: 0.16,  filter: 3600, arp: [1800, 1550, 1350] },
+    // Сирена гола/финальная: двухтональная, плавная по краям.
+    siren:   { freq: 660,  dur: 0.95, type: 'triangle', vol: 0.052, attack: 0.06,  release: 0.42,  filter: 2200, arp: [660, 880, 660, 880] }
+};
+
+/**
  * Проигрывает короткий тон.
- * @param {string} kind — click | levelup | goal | event | error
+ * @param {string} kind — click | levelup | goal | event | error | whistle | siren
  */
 function playSound(kind) {
     if (!gameSettings.sound) return;
     const ctx = getAudioCtx();
     if (!ctx || ctx.state !== 'running') return;
     try {
-        const presets = {
-            click:   { freq: 520,  dur: 0.05, type: 'square',   vol: 0.06 },
-            levelup: { freq: 660,  dur: 0.35, type: 'triangle', vol: 0.12, arp: [523, 659, 784, 1047] },
-            goal:    { freq: 440,  dur: 0.3,  type: 'sawtooth', vol: 0.12, arp: [440, 554, 659] },
-            event:   { freq: 740,  dur: 0.18, type: 'sine',     vol: 0.10, arp: [740, 988] },
-            error:   { freq: 220,  dur: 0.2,  type: 'square',   vol: 0.10 }
-        };
-        const p = presets[kind] || presets.click;
+        const p = SOUND_PRESETS[kind] || SOUND_PRESETS.click;
         const now = ctx.currentTime;
         const notes = p.arp || [p.freq];
+        const attack = Math.max(0.008, p.attack || 0.02);
+        const release = Math.max(0.04, p.release || p.dur * 0.5);
+        const step = p.dur / notes.length;
+
+        // Общий мастер-гейн: звук — фон, а не удар по ушам.
+        const master = ctx.createGain();
+        master.gain.setValueAtTime(SOUND_MASTER_VOLUME, now);
+        master.connect(ctx.destination);
+
         notes.forEach((f, i) => {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
+            const filter = ctx.createBiquadFilter();
+            const start = now + i * step;
+            const end = Math.min(start + step + release, now + p.dur + release);
+
             osc.type = p.type;
-            osc.frequency.value = f;
-            const start = now + i * (p.dur / notes.length);
-            const end = now + p.dur;
-            gain.gain.setValueAtTime(0, start);
-            gain.gain.linearRampToValueAtTime(p.vol, start + 0.01);
-            gain.gain.exponentialRampToValueAtTime(0.001, end);
-            osc.connect(gain).connect(ctx.destination);
+            osc.frequency.setValueAtTime(f, start);
+            // Мягкий сдвиг тона вниз к концу ноты (без резких скачков).
+            osc.frequency.exponentialRampToValueAtTime(Math.max(40, f * 0.94), end);
+
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(p.filter || 2600, start);
+            filter.Q.setValueAtTime(0.7, start);
+
+            // Attack → Decay/Release без щелчков.
+            gain.gain.setValueAtTime(0.0001, start);
+            gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, p.vol), start + attack);
+            gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+            osc.connect(gain).connect(filter).connect(master);
             osc.start(start);
             osc.stop(end + 0.02);
         });
@@ -15123,7 +16202,9 @@ function vibrate(kind) {
             goal: [60, 40, 120],
             levelup: [40, 60, 40, 60, 160],
             event: [30, 30, 30],
-            error: 80
+            error: 80,
+            whistle: [20, 40, 25],
+            siren: [90, 50, 90, 50, 180]
         };
         navigator.vibrate(patterns[kind] || 15);
     } catch (e) {}
@@ -15142,6 +16223,7 @@ function uiAlert(text, type) {
 // Неблокирующая замена confirm(). Возвращает Promise<boolean>.
 // Использование: if (!(await uiConfirm('...'))) return;
 let _confirmResolver = null;
+let _confirmCancel = null;
 function uiConfirm(message, options) {
     const opts = options || {};
     const modal = document.getElementById('confirm-modal');
@@ -15164,12 +16246,14 @@ function uiConfirm(message, options) {
             okBtn.removeEventListener('click', onOk);
             cancelBtn.removeEventListener('click', onCancel);
             _confirmResolver = null;
+            _confirmCancel = null;
         };
         const onOk = () => { cleanup(); playSound('event'); resolve(true); };
         const onCancel = () => { cleanup(); playSound('click'); resolve(false); };
         okBtn.addEventListener('click', onOk);
         cancelBtn.addEventListener('click', onCancel);
         _confirmResolver = resolve;
+        _confirmCancel = onCancel;
     });
 }
 
@@ -15200,12 +16284,63 @@ function showToast(text, type) {    if (!gameSettings.notifications) return;
     }
 }
 
+// ============ МИРОВЫЕ БАННЕРЫ (NEON RINK, нижний правый угол) ============
+// Важные события мира не должны теряться в ленте новостей.
+let _worldToastSeq = 0;
+function dismissWorldToast(el, instant) {
+    if (!el || el.dataset.dismissed === '1') return;
+    el.dataset.dismissed = '1';
+    el.classList.remove('show');
+    if (instant) { el.remove(); return; }
+    setTimeout(() => el.remove(), 380);
+}
+
+function showWorldToast(text, type, icon) {
+    if (!gameSettings.notifications) return;
+    try {
+        let wrap = document.getElementById('world-toast-wrap');
+        if (!wrap) {
+            wrap = document.createElement('div');
+            wrap.id = 'world-toast-wrap';
+            wrap.setAttribute('role', 'alert');
+            wrap.setAttribute('aria-live', 'assertive');
+            document.body.appendChild(wrap);
+        }
+        const el = document.createElement('div');
+        el.className = 'world-toast world-toast-' + (type || 'info');
+        el.id = 'world-toast-' + (++_worldToastSeq);
+        el.innerHTML =
+            `<span class="world-toast-ico"></span>` +
+            `<span class="world-toast-body">` +
+                `<span class="world-toast-title">${LANG.t('Внимание')}</span>` +
+                `<span class="world-toast-text"></span>` +
+            `</span>` +
+            `<span class="world-toast-bar"></span>`;
+        // Текст — только через textContent (клубы/имена не ломают разметку).
+        el.querySelector('.world-toast-ico').textContent = icon || '🌍';
+        el.querySelector('.world-toast-text').textContent = text;
+        wrap.appendChild(el);
+        requestAnimationFrame(() => el.classList.add('show'));
+        const timer = setTimeout(() => dismissWorldToast(el), 5200);
+        el.addEventListener('click', () => { clearTimeout(timer); dismissWorldToast(el); });
+        // Не более 3 баннеров одновременно
+        while (wrap.children.length > 3) dismissWorldToast(wrap.firstChild, true);
+    } catch (e) {
+        if (window.DEBUG) console.log('showWorldToast error:', e.message);
+    }
+}
+
 function loadSettings() {
     try { const r = localStorage.getItem(SETTINGS_KEY); if (r) gameSettings = {...gameSettings, ...JSON.parse(r)}; } catch (e) {}
+    gameSettings.matchView = normalizeMatchViewMode(gameSettings.matchView);
     const sS = document.getElementById('setting-sound'), sV = document.getElementById('setting-vibration'), sN = document.getElementById('setting-notifications');
     if (sS) sS.checked = gameSettings.sound;
     if (sV) sV.checked = gameSettings.vibration;
     if (sN) sN.checked = gameSettings.notifications;
+    document.querySelectorAll('input[name="setting-match-view"]').forEach(r => {
+        r.checked = r.value === gameSettings.matchView;
+    });
+    renderNationalTeamSetting();
 }
 function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(gameSettings)); } catch (e) {} }
 
@@ -15284,6 +16419,14 @@ document.getElementById('import-save-input')?.addEventListener('change', (e) => 
 document.getElementById('setting-sound')?.addEventListener('change', e => { gameSettings.sound = e.target.checked; saveSettings(); });
 document.getElementById('setting-vibration')?.addEventListener('change', e => { gameSettings.vibration = e.target.checked; saveSettings(); });
 document.getElementById('setting-notifications')?.addEventListener('change', e => { gameSettings.notifications = e.target.checked; saveSettings(); });
+document.querySelectorAll('input[name="setting-match-view"]').forEach(r => {
+    r.addEventListener('change', e => {
+        if (!e.target.checked) return;
+        gameSettings.matchView = normalizeMatchViewMode(e.target.value);
+        saveSettings();
+    });
+});
+document.getElementById('setting-nt-reset')?.addEventListener('click', () => { clearFavoriteNationalTeam(); });
 document.getElementById('btn-reset-save')?.addEventListener('click', async () => {
     if (await uiConfirm(LANG.t('Удалить ВСЕ сохранения?'))) {
         await idbDelete(SAVE_KEY).catch(() => {});
@@ -15316,14 +16459,22 @@ const WORLD_NEWS = [
     {text: 'Тренер ЦСКА уволен', emoji: '🔴'}
 ];
 let currentNewsIdx = 0;
+// Динамические новости мира приоритетнее статичного списка.
+function getWorldNewsItems() {
+    const dynamic = (worldState.feed || [])
+        .slice(0, 5)
+        .map(f => ({ text: f.text, emoji: f.emoji || '🌍', dynamic: true }));
+    return dynamic.length ? dynamic : WORLD_NEWS;
+}
 function updateWorldNews() {
     const t = document.getElementById('menu-news-text');
     const i = document.querySelector('.menu-news .news-icon');
     if (!t) return;
-    const n = WORLD_NEWS[currentNewsIdx];
-    t.textContent = LANG.t(n.text);
+    const items = getWorldNewsItems();
+    const n = items[currentNewsIdx % items.length];
+    t.textContent = n.dynamic ? n.text : LANG.t(n.text);
     if (i) i.textContent = n.emoji;
-    currentNewsIdx = (currentNewsIdx + 1) % WORLD_NEWS.length;
+    currentNewsIdx = (currentNewsIdx + 1) % items.length;
 }
 
 function generateSnowflakes() {
@@ -15354,7 +16505,7 @@ async function updateContinueCard() {
         document.getElementById('continue-season').textContent = (d.s || 2026) + '/' + ((d.s || 2026) + 1);
         document.getElementById('continue-week').textContent = d.w || 1;
         document.getElementById('continue-money').textContent = '$' + ((d.money || 3000) >= 1000 ? Math.floor((d.money || 3000) / 1000) + 'K' : d.money);
-        document.getElementById('continue-clients').textContent = (d.roster || []).length;
+        document.getElementById('continue-clients').textContent = (d.rosterNames || d.roster || []).length;
         card.style.display = 'block';
     } catch (e) { card.style.display = 'none'; }
 }
@@ -15602,28 +16753,77 @@ document.addEventListener('pointerdown', (e) => {
 // При открытии модалки делаем pushState; popstate закрывает верхнюю открытую модалку.
 const BACK_HANDLERS = [
     { id: 'negotiation-modal', close: () => { if (activeNegotiation) saveNegotiationSession(activeNegotiation); closeNegotiationModal(); activeNegotiation = null; } },
-    { id: 'event-modal',       close: () => { eventModal.style.display = 'none'; } },
+    { id: 'event-modal',       close: () => closeEventModal() },
+    { id: 'confirm-modal',     close: () => { if (_confirmCancel) _confirmCancel(); } },
+    { id: 'match-modal',       close: () => { if (typeof closeMatchView === 'function') closeMatchView(); } },
     { id: 'stock-trade-modal', close: () => { document.getElementById('stock-trade-modal').style.display = 'none'; } },
     { id: 'settings-modal',    close: () => { settingsModal.style.display = 'none'; } },
     { id: 'datapack-modal',    close: () => { document.getElementById('datapack-modal').style.display = 'none'; } },
     { id: 'about-modal',       close: () => { if (aboutModal) aboutModal.style.display = 'none'; } },
     { id: 'club-info-modal',   close: () => { if (typeof closeClubInfoModal === 'function') closeClubInfoModal(); } },
-    { id: 'draft-choice-modal',close: () => { document.getElementById('draft-choice-modal').style.display = 'none'; } }
+    { id: 'draft-choice-modal',close: () => { document.getElementById('draft-choice-modal').style.display = 'none'; } },
+    { id: 'nt-pick-modal',     close: () => { const m = document.getElementById('nt-pick-modal'); if (m) m.style.display = 'none'; } },
+    { id: 'nt-team-modal',     close: () => { const m = document.getElementById('nt-team-modal'); if (m) m.style.display = 'none'; } },
+    { id: 'npc-agency-modal',  close: () => { const m = document.getElementById('npc-agency-modal'); if (m) m.style.display = 'none'; if (typeof renderAgencyScreen === 'function') renderAgencyScreen(); } },
+    { id: 'poach-dialog-modal',close: () => { const m = document.getElementById('poach-dialog-modal'); if (m) m.style.display = 'none'; if (typeof renderAgencyScreen === 'function') renderAgencyScreen(); } },
+    { id: 'client-modal',      close: () => { const m = document.getElementById('client-modal'); if (m) m.style.display = 'none'; } },
+    { id: 'stock-modal',       close: () => { const m = document.getElementById('stock-modal'); if (m) m.style.display = 'none'; } },
+    { id: 'transfer-modal',    close: () => { const m = document.getElementById('transfer-modal'); if (m) m.style.display = 'none'; } }
 ];
+
+// Верхняя видимая модалка — по порядку в DOM, а не по порядку массива.
+function getTopVisibleModalHandler() {
+    const overlays = Array.from(document.querySelectorAll('.modal-overlay'));
+    let best = null;
+    let bestIdx = -1;
+    for (const h of BACK_HANDLERS) {
+        const el = document.getElementById(h.id);
+        if (!el) continue;
+        const visible = el.style.display && el.style.display !== 'none';
+        if (!visible) continue;
+        const idx = overlays.indexOf(el);
+        if (idx > bestIdx) { best = h; bestIdx = idx; }
+    }
+    return best;
+}
+
 function pushModalHistory() {
     try { history.pushState({ hlModal: true }, ''); } catch (e) {}
 }
 window.addEventListener('popstate', () => {
-    for (const h of BACK_HANDLERS) {
-        const el = document.getElementById(h.id);
-        if (el && el.style.display !== 'none' && el.style.display !== '') {
-            try { h.close(); } catch (e) { if (window.DEBUG) console.log('back close error', e); }
-            // Снова кладём состояние — кнопка Назад работает как «закрыть модалку», а не «выйти»
-            setTimeout(pushModalHistory, 0);
-            return;
-        }
+    const h = getTopVisibleModalHandler();
+    if (h) {
+        try { h.close(); } catch (e) { if (window.DEBUG) console.log('back close error', e); }
+        // Снова кладём состояние — кнопка Назад работает как «закрыть модалку», а не «выйти»
+        setTimeout(pushModalHistory, 0);
     }
 });
+
+// C14: Escape закрывает верхнюю модалку; Tab не уходит из неё (C13).
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const h = getTopVisibleModalHandler();
+        if (h) {
+            e.preventDefault();
+            try { h.close(); } catch (err) { if (window.DEBUG) console.log('escape close error', err); }
+        }
+        return;
+    }
+    if (e.key !== 'Tab') return;
+    const h = getTopVisibleModalHandler();
+    if (!h) return;
+    const el = document.getElementById(h.id);
+    if (!el) return;
+    const focusables = Array.from(el.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )).filter((x) => !x.disabled && x.offsetParent !== null);
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+
 // следим за открытием модалок (мутация display) — кладём history-состояние
 (function () {
     const ids = BACK_HANDLERS.map(h => h.id);
@@ -15651,9 +16851,40 @@ generateSnowflakes();
 updateContinueCard();
 hideBottomNav();
 
+// C13: role/aria для модалок, имена чекбоксов, aria-label стрелок.
+function setupModalA11y() {
+    document.querySelectorAll('.modal-overlay').forEach((m, i) => {
+        if (!m.hasAttribute('role')) m.setAttribute('role', 'dialog');
+        if (!m.hasAttribute('aria-modal')) m.setAttribute('aria-modal', 'true');
+        if (!m.hasAttribute('aria-label') && !m.hasAttribute('aria-labelledby')) {
+            const heading = m.querySelector('h1, h2, h3, .modal-header');
+            if (heading) {
+                if (!heading.id) heading.id = 'modal-heading-' + i;
+                m.setAttribute('aria-labelledby', heading.id);
+            } else {
+                m.setAttribute('aria-label', 'Диалог');
+            }
+        }
+    });
+    document.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach((el) => {
+        if (!el.name && el.id) el.name = el.id;
+    });
+    document.querySelectorAll('label').forEach((l) => {
+        if (l.htmlFor) return;
+        const input = l.querySelector('input, select, textarea');
+        if (input && input.id) l.htmlFor = input.id;
+    });
+    document.querySelectorAll('.header-back-btn, .page-btn, .back-to-leagues').forEach((b) => {
+        if (b.getAttribute('aria-label')) return;
+        const t = (b.textContent || '').trim();
+        b.setAttribute('aria-label', t === '→' ? 'Вперёд' : 'Назад');
+    });
+}
+
 // ============ ДОСТУПНОСТЬ (клавиатура) ============
 // Навигационные плитки и .tile — это div, делаем их фокусируемыми и «кнопками»
 (function initA11y() {
+    setupModalA11y();
     const mark = () => {
         document.querySelectorAll('.nav-item, .tile').forEach(el => {
             if (!el.hasAttribute('role')) el.setAttribute('role', 'button');
@@ -16192,13 +17423,60 @@ function awardNationalTournamentMedals(gold, silver, bronze) {
 let ntActiveTab = 'groups';
 
 // ============ МОДАЛКА ВЫБОРА СБОРНОЙ ============
+// Сброс выбранной сборной (этап 1.3): работает и вне турнира,
+// чистит отложенные матчи, чтобы они не всплыли позже.
+function clearFavoriteNationalTeam() {
+    favoriteNationalTeam = null;
+    if (nationalTournament) nationalTournament._pendingMatches = [];
+    saveGame();
+    renderNtFavBar();
+    const ntScreen = document.getElementById('national-tournament-screen');
+    if (ntScreen && ntScreen.style.display !== 'none') renderNationalTournamentScreen();
+    renderNationalTeamSetting();
+}
+
+// Строка «Сборная для просмотра» в настройках: значение + кнопка сброса.
+function renderNationalTeamSetting() {
+    const val = document.getElementById('setting-nt-value');
+    const btn = document.getElementById('setting-nt-reset');
+    if (!val) return;
+    if (favoriteNationalTeam) {
+        const meta = NATIONAL_TEAMS.find(x => x.code === favoriteNationalTeam);
+        val.textContent = meta ? `${meta.flag} ${meta.name}` : favoriteNationalTeam;
+        if (btn) btn.style.display = '';
+    } else {
+        val.textContent = LANG.t('не выбрана');
+        if (btn) btn.style.display = 'none';
+    }
+}
+
 function showNationalPickModal() {
-    if (!nationalTournament) return;
     const modal = document.getElementById('nt-pick-modal');
     const body = document.getElementById('nt-pick-body');
     const actions = document.getElementById('nt-pick-actions');
     const title = document.getElementById('nt-pick-title');
     if (!modal || !body || !actions) return;
+
+    // Сброс доступен всегда — даже без активного турнира (этап 1.3).
+    const renderSkipBtn = () => {
+        const skipBtn = document.createElement('button');
+        skipBtn.className = 'nt-pick-skip';
+        skipBtn.textContent = favoriteNationalTeam ? LANG.t('Сбросить выбор') : LANG.t('Не болеть ни за кого');
+        skipBtn.addEventListener('click', () => {
+            clearFavoriteNationalTeam();
+            modal.style.display = 'none';
+        });
+        actions.appendChild(skipBtn);
+    };
+
+    if (!nationalTournament) {
+        if (title) title.textContent = LANG.t('За кого болеешь?');
+        body.innerHTML = `<div class="nt-pick-intro">${LANG.t('Турнир сборных ещё не идёт. Выбор появится с новым турниром.')}</div>`;
+        actions.innerHTML = '';
+        renderSkipBtn();
+        modal.style.display = 'flex';
+        return;
+    }
 
     const t = nationalTournament;
     const tName = t.type === 'olympics' ? LANG.t('Олимпиада') : LANG.t('Чемпионат мира');
@@ -16235,20 +17513,7 @@ function showNationalPickModal() {
     body.innerHTML = html;
     actions.innerHTML = '';
 
-    const skipBtn = document.createElement('button');
-    skipBtn.className = 'nt-pick-skip';
-    skipBtn.textContent = LANG.t('Не болеть ни за кого');
-    skipBtn.addEventListener('click', () => {
-        favoriteNationalTeam = null;
-        modal.style.display = 'none';
-        saveGame();
-        updateAllDisplays();
-        const ntScreen = document.getElementById('national-tournament-screen');
-        if (ntScreen && ntScreen.style.display !== 'none') {
-            renderNationalTournamentScreen();
-        }
-    });
-    actions.appendChild(skipBtn);
+    renderSkipBtn();
 
     // Клики по карточкам
     body.querySelectorAll('.nt-pick-card').forEach(btn => {
@@ -16377,9 +17642,12 @@ function renderNtFavBar() {
             <span style="color:var(--text-muted);font-size:10px;margin-top:2px;">${subLabel}</span>
         </div>
         <button class="nt-fav-change" id="nt-fav-change">${LANG.t('СМЕНИТЬ')}</button>
+        <button class="nt-fav-change nt-fav-reset" id="nt-fav-reset">${LANG.t('СБРОСИТЬ')}</button>
     `;
     const btn = bar.querySelector('#nt-fav-change');
     if (btn) btn.addEventListener('click', showNationalPickModal);
+    const resetBtn = bar.querySelector('#nt-fav-reset');
+    if (resetBtn) resetBtn.addEventListener('click', clearFavoriteNationalTeam);
 }
 
 function renderNtGroups(c) {
@@ -16744,6 +18012,8 @@ function onLanguageChanged() {
     if (visible('event-history-screen')) renderEventHistory();
     if (visible('match-view-screen') && matchViewState) mvRemount();
     if (visible('negotiation-modal') && activeNegotiation) renderNegotiationModal(getActiveNegotiationPlayer());
+    if (visible('about-modal')) renderAttributeHelpInto(document.getElementById('about-attributes'));
+    hideAttrTooltip();
 }
 window.onLanguageChanged = onLanguageChanged;
 
@@ -16929,6 +18199,422 @@ if (import.meta.env.DEV) {
             return p ? buildNegotiationInsightHTML(p, offer) : '';
         },
         setAgentLevel: (level) => { agentLevel = Math.max(1, Math.min(50, level)); },
+        // ===== Этап 2 плейтест-плана: тренировки / апгрейды клуба / переманивание =====
+        // 2.1 Тренировки: динамическая цена и авторежим.
+        trainingCostProbe: (rating, level = null) => {
+            const prev = agentLevel;
+            if (Number.isFinite(level)) agentLevel = Math.max(1, level);
+            const cost = getTrainingCost({ rating });
+            agentLevel = prev;
+            return cost;
+        },
+        trainingAutoState: () => JSON.parse(JSON.stringify(trainingAuto)),
+        trainingProbe: (playerName) => {
+            const p = myRoster.find(x => x.name === playerName) || players.find(x => x.name === playerName);
+            if (!p) return null;
+            return {
+                name: p.name, rating: p.rating, trainingWeeks: p.trainingWeeks || 0,
+                trainingAttr: p.trainingAttr || null, cost: getTrainingCost(p),
+                attributes: { ...(p.attributes || {}) }, money: agentMoney
+            };
+        },
+        setPlayerAttrForTest: (playerName, attr, value) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p) return null;
+            if (!p.attributes) p.attributes = generateAttributes(p.position, p.rating, p.name);
+            p.attributes[attr] = Math.max(0, Math.min(99, value));
+            return p.attributes[attr];
+        },
+        setTrainingAutoForTest: (playerName, attr) => {
+            if (attr) trainingAuto[playerName] = attr;
+            else delete trainingAuto[playerName];
+            return window.__HL.trainingAutoState();
+        },
+        toggleAutoTrainingNow: (playerName, attr = null) => {
+            const p = myRoster.find(x => x.name === playerName);
+            if (!p) return null;
+            toggleAutoTraining(p, attr);
+            return window.__HL.trainingAutoState();
+        },
+        tryAutoTrainingNow: (playerName) => {
+            const p = myRoster.find(x => x.name === playerName);
+            return p ? tryStartAutoTraining(p) : false;
+        },
+        processTrainingsNow: () => { processWeeklyTrainings(); return window.__HL.trainingAutoState(); },
+        startTrainingNow: (playerName, attr) => {
+            const p = myRoster.find(x => x.name === playerName);
+            if (!p) return null;
+            startPlayerTraining(p, attr);
+            return window.__HL.trainingProbe(playerName);
+        },
+        // 2.2 Апгрейды клуба: цена по единому бюджету лиги и доля от бюджета.
+        clubUpgradeCostProbe: (league, level) => clubUpgradeCost('stadium', level, league),
+        clubUpgradeTotalProbe: (league, maxLevel = 25) => {
+            let total = 0;
+            for (const k of Object.keys(CLUB_UPGRADE_CARDS)) {
+                for (let lvl = 1; lvl < maxLevel; lvl++) total += clubUpgradeCost(k, lvl, league);
+            }
+            return total;
+        },
+        clubUpgradeShareProbe: (clubKey) => {
+            const c = clubData[clubKey];
+            if (!c) return null;
+            const lvl = c.upgrades.stadium || 1;
+            const cost = clubUpgradeCost('stadium', lvl, c.league);
+            return { cost, budget: c.budget, share: getClubUpgradeBudgetShare(cost, c), leagueBudget: getLeagueBudget(c.league) };
+        },
+        clubUpgradeCardHTMLForTest: (cardKey) => {
+            const key = presidentClubKey || Object.keys(clubData)[0];
+            const c = clubData[key];
+            if (!c) return null;
+            return buildClubUpgradeCard(c, cardKey).outerHTML;
+        },
+        purchaseClubUpgradeNow: (cardKey) => {
+            const key = presidentClubKey || Object.keys(clubData)[0];
+            const c = clubData[key];
+            if (!c) return null;
+            const before = { level: c.upgrades[cardKey] || 1, budget: c.budget };
+            const cost = clubUpgradeCost(cardKey, before.level, c.league);
+            purchaseClubUpgrade(cardKey);
+            return { ...before, cost, levelAfter: c.upgrades[cardKey] || 1, budgetAfter: c.budget };
+        },
+        // 2.3 Переманивание: чистый шанс и пресеты оффера.
+        poachPresetsProbe: (playerName) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p) return null;
+            return getPoachOfferPresets(p).map(o => ({
+                id: o.id, name: o.name, cost: o.cost, quality: o.quality,
+                newSalary: o.newSalary, agentCommissionRate: o.agentCommissionRate,
+                signingBonus: o.signingBonus, promises: [...(o.promises || [])]
+            }));
+        },
+        poachOfferQualityProbe: (playerName, offer) => {
+            const p = players.find(x => x.name === playerName);
+            return p ? getPoachOfferQuality(p, offer) : null;
+        },
+        poachChanceProbe: (playerName, agencyRep, replyType = 'neutral', preset = 'standard', myRepOverride = null) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p) return null;
+            const presetOffer = getPoachOfferPresets(p).find(o => o.id === preset) || getPoachOfferPresets(p)[0];
+            const offer = (preset && typeof preset === 'object') ? preset : presetOffer;
+            return getPoachChance(p, { rep: agencyRep }, { type: replyType }, offer, myRepOverride);
+        },
+        poachChanceRawProbe: (playerName, agencyRep, replyType, offer, myRepOverride = null) => {
+            const p = players.find(x => x.name === playerName);
+            return p ? getPoachChance(p, { rep: agencyRep }, { type: replyType }, offer, myRepOverride) : null;
+        },
+        poachRollProbe: (chance) => simRandom() * 100 < chance,
+        // ===== Этап 3 плейтест-плана: просмотр матчей и справка по атрибутам =====
+        // 3.1 Настройка просмотра матчей.
+        applyMatchViewPolicy: () => applyMatchViewPolicy(),
+        shouldOpenMatchView: () => shouldOpenMatchView(),
+        matchViewSettings: () => ({
+            mode: normalizeMatchViewMode(gameSettings.matchView),
+            policy: applyMatchViewPolicy(),
+            shouldOpen: shouldOpenMatchView()
+        }),
+        setMatchViewSetting: (mode) => {
+            gameSettings.matchView = normalizeMatchViewMode(mode);
+            saveSettings();
+            loadSettings();
+            return window.__HL.matchViewSettings();
+        },
+        reloadSettingsNow: () => {
+            gameSettings = { sound: true, vibration: true, notifications: true, matchView: MATCH_VIEW_DEFAULT };
+            loadSettings();
+            return window.__HL.matchViewSettings();
+        },
+        matchQueueState: () => ({
+            left: matchQueue ? Math.max(0, matchQueue.length - matchQueueIdx) : 0,
+            hasQueue: !!matchQueue,
+            onFinish: !!matchQueueOnFinish,
+            finished: matchPlayback.isFinished(),
+            screen: document.getElementById('match-view-screen')?.style.display || 'none'
+        }),
+        openMatchQueueForTest: (mode, count = 1, onFinish = null, kind = 'fromData') => {
+            gameSettings.matchView = normalizeMatchViewMode(mode);
+            saveSettings();
+            const makeMatch = (i) => ({
+                home: 'Test Home ' + i, away: 'Test Away ' + i, league: 'NHL', week: currentWeek,
+                result: {
+                    homeScore: 2, awayScore: 1, isOT: false, isSO: false,
+                    goals: [
+                        { minute: 9, period: 1, team: 'home', scorer: 'Test Scorer', assists: [] },
+                        { minute: 31, period: 2, team: 'away', scorer: 'Test Rival', assists: ['Test Assist'] },
+                        { minute: 52, period: 3, team: 'home', scorer: 'Test Scorer', assists: [] }
+                    ],
+                    threeStars: ['Test Scorer'], playerRatings: []
+                }
+            });
+            const items = Array.from({ length: Math.max(1, count) }, (_, i) => ({ match: makeMatch(i), lk: 'NHL' }));
+            if (kind === 'open') openMatchQueue(items.map(x => x.match), 'NHL');
+            else openMatchQueueFromData(items, onFinish);
+            return { ...window.__HL.matchQueueState(), viewed: items.map(x => !!x.match.viewed) };
+        },
+        closeMatchViewNow: () => {
+            closeMatchView();
+            return window.__HL.matchQueueState();
+        },
+        openPlayoffFinalQueueForTest: (mode = 'off') => {
+            gameSettings.matchView = normalizeMatchViewMode(mode);
+            saveSettings();
+            const match = {
+                home: 'Test Home', away: 'Test Away', league: 'NHL', week: currentWeek,
+                isPlayoff: true, playoffRound: 4, playoffTotalRounds: 4,
+                result: {
+                    homeScore: 2, awayScore: 1, isOT: false, isSO: false,
+                    goals: [
+                        { minute: 12, period: 1, team: 'home', scorer: 'Test Scorer', assists: [] },
+                        { minute: 44, period: 3, team: 'away', scorer: 'Test Rival', assists: [] },
+                        { minute: 58, period: 3, team: 'home', scorer: 'Test Hero', assists: [] }
+                    ],
+                    threeStars: ['Test Hero'], playerRatings: []
+                }
+            };
+            openMatchQueueFromData([{ match, lk: 'NHL' }], () => finishPlayoffs());
+            return { phase: seasonPhase, ...window.__HL.matchQueueState() };
+        },
+        // 3.2 Справка по атрибутам и тултип.
+        attributeKeys: () => Object.keys(ATTRIBUTE_INFO),
+        attributeInfoProbe: (key) => getAttributeInfo(key),
+        attributeHelpHTML: () => renderAttributeHelpHTML(),
+        ppAttrBarHTML: (label, value, attrKey) => ppAttrBar(label, value, attrKey),
+        developmentHTMLForTest: (playerName) => {
+            const p = myRoster.find(x => x.name === playerName) || players.find(x => x.name === playerName);
+            if (!p) return null;
+            const box = document.createElement('div');
+            renderPlayerDevelopment(box, p);
+            return box.innerHTML;
+        },
+        renderAboutAttributesNow: () => {
+            const el = document.getElementById('about-attributes');
+            renderAttributeHelpInto(el);
+            return el ? el.innerHTML : '';
+        },
+        openAboutNow: () => {
+            renderAttributeHelpInto(document.getElementById('about-attributes'));
+            if (aboutModal) aboutModal.style.display = 'flex';
+            return aboutModal ? aboutModal.style.display : 'none';
+        },
+        showAttrTooltipNow: (attrKey, pinned = true) => {
+            const btn = document.querySelector(`[data-attr-help="${attrKey}"]`);
+            showAttrTooltip(attrKey, btn, pinned);
+            return window.__HL.attrTooltipState();
+        },
+        attrTooltipState: () => ({
+            open: isAttrTooltipOpen(),
+            attr: attrTooltipAttr,
+            pinned: attrTooltipPinned,
+            text: attrTooltipEl ? attrTooltipEl.textContent : ''
+        }),
+        hideAttrTooltipNow: () => {
+            hideAttrTooltip();
+            return window.__HL.attrTooltipState();
+        },
+        // ===== Блок A роудмапа: регрессионные хуки (dev/test only) =====
+        // A1: старение мира за сезон — один проход, клиенты не стареют дважды.
+        advanceSeasonAgesNow: () => advanceSeasonAges(),
+        // A2: флаг потери клиента (сбрасывается в новом сезоне и resetGame).
+        npcPoachFlags: () => ({ lostPlayerThisSeason }),
+        setLostPlayerThisSeason: (v) => { lostPlayerThisSeason = !!v; },
+        // A3: NPC-переманивание клиента (кнопки «Удержать/Отпустить/Пригрозить»).
+        showPoachingEventNow: (playerName, newSalaryK, compensationK) => {
+            const p = myRoster.find(x => x.name === playerName);
+            if (!p || npcAgencies.length === 0) return false;
+            showPoachingEvent(p, npcAgencies[0], newSalaryK, compensationK);
+            return true;
+        },
+        npcAgentClientIds: (index = 0) => {
+            const a = npcAgencies[index];
+            return a ? { id: a.id, clientIds: [...(a.clientIds || [])] } : null;
+        },
+        // A4/A5: совет директоров и пост президента.
+        councilState: () => ({
+            presidentClubKey,
+            clubCouncil: clubCouncil ? JSON.parse(JSON.stringify(clubCouncil)) : null
+        }),
+        setPresidentForTest: (clubKey, shares) => {
+            presidentClubKey = clubKey || Object.keys(clubData)[0];
+            myPortfolio[presidentClubKey] = { shares, avgPrice: 1 };
+            clubCouncil = null;
+            ensureCouncil();
+            return window.__HL.councilState();
+        },
+        evaluateCouncilSeasonNow: () => { evaluateCouncilSeason(); return window.__HL.councilState(); },
+        patchCouncilForTest: (patch) => {
+            if (!clubCouncil) return null;
+            Object.assign(clubCouncil, patch);
+            return window.__HL.councilState();
+        },
+        setPhaseForTest: (phase, weeks) => { seasonPhase = phase; transferPhaseWeeksLeft = weeks; },
+        // A6: контракты конца сезона (клиенты — один проход, FA не получают контракт).
+        endOfSeasonContractsNow: () => processEndOfSeasonContracts(),
+        setPlayerContract: (playerName, patch) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p) return null;
+            Object.assign(p, patch);
+            normalizeContractData(p);
+            return { contractYears: p.contractYears, guaranteedYears: p.guaranteedYears, goalBonus: p.goalBonus, club: p.club };
+        },
+        playerContractProbe: (playerName) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p) return null;
+            return {
+                contractYears: p.contractYears, guaranteedYears: p.guaranteedYears,
+                goalBonus: p.goalBonus, club: p.club, league: p.league, salary: p.salary,
+                age: p.age, rating: p.rating,
+                inRoster: myRoster.includes(p)
+            };
+        },
+        firstWorldPlayerName: () => {
+            const p = players.find(x => x.club && !myRoster.includes(x));
+            return p ? p.name : null;
+        },
+        setMoneyForTest: (v) => { agentMoney = v; },
+        // Изоляция денежных тестов: награды карьерных целей не влияют на дельту.
+        completeCareerGoalsForTest: () => {
+            if (!careerGoals) careerGoals = {};
+            Object.keys(CAREER_GOALS).forEach(b => { careerGoals[b] = CAREER_GOALS[b].length; });
+        },
+        // A7: отставки — один бросок на игрока, myRoster/players синхронны.
+        retirementsNow: () => {
+            processRetirements();
+            const names = new Set(players.map(p => p.name));
+            return {
+                ghosts: myRoster.filter(p => !names.has(p.name)).map(p => p.name),
+                rosterSize: myRoster.length,
+                playersCount: players.length
+            };
+        },
+        agePlayersForTest: (minAge) => { players.forEach(p => { p.age = Math.max(p.age, minAge); }); },
+        // A8: пополнение молодёжи — лига берётся из ключа YPS.
+        replenishYouthNow: () => replenishYouth(),
+        worldLeagueProbe: () => {
+            const out = {};
+            for (const lk of ['NHL', 'AHL', 'KHL']) {
+                const ps = players.filter(p => p.league === lk && p.club);
+                out[lk] = {
+                    count: ps.length,
+                    young: ps.filter(p => p.age <= 21).length,
+                    avgRating: ps.length ? Math.round(ps.reduce((s, p) => s + p.rating, 0) / ps.length) : 0
+                };
+            }
+            return out;
+        },
+        // ===== Этап 1 плейтест-плана: биржа / цепочки / сборная (dev/test only) =====
+        // 1.1 Биржа
+        stockFairProbe: (clubKey) => {
+            const c = clubData[clubKey];
+            if (!c) return null;
+            return { fair: getFairStockPrice(c), ...getStockBounds(c), price: c.stockPrice };
+        },
+        stockValueProbe: (clubKey, noise = 1) => {
+            const c = clubData[clubKey];
+            return c ? Math.round(getClubEnterpriseValue(c, noise)) : null;
+        },
+        stockClampProbe: (prev, next) => clampStockMove(prev, next),
+        stockTickNow: (clubKey) => {
+            const c = clubData[clubKey];
+            if (!c) return null;
+            recalculateStockPrice(c);
+            return { price: c.stockPrice, history: [...c.stockHistory] };
+        },
+        stockWeeksNow: (clubKey, weeks) => {
+            const c = clubData[clubKey];
+            if (!c) return null;
+            for (let i = 0; i < weeks; i++) {
+                const r = simRandom();
+                c.form.push(r < 0.45 ? 'W' : r < 0.75 ? 'L' : 'OT');
+                if (c.form.length > 5) c.form.shift();
+                recalculateStockPrice(c);
+            }
+            return { price: c.stockPrice, history: [...c.stockHistory], fair: getFairStockPrice(c) };
+        },
+        setClubStockForTest: (clubKey, patch) => {
+            const c = clubData[clubKey];
+            if (!c) return null;
+            Object.assign(c, patch);
+            return { price: c.stockPrice };
+        },
+        clubKeysForTest: () => Object.keys(clubData),
+        setClubUpgradesForTest: (clubKey, level) => {
+            const c = clubData[clubKey];
+            if (!c) return null;
+            Object.keys(CLUB_UPGRADE_CARDS).forEach(k => { c.upgrades[k] = level; });
+            return getClubUpgradesTotal(c);
+        },
+        // 1.2 Цепочки/ивенты
+        chainState: () => JSON.parse(JSON.stringify(activeChains)),
+        clearChainCooldownForTest: (chainId) => { delete eventCooldowns[chainId]; },
+        triggerChainStartNow: (chainId) => { triggerChainStart(chainId); return window.__HL.chainState(); },
+        chainTickNow: () => tryChainEvent(),
+        setChainStageForTest: (chainId, stage) => {
+            const ac = activeChains.find(c => c.chainId === chainId);
+            if (!ac) return null;
+            ac.stage = stage;
+            ac.startedWeek = currentWeek - 100;
+            ac.startedSeason = currentSeason;
+            return window.__HL.chainState();
+        },
+        eventPoolProbe: (eventId) => {
+            const ev = EVENT_POOL.find(e => e.id === eventId);
+            if (!ev) return null;
+            let condition = false, player = null;
+            try { condition = !!ev.condition(); } catch (e) {}
+            try { player = ev.getPlayer ? ev.getPlayer() : null; } catch (e) {}
+            return { condition, playerName: player ? player.name : null };
+        },
+        eventChoiceNow: (eventId, choiceIndex) => {
+            const ev = EVENT_POOL.find(e => e.id === eventId);
+            if (!ev) return null;
+            const p = ev.getPlayer();
+            if (!p) return null;
+            return applyEventChoice(ev, ev.choices[choiceIndex], p);
+        },
+        homeTasksFor: (playerName) => activeTasks.filter(t => t.type === 'find_club_home' && t.playerName === playerName).map(t => ({ id: t.id, completed: t.completed, failed: t.failed })),
+        checkTasksNow: () => checkActiveTasks(),
+        setPlayerClubForTest: (playerName, league, club, nationality) => {
+            const p = players.find(x => x.name === playerName);
+            if (!p) return null;
+            p.league = league; p.club = club;
+            if (nationality) p.nationality = nationality;
+            return { league: p.league, club: p.club, inHome: isInHomeCountry(p) };
+        },
+        eventChoiceForPlayerNow: (eventId, choiceIndex, playerName) => {
+            const ev = EVENT_POOL.find(e => e.id === eventId);
+            const p = players.find(x => x.name === playerName);
+            if (!ev || !p) return null;
+            return applyEventChoice(ev, ev.choices[choiceIndex], p);
+        },
+        playerLoyaltyProbe: (playerName) => {
+            const p = players.find(x => x.name === playerName);
+            return p ? p.loyalty : null;
+        },
+        rosterReorderForTest: (name) => {
+            const i = myRoster.findIndex(p => p.name === name);
+            if (i > 0) { const [p] = myRoster.splice(i, 1); myRoster.unshift(p); }
+            return myRoster.map(p => p.name);
+        },
+        // 1.3 Сборная
+        ntState: () => ({
+            favorite: favoriteNationalTeam,
+            hasTournament: !!nationalTournament,
+            pending: nationalTournament ? (nationalTournament._pendingMatches || []).length : 0
+        }),
+        setFavoriteForTest: (code) => { favoriteNationalTeam = code; },
+        clearFavoriteNow: () => { clearFavoriteNationalTeam(); return window.__HL.ntState(); },
+        startTournamentNow: () => startNationalTournament(),
+        openNtPickModalNow: () => { showNationalPickModal(); return document.getElementById('nt-pick-modal').style.display; },
+        ntFavBarNow: () => { renderNtFavBar(); const b = document.getElementById('nt-fav-bar'); return b ? b.innerHTML : ''; },
+        addPendingNtMatchForTest: () => {
+            if (!nationalTournament) return false;
+            const t = nationalTournament;
+            if (!t._pendingMatches) t._pendingMatches = [];
+            t._pendingMatches.push({ homeTeam: t.teams[0], awayTeam: t.teams[1], res: { scoreA: 1, scoreB: 2, isOT: false, goals: [] } });
+            return true;
+        },
+        tournamentWeekNow: () => playTournamentWeek(),
+        matchQueueSize: () => (matchQueue ? matchQueue.length : 0),
         advanceWeek: () => playRegularWeek(),
         // Плей-офф: старт и раунд (dev/test only).
         startPlayoffsNow: () => startPlayoffs(),
@@ -17037,7 +18723,194 @@ if (import.meta.env.DEV) {
             pool: [players.length, players.reduce((s, p) => s + p.rating, 0)],
             draws: getSimulationDraws(),
             ratings: players.map((p) => `${p.name}|${p.rating}|${p.age}|${p.potential}`)
-        })
+        }),
+        // v1.1: живой мир и звук
+        worldStateProbe: () => JSON.parse(JSON.stringify(worldState)),
+        worldTickNow: (type = null, clubKey = null) => {
+            const before = getSimulationDraws();
+            const event = simulateWorldEvents(type, clubKey);
+            return {
+                event: event ? JSON.parse(JSON.stringify(event)) : null,
+                draws: getSimulationDraws() - before,
+                state: JSON.parse(JSON.stringify(worldState))
+            };
+        },
+        worldEffectiveStrength: (lk, club) => getEffectiveTeamStrength(lk, club),
+        worldCandidatesNow: () => {
+            const now = worldClockKey();
+            return Object.keys(clubData).filter(k => (worldState.cooldowns[k] || 0) <= now);
+        },
+        worldStrengthProbe: (lk, club) => ({
+            base: teamStrengths[lk + '_' + club] || 0.5,
+            effective: getEffectiveTeamStrength(lk, club)
+        }),
+        setWorldClockForTest: (season, week) => { currentSeason = season; currentWeek = week; },
+        setClubBudgetForTest: (clubKey, budget) => {
+            if (!clubData[clubKey]) return null;
+            clubData[clubKey].budget = budget;
+            return { budget: clubData[clubKey].budget };
+        },
+        worldClubSquadSize: (clubKey) => {
+            const c = clubData[clubKey];
+            if (!c) return 0;
+            return players.filter(p => p.club === c.club && p.league === c.league).length;
+        },
+        worldClubProbe: (clubKey) => {
+            const c = clubData[clubKey];
+            if (!c) return null;
+            return {
+                key: clubKey, club: c.club, league: c.league,
+                budget: c.budget, prestige: c.prestige,
+                stadium: c.upgrades.stadium
+            };
+        },
+        playerClubProbe: (name) => {
+            const p = players.find(x => x.name === name);
+            return p ? { name: p.name, club: p.club, league: p.league, isScouted: !!p.isScouted } : null;
+        },
+        rumorNow: (force = true) => {
+            const before = getSimulationDraws();
+            const event = generateTransferRumor(!!force);
+            return {
+                event: event ? JSON.parse(JSON.stringify(event)) : null,
+                draws: getSimulationDraws() - before,
+                state: JSON.parse(JSON.stringify(worldState))
+            };
+        },
+        rumorUntilProbe: () => worldState.rumorUntil || 0,
+        worldToastCount: () => document.querySelectorAll('#world-toast-wrap .world-toast').length,
+        worldToastTexts: () => [...document.querySelectorAll('#world-toast-wrap .world-toast .world-toast-text')].map(el => el.textContent),
+        // v1.1: очередь модалок (B12)
+        modalQueueState: () => ({
+            pending: eventModalQueue.length,
+            busy: eventModalBusy,
+            open: isEventModalOpen(),
+            title: eventTitle ? eventTitle.textContent : '',
+            visible: [...document.querySelectorAll('.modal-overlay')].filter(el => el.style.display === 'flex').length
+        }),
+        queueInfoModalForTest: (title, text) => {
+            openSimpleInfoModal(title, text);
+            return window.__HL.modalQueueState();
+        },
+        closeEventModalForTest: () => { closeEventModal(); return window.__HL.modalQueueState(); },
+        resetModalQueueForTest: () => {
+            resetEventModalQueue();
+            if (eventModal) eventModal.style.display = 'none';
+            return window.__HL.modalQueueState();
+        },
+        soundPresetsProbe: () => Object.keys(SOUND_PRESETS),
+        soundMasterProbe: () => SOUND_MASTER_VOLUME,
+        setAudioContextForTest: (ctx) => { _audioCtx = ctx; },
+        soundPlayNow: (kind) => {
+            try { playSound(kind); return true; } catch (e) { return false; }
+        },
+        setSoundForTest: (on) => { gameSettings.sound = !!on; },
+        // ===== v1.1: баланс, блок B и платформенные фиксы =====
+        xpThresholdsProbe: () => XP_THRESHOLDS.slice(),
+        weeklyEventChanceProbe: (weeksSinceLast) => (weeksSinceLast >= EVENT_MAX_COOLDOWN ? 0.35 : 0.20),
+        wealthTaxProbe: (money, level) => {
+            const oldMoney = agentMoney, oldLevel = agentLevel;
+            agentMoney = money;
+            if (Number.isFinite(level)) agentLevel = level;
+            const tax = getWealthTax();
+            agentMoney = oldMoney;
+            agentLevel = oldLevel;
+            return tax;
+        },
+        awardWeeklyXPForTest: (name, delta) => {
+            const p = players.find(x => x.name === name);
+            if (!p || !p.stats) return null;
+            const before = new Map([[p, {
+                gp: p.stats.gp || 0, goals: p.stats.goals || 0, assists: p.stats.assists || 0,
+                ratingSum: p.stats.ratingSum || 0, goalsAgainst: p.stats.goalsAgainst || 0
+            }]]);
+            const xpBefore = agentXP;
+            p.stats.gp = (p.stats.gp || 0) + (delta.gp || 0);
+            p.stats.goals = (p.stats.goals || 0) + (delta.goals || 0);
+            p.stats.assists = (p.stats.assists || 0) + (delta.assists || 0);
+            p.stats.ratingSum = (p.stats.ratingSum || 0) + (delta.ratingSum || 0);
+            p.stats.goalsAgainst = (p.stats.goalsAgainst || 0) + (delta.goalsAgainst || 0);
+            const gained = awardWeeklyClientXP(before);
+            return { gained, xpBefore, xpAfter: agentXP };
+        },
+        careerGoalMoneyProbe: (branch, lvl) => {
+            const goal = (CAREER_GOALS[branch] || []).find(g => g.lvl === lvl);
+            return goal ? { shown: goal.reward?.money || 0, paid: getCareerGoalMoney(goal) } : null;
+        },
+        worldCupTeamsNow: () => selectWorldCupTeams(),
+        clubStrengthProbe: (lk, club) => computeClubStrength(lk, club),
+        refreshStrengthsNow: () => { refreshTeamStrengths(); return { ...teamStrengths }; },
+        teamInjuryPenaltyProbe: () => ({ ...teamInjuryPenalty }),
+        setPlayerInjuryForTest: (name, weeks) => {
+            const p = players.find(x => x.name === name);
+            if (!p) return null;
+            p.injuryWeeks = weeks;
+            refreshTeamInjuryModifiers();
+            return { injuryWeeks: p.injuryWeeks };
+        },
+        setClubFormForTest: (clubKey, form) => {
+            if (!clubData[clubKey]) return null;
+            clubData[clubKey].form = [...form];
+            return { form: [...clubData[clubKey].form] };
+        },
+        escapeHtmlProbe: (value) => escapeHtml(value),
+        checkTaskProgressNow: (clubKey, task, season) => {
+            const c = clubData[clubKey];
+            return c ? checkTaskProgress(c, task, season) : null;
+        },
+        backHandlersProbe: () => BACK_HANDLERS.map(h => h.id),
+        topModalProbe: () => {
+            const h = getTopVisibleModalHandler();
+            return h ? h.id : null;
+        },
+        closeTopModalNow: () => {
+            const h = getTopVisibleModalHandler();
+            if (h) h.close();
+            return window.__HL.topModalProbe();
+        },
+        modalA11yProbe: () => [...document.querySelectorAll('.modal-overlay')].map(m => ({
+            id: m.id, role: m.getAttribute('role'), ariaModal: m.getAttribute('aria-modal'),
+            labelled: m.getAttribute('aria-labelledby') || m.getAttribute('aria-label')
+        })),
+        continueClientsProbe: async (rosterNames) => {
+            const prev = await idbGet(SAVE_KEY);
+            await idbSet(SAVE_KEY, { s: 2026, w: 1, money: 3000, rosterNames });
+            await updateContinueCard();
+            const value = document.getElementById('continue-clients').textContent;
+            if (prev) await idbSet(SAVE_KEY, prev);
+            else await idbDelete(SAVE_KEY).catch(() => {});
+            return value;
+        },
+        newsRenderProbe: (text) => {
+            addNews(text, 'info');
+            renderNewsFeedScreen();
+            return document.getElementById('news-feed-content').innerHTML;
+        },
+        setChampionForTest: (lk, season, champion) => {
+            championsHistory[lk] = (championsHistory[lk] || []).filter(h => h.season !== season);
+            championsHistory[lk].unshift({ season, champion, finalist: null });
+            return championsHistory[lk];
+        },
+        setPlayerRatingForTest: (name, rating) => {
+            const p = players.find(x => x.name === name);
+            if (!p) return null;
+            p.rating = rating;
+            refreshTeamStrengths();
+            return { name: p.name, club: p.club, league: p.league, rating: p.rating };
+        },
+        clubPrestigeProbe: (lk, club) => {
+            const c = clubData[lk + '_' + club];
+            return c ? c.prestige : null;
+        },
+        clubPlayersProbe: (lk, club) => players
+            .filter(p => p.league === lk && p.club === club)
+            .map(p => ({ name: p.name, rating: p.rating, position: p.position })),
+        leagueClubsProbe: (lk) => getAllClubs(lk),
+        rebalanceRostersNow: () => { rebalanceClubRosters(); return players.length; },
+        careerGoalProbe: (branch, lvl) => {
+            const goal = (CAREER_GOALS[branch] || []).find(g => g.lvl === lvl);
+            return goal ? { target: goal.target, title: goal.title, reward: { ...(goal.reward || {}) } } : null;
+        }
     };
 }
 

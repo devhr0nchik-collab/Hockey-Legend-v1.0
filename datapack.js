@@ -289,10 +289,19 @@ const TEAM_RENAMES = {
     "Днепровские Львы": "Днепровские Витязи",
     "Зубры": "Белорусские Зубры",
 
-    // ============ ICE_HL (Австрия, 3) ============
+    // ============ ICE_HL (Австрия/Европа, 12) ============
     "Red Bull Salzburg": "Salzburg Eagles",
     "KAC Klagenfurt": "Klagenfurt Knights",
-    "Graz 99ers": "Graz Gladiators"
+    "Graz 99ers": "Graz Gladiators",
+    "Vienna Capitals": "Vienna Vipers",
+    "EC VSV": "Villach Vanguard",
+    "Black Wings Linz": "Linz Black Wings",
+    "HC Bolzano": "Bolzano Foxes",
+    "HC Pustertal": "Pustertal Wolves",
+    "Olimpija Ljubljana": "Ljubljana Dragons",
+    "Fehérvár AV19": "Fehervar Devils",
+    "Pioneers Vorarlberg": "Vorarlberg Pioneers",
+    "Asiago": "Asiago Stars"
 };
 // fake → real (обратный словарь для активации датапака)
 const TEAM_RENAMES_REVERSE = {};

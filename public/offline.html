@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#05070c">
+    <title>Hockey Legend — офлайн</title>
+    <style>
+        :root { color-scheme: dark; }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            background: radial-gradient(circle at 50% 0%, #101826 0%, #05070c 70%);
+            color: #e8f6ff; font-family: "Chakra Petch", "Rajdhani", system-ui, sans-serif;
+            padding: 24px env(safe-area-inset-right) calc(24px + env(safe-area-inset-bottom)) env(safe-area-inset-left);
+        }
+        .card {
+            max-width: 420px; width: 100%; padding: 28px 24px; text-align: center;
+            border: 1px solid rgba(0, 229, 255, 0.45); border-radius: 18px;
+            background: linear-gradient(160deg, rgba(0, 229, 255, 0.08), rgba(198, 255, 0, 0.04));
+            box-shadow: 0 0 40px rgba(0, 229, 255, 0.18);
+        }
+        .ico { font-size: 52px; }
+        h1 { margin: 12px 0 8px; font-size: 24px; letter-spacing: 0.06em; color: #c6ff00; }
+        p { margin: 0 0 20px; line-height: 1.5; color: #9fb4c8; }
+        button {
+            cursor: pointer; border: 1px solid #00e5ff; border-radius: 10px;
+            background: #00e5ff; color: #05070c; font: inherit; font-weight: 700;
+            padding: 12px 22px; letter-spacing: 0.05em;
+        }
+        button:focus-visible { outline: 3px solid #c6ff00; outline-offset: 3px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="ico">🏒</div>
+        <h1>НЕТ СЕТИ</h1>
+        <p>Hockey Legend не смог загрузить свежую версию. Проверьте подключение — игра снова будет доступна онлайн.</p>
+        <button onclick="location.reload()">Повторить</button>
+    </div>
+</body>
+</html>

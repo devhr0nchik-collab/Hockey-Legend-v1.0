@@ -103,6 +103,11 @@ export const LANG = {
             "Отклик на касания": "Отклик на касания",
             "Уведомления": "Уведомления",
             "События в игре": "События в игре",
+            "Просмотр матчей": "Просмотр матчей",
+            "Как показывать матчи после недели": "Как показывать матчи после недели",
+            "Показывать матчи полностью": "Показывать матчи полностью",
+            "Сразу к финальному счёту": "Сразу к финальному счёту",
+            "Не показывать матчи": "Не показывать матчи",
             "Язык / Language": "Язык / Language",
             "Русский / English": "Русский / English",
             "⚠ Опасная зона": "⚠ Опасная зона",
@@ -221,6 +226,36 @@ export const LANG = {
             "Начата тренировка": "Начата тренировка",
             "тренировка удалась!": "тренировка удалась!",
             "тренировка не дала результата": "тренировка не дала результата",
+            "Автотренировка": "Автотренировка",
+            "Автотренировка включена": "Автотренировка включена",
+            "Автотренировка отключена": "Автотренировка отключена",
+            "Автотренировка начата": "Автотренировка начата",
+            "Автотренировка остановлена": "Автотренировка остановлена",
+            "Автоматически запускает новый блок, когда клиент свободен и хватает денег.": "Автоматически запускает новый блок, когда клиент свободен и хватает денег.",
+            "атрибут достиг максимума": "атрибут достиг максимума",
+            "недостаточно средств": "недостаточно средств",
+            "Все атрибуты на максимуме": "Все атрибуты на максимуме",
+            "Вкл": "Вкл",
+            "Выкл": "Выкл",
+            "Цель": "Цель",
+            "от бюджета клуба": "от бюджета клуба",
+            "Предложение игроку": "Предложение игроку",
+            "Бесплатно": "Бесплатно",
+            "Стандарт": "Стандарт",
+            "Агент года": "Агент года",
+            "Медийный": "Медийный",
+            "Недостаточно средств для этого предложения": "Недостаточно средств для этого предложения",
+            "шанс": "шанс",
+            // ============ СПРАВКА ПО АТРИБУТАМ ============
+            "Атрибуты": "Атрибуты",
+            "Справка по атрибуту": "Справка по атрибуту",
+            "Завершение атак, броски и голы.": "Завершение атак, броски и голы.",
+            "Игра в обороне, отбор и меньше пропущенных.": "Игра в обороне, отбор и меньше пропущенных.",
+            "Контроль шайбы, пас и ассисты.": "Контроль шайбы, пас и ассисты.",
+            "Хладнокровие, стресс и буллиты.": "Хладнокровие, стресс и буллиты.",
+            "Сила, выносливость и силовые приёмы.": "Сила, выносливость и силовые приёмы.",
+            "Катание и ускорение.": "Катание и ускорение.",
+            "Потолок роста игрока: выше рейтинга не прыгнуть.": "Потолок роста игрока: выше рейтинга не прыгнуть.",
             "Шанс": "Шанс",
             "Все предложения отклонены. Ожидайте следующего ТО": "Все предложения отклонены. Ожидайте следующего ТО",
             "Все предложения отклонены": "Все предложения отклонены",
@@ -441,6 +476,12 @@ export const LANG = {
             "Ты не болеешь ни за кого": "Ты не болеешь ни за кого",
             "Выбрать сборную — будет интереснее": "Выбрать сборную — будет интереснее",
             "Не болеть ни за кого": "Не болеть ни за кого",
+            "Сбросить выбор": "Сбросить выбор",
+            "СБРОСИТЬ": "СБРОСИТЬ",
+            "Сбросить": "Сбросить",
+            "не выбрана": "не выбрана",
+            "Сборная для просмотра": "Сборная для просмотра",
+            "Турнир сборных ещё не идёт. Выбор появится с новым турниром.": "Турнир сборных ещё не идёт. Выбор появится с новым турниром.",
             "ВЫБРАТЬ": "ВЫБРАТЬ",
             "СМЕНИТЬ": "СМЕНИТЬ",
             "Сборная не участвует": "Сборная не участвует",
@@ -1926,6 +1967,10 @@ export const LANG = {
             "Сто миллионов": "Сто миллионов",
             "$1B": "$1B",
             "Миллиардер": "Миллиардер",
+            "$25M": "$25M",
+            "Двадцать пять миллионов": "Двадцать пять миллионов",
+            "$75M": "$75M",
+            "Семьдесят пять миллионов": "Семьдесят пять миллионов",
 
             // ============ ВЕТКА: ЛЕГЕНДА ============
             "Первый гол клиента": "Первый гол клиента",
@@ -2190,7 +2235,20 @@ export const LANG = {
             "{b}: {a} многовато. Наш максимум {m}": "{b}: {a} многовато. Наш максимум {m}",
             "Хорошо, мы подумаем. Можем поднять до": "Хорошо, мы подумаем. Можем поднять до",
             "Мы уже на пределе. Больше не двинемся": "Мы уже на пределе. Больше не двинемся",
-            "Комиссия: {c} ({p}% от годовой зарплаты)": "Комиссия: {c} ({p}% от годовой зарплаты)"
+            "Комиссия: {c} ({p}% от годовой зарплаты)": "Комиссия: {c} ({p}% от годовой зарплаты)",
+            // Живой мир: динамические новости
+            "🌍 {club} объявлен банкротом — игроки ушли в свободные агенты": "🌍 {club} объявлен банкротом — игроки ушли в свободные агенты",
+            "🌍 {club} назначил нового тренера — команда на подъёме": "🌍 {club} назначил нового тренера — команда на подъёме",
+            "🌍 {club} уволил тренера — команда перестраивается": "🌍 {club} уволил тренера — команда перестраивается",
+            "🏟️ {club} начал строительство арены — бюджет вырос": "🏟️ {club} начал строительство арены — бюджет вырос",
+            // Баннеры важных мировых событий
+            "Внимание: {club} обанкротился!": "Внимание: {club} обанкротился!",
+            "Внимание: {club} уволил тренера!": "Внимание: {club} уволил тренера!",
+            "{club} назначил нового тренера": "{club} назначил нового тренера",
+            "🏟️ {club} строит новую арену": "🏟️ {club} строит новую арену",
+            // Трансферные слухи
+            "📣 {club} проявляет интерес к вашему клиенту {player}": "📣 {club} проявляет интерес к вашему клиенту {player}",
+            "📣 {club} проявляет интерес к свободному агенту {player}": "📣 {club} проявляет интерес к свободному агенту {player}"
         },
         en: {
             // Фаза 1 — Общие
@@ -2281,6 +2339,11 @@ export const LANG = {
             "Отклик на касания": "Touch feedback",
             "Уведомления": "Notifications",
             "События в игре": "In-game events",
+            "Просмотр матчей": "Match viewing",
+            "Как показывать матчи после недели": "How to show matches after a week",
+            "Показывать матчи полностью": "Show matches in full",
+            "Сразу к финальному счёту": "Jump to the final score",
+            "Не показывать матчи": "Do not show matches",
             "Язык / Language": "Language",
             "Русский / English": "Russian / English",
             "⚠ Опасная зона": "⚠ Danger zone",
@@ -2436,6 +2499,12 @@ export const LANG = {
             "Ты не болеешь ни за кого": "You don't cheer for anyone",
             "Выбрать сборную — будет интереснее": "Pick a team — it'll be more fun",
             "Не болеть ни за кого": "Don't cheer for anyone",
+            "Сбросить выбор": "Reset choice",
+            "СБРОСИТЬ": "RESET",
+            "Сбросить": "Reset",
+            "не выбрана": "not selected",
+            "Сборная для просмотра": "National team to watch",
+            "Турнир сборных ещё не идёт. Выбор появится с новым турниром.": "No national tournament is running. The choice will appear with the next tournament.",
             "ВЫБРАТЬ": "PICK",
             "СМЕНИТЬ": "CHANGE",
             "Сборная не участвует": "Team not participating",
@@ -3914,6 +3983,10 @@ export const LANG = {
             "Сто миллионов": "A hundred million",
             "$1B": "$1B",
             "Миллиардер": "Billionaire",
+            "$25M": "$25M",
+            "Двадцать пять миллионов": "Twenty-five million",
+            "$75M": "$75M",
+            "Семьдесят пять миллионов": "Seventy-five million",
 
             // ============ BRANCH: LEGEND ============
             "Первый гол клиента": "First client goal",
@@ -4202,6 +4275,36 @@ export const LANG = {
             "Начата тренировка": "Training started",
             "тренировка удалась!": "training succeeded!",
             "тренировка не дала результата": "training had no effect",
+            "Автотренировка": "Auto-training",
+            "Автотренировка включена": "Auto-training enabled",
+            "Автотренировка отключена": "Auto-training disabled",
+            "Автотренировка начата": "Auto-training started",
+            "Автотренировка остановлена": "Auto-training stopped",
+            "Автоматически запускает новый блок, когда клиент свободен и хватает денег.": "Automatically starts a new block when the client is free and you can afford it.",
+            "атрибут достиг максимума": "attribute is maxed out",
+            "недостаточно средств": "not enough funds",
+            "Все атрибуты на максимуме": "All attributes are maxed out",
+            "Вкл": "ON",
+            "Выкл": "OFF",
+            "Цель": "Target",
+            "от бюджета клуба": "of the club budget",
+            "Предложение игроку": "Offer to the player",
+            "Бесплатно": "Free",
+            "Стандарт": "Standard",
+            "Агент года": "Agent of the Year",
+            "Медийный": "Media",
+            "Недостаточно средств для этого предложения": "Not enough funds for this offer",
+            "шанс": "chance",
+            // ============ ATTRIBUTE HELP ============
+            "Атрибуты": "Attributes",
+            "Справка по атрибуту": "Attribute help",
+            "Завершение атак, броски и голы.": "Finishing attacks, shots and goals.",
+            "Игра в обороне, отбор и меньше пропущенных.": "Defensive play, takeaways and fewer goals allowed.",
+            "Контроль шайбы, пас и ассисты.": "Puck control, passing and assists.",
+            "Хладнокровие, стресс и буллиты.": "Composure, stress and shootouts.",
+            "Сила, выносливость и силовые приёмы.": "Strength, endurance and body checks.",
+            "Катание и ускорение.": "Skating and acceleration.",
+            "Потолок роста игрока: выше рейтинга не прыгнуть.": "The player's growth ceiling: he cannot exceed it.",
             "Шанс": "Chance",
             "Тренировки": "Training",
             "Все предложения отклонены. Ожидайте следующего ТО": "All offers declined. Wait for the next transfer window",
@@ -4440,7 +4543,20 @@ export const LANG = {
             "{b}: {a} многовато. Наш максимум {m}": "{b}: {a} is too much. Our maximum is {m}",
             "Хорошо, мы подумаем. Можем поднять до": "Alright, we will think about it. We can raise to",
             "Мы уже на пределе. Больше не двинемся": "We are at our limit. We will not move further",
-            "Комиссия: {c} ({p}% от годовой зарплаты)": "Fee: {c} ({p}% of the annual salary)"
+            "Комиссия: {c} ({p}% от годовой зарплаты)": "Fee: {c} ({p}% of the annual salary)",
+            // Living world: dynamic news
+            "🌍 {club} объявлен банкротом — игроки ушли в свободные агенты": "🌍 {club} declared bankruptcy — players hit free agency",
+            "🌍 {club} назначил нового тренера — команда на подъёме": "🌍 {club} hired a new coach — the team is on the rise",
+            "🌍 {club} уволил тренера — команда перестраивается": "🌍 {club} fired the coach — the team is rebuilding",
+            "🏟️ {club} начал строительство арены — бюджет вырос": "🏟️ {club} started building an arena — budget increased",
+            // Important world event banners
+            "Внимание: {club} обанкротился!": "Warning: {club} went bankrupt!",
+            "Внимание: {club} уволил тренера!": "Warning: {club} fired the coach!",
+            "{club} назначил нового тренера": "{club} hired a new coach",
+            "🏟️ {club} строит новую арену": "🏟️ {club} is building a new arena",
+            // Transfer rumors
+            "📣 {club} проявляет интерес к вашему клиенту {player}": "📣 {club} is interested in your client {player}",
+            "📣 {club} проявляет интерес к свободному агенту {player}": "📣 {club} is interested in free agent {player}"
         }
     },
 
@@ -4597,9 +4713,9 @@ const PATTERN_RU_TO_EN = [
     [/^Получил (\d+)\s+клиентов!$/, 'Got $1 clients!'],
     [/^Репутация \+(\d+),\s*но реп −(\d+)\.$/, 'Reputation +$1, but rep −$2.'],
     [/^(\d+)\s+из\s+(\d+)$/, '$1 of $2'],
-    [/^(\d+)-е место$/, '$1st place'],
-    [/^(\d+)-е место из$/, '$1st place of'],
-    [/^Лучший сезон:\s*(\d+)\s*\((\d+)-е место\)$/, 'Best season: $1 ($2nd place)'],
+    [/^(\d+)-е место$/, '$1{ord} place'],
+    [/^(\d+)-е место из$/, '$1{ord} place of'],
+    [/^Лучший сезон:\s*(\d+)\s*\((\d+)-е место\)$/, 'Best season: $1 ($2{ord} place)'],
     [/^(\d+)\s+очк\.$/, '$1 pts.'],
     [/^Задачи на сезон\s*\((\d+)\/(\d+)\s+выполнено\)$/, 'Season tasks ($1/$2 done)'],
     [/^(\d+)\s+мест$/, '$1 seats'],
@@ -4801,7 +4917,12 @@ const PATTERN_EN_TO_RU = [
     [/^(\d+)st place$/, '$1-е место'],
     [/^(\d+)nd place$/, '$1-е место'],
     [/^(\d+)rd place$/, '$1-е место'],
-    [/^Best season:\s*(\d+)\s*\((\d+)nd place\)$/, 'Лучший сезон: $1 ($2-е место)'],
+    [/^(\d+)th place$/, '$1-е место'],
+    [/^(\d+)st place of$/, '$1-е место из'],
+    [/^(\d+)nd place of$/, '$1-е место из'],
+    [/^(\d+)rd place of$/, '$1-е место из'],
+    [/^(\d+)th place of$/, '$1-е место из'],
+    [/^Best season:\s*(\d+)\s*\((\d+)(?:st|nd|rd|th) place\)$/, 'Лучший сезон: $1 ($2-е место)'],
     [/^(\d+)\s+pts\.$/, '$1 очк.'],
     [/^Season tasks\s*\((\d+)\/(\d+)\s+done\)$/, 'Задачи на сезон ($1/$2 выполнено)'],
     [/^(\d+)\s+seats$/, '$1 мест'],
@@ -4919,11 +5040,33 @@ const PATTERN_EN_TO_RU = [
     [/^Playoffs\s+•\s+Round\s+(\d+)\s*\/\s*(\d+)$/, 'Плей-офф • Раунд $1 / $2'],
     [/^Group stage\s+•\s+Week\s+(\d+)\s*\/\s*(\d+)$/, 'Групповой этап • Неделя $1 / $2']
 ];
+function ordinalSuffixEn(n) {
+    const v = Math.abs(Number(n)) % 100;
+    if (v >= 11 && v <= 13) return 'th';
+    switch (Math.abs(Number(n)) % 10) {
+        case 1: return 'st';
+        case 2: return 'nd';
+        case 3: return 'rd';
+        default: return 'th';
+    }
+}
 function applyPattern(text) {
     const list = LANG.current === 'en' ? PATTERN_RU_TO_EN : PATTERN_EN_TO_RU;
     for (const [re, repl] of list) {
         if (re.test(text)) {
-            const out = text.replace(re, repl);
+            let out;
+            if (repl.includes('{ord}')) {
+                // C5: порядковые числительные — 1st/2nd/3rd/4th, а не «2st».
+                out = text.replace(re, (...args) => {
+                    const caps = args.slice(1, -2);
+                    let s = repl;
+                    s = s.replace(/\$(\d+)/g, (_, n) => caps[Number(n) - 1] ?? '');
+                    s = s.replace(/(\d+)\{ord\}/g, (_, n) => n + ordinalSuffixEn(Number(n)));
+                    return s;
+                });
+            } else {
+                out = text.replace(re, repl);
+            }
             return translateEmbeddedCyrillic(out);
         }
     }
@@ -4933,13 +5076,23 @@ function applyPattern(text) {
 // Переводит оставшуюся кириллицу внутри уже переведённой строки
 // (названия клубов, лиг, стран внутри новостей и т.п.)
 const _CYR_RE = /[А-Яа-яЁё]/;
+let _cyrKeysCache = null;
+let _cyrKeysDictRef = null;
+function getEmbeddedCyrKeys(dict) {
+    // C7: список ключей строится один раз на словарь, а не на каждый текстовый узел.
+    if (_cyrKeysDictRef !== dict || !_cyrKeysCache) {
+        _cyrKeysDictRef = dict;
+        _cyrKeysCache = Object.keys(dict)
+            .filter(k => _CYR_RE.test(k) && k.length >= 3)
+            .sort((a, b) => b.length - a.length);
+    }
+    return _cyrKeysCache;
+}
 function translateEmbeddedCyrillic(text) {
     if (LANG.current !== 'en') return text;
     if (!text || !_CYR_RE.test(text)) return text;
     const dict = LANG.dict.en;
-    const cyrKeys = Object.keys(dict)
-        .filter(k => _CYR_RE.test(k) && k.length >= 3)
-        .sort((a, b) => b.length - a.length);
+    const cyrKeys = getEmbeddedCyrKeys(dict);
     for (const key of cyrKeys) {
         if (text.includes(key)) {
             text = text.split(key).join(dict[key]);
@@ -5071,87 +5224,138 @@ function lookupTranslation(map, rawText) {
     return null;
 }
 
-function translateDOM(root) {
-    if (_isTranslating) return;
-    _isTranslating = true;
+function translateRoot(root) {
+    if (!root) return;
+    const { toEn, toRu } = getReverseDicts();
 
-    try {
-        if (!root) root = document.body;
-        const { toEn, toRu } = getReverseDicts();
+    // Что на что меняем: если current='en' — ru→en, если 'ru' — en→ru
+    const map = LANG.current === 'en' ? toEn : toRu;
 
-        // Что на что меняем: если current='en' — ru→en, если 'ru' — en→ru
-        const map = LANG.current === 'en' ? toEn : toRu;
+    const walker = document.createTreeWalker(
+        root,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+    );
+    let node;
+    while ((node = walker.nextNode())) {
+        const text = node.nodeValue;
+        if (!text) continue;
+        const trimmed = text.trim();
+        if (!trimmed) continue;
 
-        const walker = document.createTreeWalker(
-            root,
-            NodeFilter.SHOW_TEXT,
-            null,
-            false
-        );
-        let node;
-        while ((node = walker.nextNode())) {
-            const text = node.nodeValue;
-            if (!text) continue;
-            const trimmed = text.trim();
-            if (!trimmed) continue;
-
-            const translated = lookupTranslation(map, trimmed);
-            if (translated !== null) {
-                // Сохраняем только внешние пробелы исходного узла
-                const leadingWs = text.match(/^\s*/)[0];
-                const trailingWs = text.match(/\s*$/)[0];
-                node.nodeValue = leadingWs + translated + trailingWs;
-            }
+        const translated = lookupTranslation(map, trimmed);
+        if (translated !== null) {
+            // Сохраняем только внешние пробелы исходного узла
+            const leadingWs = text.match(/^\s*/)[0];
+            const trailingWs = text.match(/\s*$/)[0];
+            const next = leadingWs + translated + trailingWs;
+            if (next !== text) node.nodeValue = next;
         }
+    }
 
-        // Плейсхолдеры input
-        root.querySelectorAll('input[placeholder]').forEach(inp => {
-            const p = inp.placeholder.trim();
-            const t = lookupTranslation(map, p);
-            if (t !== null) inp.placeholder = t;
-        });
+    // Плейсхолдеры input
+    root.querySelectorAll('input[placeholder]').forEach(inp => {
+        const p = inp.placeholder.trim();
+        const t = lookupTranslation(map, p);
+        if (t !== null && t !== inp.placeholder) inp.placeholder = t;
+    });
 
-        // title у элементов
-        root.querySelectorAll('[title]').forEach(el => {
-            const t = (el.getAttribute('title') || '').trim();
-            const tt = lookupTranslation(map, t);
-            if (tt !== null) el.setAttribute('title', tt);
-        });
+    // title у элементов
+    root.querySelectorAll('[title]').forEach(el => {
+        const t = (el.getAttribute('title') || '').trim();
+        const tt = lookupTranslation(map, t);
+        if (tt !== null && tt !== t) el.setAttribute('title', tt);
+    });
+}
+
+// C8/C9: переводим только затронутые поддеревья. Мутации, пришедшие во время
+// перевода, не «проглатываются», а складываются в очередь и обрабатываются
+// после снятия флага.
+const _pendingTranslateRoots = new Set();
+function addTranslateRoot(root) {
+    if (!root) return;
+    if (root.nodeType === 3) root = root.parentElement;
+    if (!root || root.nodeType !== 1) return;
+    for (const existing of _pendingTranslateRoots) {
+        if (existing === root || existing.contains(root)) return;
+    }
+    for (const existing of [..._pendingTranslateRoots]) {
+        if (root.contains(existing)) _pendingTranslateRoots.delete(existing);
+    }
+    _pendingTranslateRoots.add(root);
+}
+
+function translateDOM(root) {
+    if (_isTranslating) { addTranslateRoot(root || document.body); return; }
+    _isTranslating = true;
+    try {
+        translateRoot(root || document.body);
     } finally {
-        // Снимаем флаг асинхронно, чтобы MutationObserver успел "проглотить"
-        // мутации от самого переводчика, но не запускал новый цикл
-        setTimeout(() => { _isTranslating = false; }, 50);
+        setTimeout(() => {
+            _isTranslating = false;
+            flushTranslateRoots();
+        }, 0);
+    }
+}
+
+function flushTranslateRoots() {
+    if (_isTranslating) return;
+    const roots = [..._pendingTranslateRoots];
+    _pendingTranslateRoots.clear();
+    if (roots.length === 0) return;
+    _isTranslating = true;
+    try {
+        roots.forEach(r => { if (r.isConnected) translateRoot(r); });
+    } finally {
+        setTimeout(() => {
+            _isTranslating = false;
+            if (_pendingTranslateRoots.size > 0) flushTranslateRoots();
+        }, 0);
     }
 }
 
 // ============ MUTATION OBSERVER ============
 let _translateScheduled = false;
-function scheduleTranslate() {
+function scheduleTranslate(root) {
+    addTranslateRoot(root || document.body);
     if (_translateScheduled) return;
-    if (_isTranslating) return;
     _translateScheduled = true;
     setTimeout(() => {
         _translateScheduled = false;
-        translateDOM(document.body);
+        flushTranslateRoots();
     }, 40);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     const observer = new MutationObserver((mutations) => {
-        if (_isTranslating) return; // изменения от переводчика — игнорируем
+        // Даже во время перевода складываем корни в очередь (C9),
+        // а не отбрасываем чужие изменения.
         for (const m of mutations) {
-            if (m.type === 'childList' || m.type === 'characterData') {
-                scheduleTranslate();
-                return;
-            }
+            const target = m.type === 'characterData' ? m.target.parentElement : m.target;
+            if (target) addTranslateRoot(target);
         }
+        if (_pendingTranslateRoots.size > 0) scheduleTranslate();
     });
     observer.observe(document.body, {
         childList: true,
         subtree: true,
         characterData: true
     });
-    scheduleTranslate();
+    scheduleTranslate(document.body);
 });
+
+// Чистый перевод динамической строки (для тестов C5/C6, без DOM).
+export function translateTextForTest(text, lang) {
+    const prev = LANG.current;
+    LANG.current = lang === 'en' ? 'en' : 'ru';
+    try {
+        const { toEn, toRu } = getReverseDicts();
+        const map = LANG.current === 'en' ? toEn : toRu;
+        return lookupTranslation(map, text) ?? applyPattern(text) ?? text;
+    } finally {
+        LANG.current = prev;
+    }
+}
 
 console.log('🌐 i18n.js готов');

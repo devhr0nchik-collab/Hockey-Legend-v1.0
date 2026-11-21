@@ -2,14 +2,27 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#05070c">
     <meta name="description" content="Hockey Legend — симулятор хоккейного агента: клиенты, контракты, лиги, драфт и трофеи.">
-    <title>Hockey Legend v1.0</title>
+    <title>Hockey Legend v1.1</title>
     <link rel="icon" type="image/svg+xml" href="icon.svg">
-    <link rel="apple-touch-icon" href="icon.svg">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-180.png">
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="stylesheet" href="style.css">
+    <!-- C15: карточка для соцсетей -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Hockey Legend — симулятор хоккейного агента">
+    <meta property="og:description" content="Клиенты, контракты, переговоры, лиги, драфт и трофеи. Построй агентство-легенду.">
+    <meta property="og:image" content="icons/og-cover.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Hockey Legend — симулятор хоккейного агента">
+    <meta name="twitter:description" content="Клиенты, контракты, переговоры, лиги, драфт и трофеи.">
+    <meta name="twitter:image" content="icons/og-cover.png">
 </head>
 <body>
 
@@ -645,12 +658,24 @@
                     <div class="settings-label"><span class="settings-icon">🔔</span><div><div class="settings-title">Уведомления</div><div class="settings-desc">События в игре</div></div></div>
                     <label class="toggle-switch"><input type="checkbox" id="setting-notifications" checked><span class="toggle-slider"></span></label>
                 </div>
+                <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                    <div class="settings-label"><span class="settings-icon">🏒</span><div><div class="settings-title" data-i18n="Просмотр матчей">Просмотр матчей</div><div class="settings-desc" data-i18n="Как показывать матчи после недели">Как показывать матчи после недели</div></div></div>
+                    <div class="match-view-options">
+                        <label class="match-view-option"><input type="radio" name="setting-match-view" id="setting-match-view-full" value="full" checked><span data-i18n="Показывать матчи полностью">Показывать матчи полностью</span></label>
+                        <label class="match-view-option"><input type="radio" name="setting-match-view" id="setting-match-view-score" value="score"><span data-i18n="Сразу к финальному счёту">Сразу к финальному счёту</span></label>
+                        <label class="match-view-option"><input type="radio" name="setting-match-view" id="setting-match-view-off" value="off"><span data-i18n="Не показывать матчи">Не показывать матчи</span></label>
+                    </div>
+                </div>
                 <div class="settings-row">
                     <div class="settings-label"><span class="settings-icon">🌐</span><div><div class="settings-title">Язык / Language</div><div class="settings-desc">Русский / English</div></div></div>
                     <div class="lang-switch" id="settings-lang-switch">
                         <button class="lang-switch-btn active" data-lang="ru">🇷🇺 RU</button>
                         <button class="lang-switch-btn" data-lang="en">🇬🇧 EN</button>
                     </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label"><span class="settings-icon">🏒</span><div><div class="settings-title" data-i18n="Сборная для просмотра">Сборная для просмотра</div><div class="settings-desc" id="setting-nt-value">не выбрана</div></div></div>
+                    <button id="setting-nt-reset" class="btn-neutral" style="padding:8px 12px;font-size:12px;" data-i18n="Сбросить">Сбросить</button>
                 </div>
                 <div class="settings-divider"></div>
                 <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
@@ -712,6 +737,8 @@
                     <div class="about-feature"><span class="feature-icon">🏆</span><div><div class="feature-title">Плей-офф и награды</div><div class="feature-desc">Сетка плей-офф, трофеи, личные награды</div></div></div>
                     <div class="about-feature"><span class="feature-icon">⚙️</span><div><div class="feature-title">Прокачка агентства</div><div class="feature-desc">7 карточек × 25 уровней</div></div></div>
                 </div>
+                <div class="about-section-title" data-i18n="Атрибуты">📊 Атрибуты</div>
+                <div class="about-attributes" id="about-attributes"></div>
                 <div class="about-section-title">🛠 Разработка</div>
                 <p class="about-credits">Создано в образовательных целях. Игра не связана с NHL, KHL, IIHF или любым клубом. Все названия и логотипы принадлежат их владельцам.</p>
                 <div class="about-footer">© 2026 Hockey Legend<br>Сделано с ❤ для любителей хоккея</div>

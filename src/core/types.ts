@@ -172,6 +172,7 @@ export interface SaveData {
     activeCommissions: unknown[];
     pendingClubReturn: unknown[];
     playerNegotiations: Record<string, unknown>;
+    trainingAuto?: Record<string, string>;
     contractExtras?: Record<string, [string, number, number, number, number?, number?, number?]>;
     poachedPlayersThisSeason: Record<string, unknown>;
     agencyPoachAttempts: Record<string, unknown>;
