@@ -1,15 +1,15 @@
 // ============================================================
 // RNG для игровой симуляции.
 //
-// Отдельный от Math.random поток: косметика (анимации, снежинки)
-// не должна влиять на результаты матчей. По умолчанию обёртка
-// использует Math.random, поэтому поведение не меняется, пока
-// симуляция явно не засеяна через setSimulationSeed().
+// Отдельный от косметики поток: анимации не влияют на результаты.
+// До явного setSimulationSeed() используется ФИКСИРОВАННЫЙ
+// детерминированный поток — Math.random в симуляции запрещён.
 // ============================================================
 import { makeSeededRNG, type Rng } from './rng';
 
-let impl: Rng = Math.random;
-let seed = 0;
+const DEFAULT_SIM_SEED = 0x4d595df4;
+let impl: Rng = makeSeededRNG(DEFAULT_SIM_SEED);
+let seed = DEFAULT_SIM_SEED;
 let seeded = false;
 let draws = 0;
 

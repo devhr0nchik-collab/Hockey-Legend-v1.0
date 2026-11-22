@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#05070c">
     <meta name="description" content="Hockey Legend — симулятор хоккейного агента: клиенты, контракты, лиги, драфт и трофеи.">
-    <title>Hockey Legend v1.1</title>
+    <title>Hockey Legend v1.2</title>
     <link rel="icon" type="image/svg+xml" href="icon.svg">
     <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
@@ -150,7 +150,7 @@
                 <div class="menu-stat-divider"></div>
                 <div class="menu-stat"><span class="menu-stat-val">4000+</span><span class="menu-stat-lbl">игроков</span></div>
             </div>
-            <div class="menu-version">v1.0</div>
+            <div class="menu-version">v1.2</div>
             <div class="menu-disclaimer" id="menu-disclaimer">Неофициальная игра. Не связана с NHL, KHL, IIHF или любым клубом. Все названия и логотипы принадлежат их владельцам.</div>
         </div>
     </div>
@@ -261,6 +261,11 @@
                     <div class="tile-icon">🎯</div>
                     <div class="tile-label">Цели</div>
                     <div class="tile-desc">Древо прогресса</div>
+                </div>
+                <div class="tile" data-action="hall">
+                    <div class="tile-icon">🏛</div>
+                    <div class="tile-label">Зал Славы</div>
+                    <div class="tile-desc">Легенды и рекорды</div>
                 </div>
                 <div class="tile" data-action="history">
                     <div class="tile-icon">📜</div>
@@ -467,6 +472,10 @@
                 <span class="ptab-icon">📜</span>
                 <span class="ptab-label">История</span>
             </button>
+            <button class="player-tab" data-ptab="dialogue">
+                <span class="ptab-icon">💬</span>
+                <span class="ptab-label">Диалог</span>
+            </button>
         </div>
         <div class="mobile-content" id="player-content"></div>
     </div>
@@ -485,6 +494,10 @@
             <button class="clients-tab" data-atab="rating">
                 <span class="tab-icon">🏆</span>
                 <span>Рейтинг</span>
+            </button>
+            <button class="clients-tab" data-atab="finance">
+                <span class="tab-icon">💳</span>
+                <span>Финансы</span>
             </button>
         </div>
         <div class="mobile-content" id="agency-content"></div>
@@ -514,6 +527,31 @@
         <div class="mobile-content" id="goals-content"></div>
     </div>
 
+    <!-- ============ ЭКРАН «ЗАЛ СЛАВЫ» (v1.3) ============ -->
+    <div id="hall-of-fame-screen" class="mobile-screen" style="display: none;">
+        <div class="mobile-header">
+            <button class="header-back-btn" id="hall-back">←</button>
+            <div class="mobile-header-icon">🏛</div>
+            <div class="mobile-header-title" id="hall-title">Зал Славы</div>
+        </div>
+        <div class="clients-tabs" id="hall-tabs">
+            <button class="clients-tab active" data-htab="agency">
+                <span class="tab-icon">🏛</span>
+                <span>Агентство</span>
+            </button>
+            <button class="clients-tab" data-htab="leagues">
+                <span class="tab-icon">🏆</span>
+                <span>Лиги</span>
+            </button>
+            <button class="clients-tab" data-htab="achievements">
+                <span class="tab-icon">🎖</span>
+                <span>Достижения</span>
+                <span class="tab-count" id="hall-ach-count">0</span>
+            </button>
+        </div>
+        <div class="mobile-content" id="hall-content"></div>
+    </div>
+
     <!-- ============ ЭКРАН ХАБА КЛУБА ============ -->
     <div id="club-hub-screen" class="mobile-screen" style="display: none;">
         <div class="mobile-header">
@@ -524,6 +562,9 @@
         <div class="club-hub-tabs">
             <button class="club-hub-tab active" data-chub="overview">
                 <span class="cht-icon">📊</span><span>Обзор</span>
+            </button>
+            <button class="club-hub-tab" data-chub="decisions">
+                <span class="cht-icon">🗳️</span><span>Решения</span>
             </button>
             <button class="club-hub-tab" data-chub="roster">
                 <span class="cht-icon">👥</span><span>Состав</span>
@@ -599,6 +640,10 @@
         <div class="nav-item active" data-cnav="overview">
             <div class="nav-icon">📊</div>
             <div class="nav-label">Обзор</div>
+        </div>
+        <div class="nav-item" data-cnav="decisions">
+            <div class="nav-icon">🗳️</div>
+            <div class="nav-label">Решения</div>
         </div>
         <div class="nav-item" data-cnav="roster">
             <div class="nav-icon">👥</div>
@@ -722,7 +767,7 @@
                         </svg>
                     </div>
                     <div class="about-title">HOCKEY LEGEND</div>
-                    <div class="about-version-tag">v1.0</div>
+                    <div class="about-version-tag">v1.3</div>
                 </div>
                 <p class="about-description">
                     Симулятор хоккейного агента. Начни с нуля — подписывай игроков, 
@@ -762,6 +807,17 @@
             <div class="modal-header"><h2 id="client-modal-title">Игрок</h2></div>
             <div class="modal-body" id="client-modal-body"></div>
             <div class="modal-actions" id="client-modal-actions"></div>
+        </div>
+    </div>
+
+    <!-- ============ МОДАЛЬНОЕ ОКНО КЛИЕНТА ЗАЛА СЛАВЫ (v1.3) ============ -->
+    <div id="hall-client-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box hlf-modal-box">
+            <div class="modal-header">
+                <h2 id="hall-client-title">Клиент</h2>
+                <button class="hlf-modal-close" id="hall-client-close" aria-label="Закрыть">✕</button>
+            </div>
+            <div class="modal-body" id="hall-client-body"></div>
         </div>
     </div>
 
@@ -835,12 +891,12 @@
         </div>
     </div>
 
-    <!-- ============ МОДАЛКА ДИАЛОГА ПЕРЕМАНИВАНИЯ ============ -->
-    <div id="poach-dialog-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-box">
-            <div class="modal-header"><h2>💬 Диалог с игроком</h2></div>
-            <div class="modal-body" id="poach-dialog-body"></div>
-            <div class="modal-actions" id="poach-dialog-actions"></div>
+    <!-- ============ МОДАЛКА ДИАЛОГА С ИГРОКОМ (v1.2.1) ============ -->
+    <div id="player-dialogue-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box player-dialogue-box">
+            <div class="modal-header"><h2 id="player-dialogue-title">💬 Диалог с игроком</h2></div>
+            <div class="modal-body" id="player-dialogue-body"></div>
+            <div class="modal-actions" id="player-dialogue-actions"></div>
         </div>
     </div>
 
@@ -853,6 +909,16 @@
             <div class="modal-actions" id="event-actions"></div>
         </div>
     </div>
+    <div id="president-onboarding-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-box president-onboarding-box">
+            <div class="modal-header"><h2>🏛️ Вы президент клуба</h2></div>
+            <div class="modal-body" id="president-onboarding-body"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn-primary" id="president-onboarding-start">Начать управлять</button>
+            </div>
+        </div>
+    </div>
+    <div id="why-popover" class="why-popover" role="tooltip" style="display: none;"></div>
     <div id="stock-modal" class="modal-overlay" style="display: none;">
         <div class="modal-box">
             <div class="modal-header"><h2 id="stock-modal-title"></h2></div>

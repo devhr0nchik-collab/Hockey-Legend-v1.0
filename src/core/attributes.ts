@@ -41,7 +41,9 @@ export function generateAttributes(
     rating: number,
     name?: string | null
 ): PlayerAttributes {
-    const rng = name ? makeSeededRNG(hashString(name + '_' + position)) : Math.random;
+    // Без Math.random: даже безымянный игрок получает воспроизводимый набор.
+    const seedSource = (name || 'unknown') + '_' + position + '_' + rating;
+    const rng = makeSeededRNG(hashString(seedSource));
     const v = () => Math.round((rng() - 0.5) * 16);
     const base = POSITION_BASE[position] || POSITION_BASE.F;
     const mods = ARCHETYPE_MODS[getPlayerArchetype(position, name)];

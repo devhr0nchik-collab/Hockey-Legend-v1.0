@@ -8,5 +8,6 @@
 
 import '../i18n.js';
 import '../datapack_rosters.js';
+import './features/president/events.js';
 import '../script.js';
 import '../datapack.js';

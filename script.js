@@ -8,6 +8,26 @@ import { createIdbStore } from './src/features/save/storage';
 import { isSaveData, normalizeLoadedSave } from './src/features/save/migrations';
 import { setSimulationSeed, simRandom, simInt, simChoice, matchSeed, getSimulationDraws } from './src/core/sim-random';
 import { cosmeticRandom } from './src/core/cosmetic-random';
+import {
+    CLUB_TACTICS, TACTIC_IDS, getTacticMods, tacticForStance,
+    simulateTacticWinRate, runTacticsMonteCarlo,
+    gradeSeason, computeNextSeasonBudget, cashCapForRevenue
+} from './src/features/economy/balance.js';
+import { TutorialManager, TUTORIAL_FLAGS } from './src/features/tutorial/TutorialManager.js';
+import {
+    VERSION, getEventRewardCap, getEventMoneyMultiplier as getEventMoneyMultiplierForLevel,
+    parseEventInvestment, settleEventMoney
+} from './src/features/economy/event-rewards.js';
+
+export { VERSION };
+
+function applyVersionToUI() {
+    const short = 'v' + VERSION.split('.').slice(0, 2).join('.');
+    document.querySelectorAll('.menu-version, .about-version-tag').forEach(el => { el.textContent = short; });
+    const title = document.querySelector('title');
+    if (title && /Hockey Legend/.test(title.textContent)) title.textContent = `Hockey Legend ${short}`;
+}
+applyVersionToUI();
 
 if (window.DEBUG) console.log("✅ script.js загружен");
 
@@ -191,8 +211,57 @@ let agencyName = 'Моё агентство';
 let agencyCountry = 'RU';
 let agencyFlag = '🇷🇺';
 let agentMoney = 3000;
+// v1.2.3: финансовая история (последние 100 операций) хранится в корне сейва.
+const FINANCE_HISTORY_LIMIT = 100;
+let financeHistory = [];
+
+function logTransaction(type, amount, reason) {
+    const amt = Math.abs(Math.round(Number(amount) || 0));
+    if (!amt) return null;
+    const entry = {
+        season: Number.isFinite(currentSeason) ? currentSeason : 2026,
+        week: Number.isFinite(currentWeek) ? currentWeek : 1,
+        type: type === 'income' ? 'income' : 'expense',
+        amount: amt,
+        reason: String(reason || '').trim().slice(0, 160) || (type === 'income' ? 'Доход' : 'Расход')
+    };
+    financeHistory.push(entry);
+    if (financeHistory.length > FINANCE_HISTORY_LIMIT) {
+        financeHistory.splice(0, financeHistory.length - FINANCE_HISTORY_LIMIT);
+    }
+    return entry;
+}
+
+function applyMoney(delta, reason) {
+    const d = Math.round(Number(delta) || 0);
+    if (!d) return 0;
+    agentMoney += d;
+    logTransaction(d > 0 ? 'income' : 'expense', Math.abs(d), reason);
+    return d;
+}
+
+function normalizeFinanceHistory(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const item of raw) {
+        if (!item || typeof item !== 'object') continue;
+        const amount = Math.abs(Math.round(Number(item.amount) || 0));
+        if (!amount) continue;
+        out.push({
+            season: Number.isFinite(item.season) ? Math.round(item.season) : 2026,
+            week: Number.isFinite(item.week) ? Math.round(item.week) : 1,
+            type: item.type === 'income' ? 'income' : 'expense',
+            amount,
+            reason: String(item.reason || '').slice(0, 160)
+        });
+    }
+    return out.slice(-FINANCE_HISTORY_LIMIT);
+}
+
 let players = [];
 let myRoster = [];
+// Пункт 9: имена всех, кого агент вёл когда-либо (для эффекта бывшего клиента).
+let formerClientNames = [];
 let currentSeason = 2026;
 let currentWeek = 1;
 let newsFeed = [];
@@ -210,6 +279,9 @@ let currentPlayerScreen = null;
 let currentPlayerSource = 'my';
 // Автотренировки: { [playerName]: attribute }. Хранятся в корне сейва (не в PackedPlayer).
 let trainingAuto = {};
+// v1.2: групповая тренировка — один атрибут на всех клиентов.
+let groupTrainingAttr = null;
+let agencyShowAllUpgrades = false;
 // Живой мир: динамические события (банкротства, тренеры, арены).
 // Хранится в корне сейва, PackedClub не меняется.
 let worldState = { v: 1, cooldowns: {}, debtWeeks: {}, effects: {}, feed: [] };
@@ -253,6 +325,13 @@ let clubSeasonPositions = {};
 let presidentClubKey = null;
 let clubHubTab = 'overview';
 let clubCouncil = null;
+// Батч 1: недельные решения/события президента (данные — src/features/president/events.js)
+let presidentDecisions = null;
+// Батч 2: экономика/баланс/оценка сезона (всё вынесено в корень сейва,
+// PackedClub/PackedPlayer не меняются).
+let clubFinance = {};       // clubKey -> { season, seasonRevenue, ... }
+let seasonReviews = {};     // clubKey -> { v, latest, history[] }
+let presidentWarmup = { v: 1, until: 0, weeks: 0, clubKey: null, clubName: '', reason: '', count: 0 };
 let careerGoals = {};
 let careerCounters = {
     poachSuccess: 0,
@@ -263,6 +342,21 @@ let careerCounters = {
     newsCount: 0,
     idSeq: 0
 };
+// ===== v1.3: Зал Славы, лиговые рекорды, достижения =====
+// Всё хранится в корне сейва: PackedPlayer/PackedClub (v23) не меняются.
+const HALL_ENTRY_LIMIT = 72;
+const LEAGUE_RECORD_LIMIT = 10;
+let agencyHall = { v: 1, entries: [] };
+let leagueRecords = {};
+let achievements = { v: 1, unlocked: {}, counters: {} };
+// Временная карта сезона: сейвы/сухари вратарей. Сбрасывается вместе со статистикой.
+let seasonGoalie = {};
+// UI-состояние экрана «Зал Славы»
+let hallTab = 'agency';
+let hallLeague = 'NHL';
+let hallAchFilter = 'all';
+let hallSelectedEntry = null;
+
 let clubRosterFilter = 'all';
 let seasonSchedule = {};
 let expandedInfraCards = {};
@@ -270,6 +364,7 @@ let matchViewState = null;
 let matchQueue = null;
 let matchQueueOnFinish = null;
 let matchQueueIdx = 0;
+let matchReturnScreen = null;
 
 // XP
 let agentXP = 0;
@@ -709,6 +804,8 @@ function getClubSalaryLoad(club) {
 }
 
 function upgradeCost(cardKey, level) {
+    // v1.2: первый апгрейд офиса намеренно дешёвый — быстрый 3-й слот.
+    if (cardKey === 'office' && level === 1) return 1500;
     return Math.round(UPGRADE_CARDS[cardKey].baseCost * Math.pow(level, 2.5));
 }
 function weeklyCostForCard(cardKey) {
@@ -721,7 +818,7 @@ function totalWeeklyCost() {
     sum += getTrainerWeeklyCost(); // зарплата личного тренера
     return sum;
 }
-function getSlots() { return 5 + upgrades.office; }
+function getSlots() { return 1 + upgrades.office; }
 function getMaxRatingVisible() { return 30 + Math.round((upgrades.scouting - 1) * 2.9); }
 // Возвращает ширину "погрешности" (±X очков) для потенциала.
 // Ур. 1: ±25 (очень широко)
@@ -1142,6 +1239,64 @@ function getGaugeTone(value) {
     return 'red';
 }
 
+// v1.2.3: шанс подписания контракта в реальном времени.
+// >75% — зелёный, 40–75% — жёлтый, <40% — красный.
+function getContractChanceTone(chance) {
+    const v = clampNumber(Math.round(chance), 0, 100);
+    if (v > 75) return 'green';
+    if (v >= 40) return 'amber';
+    return 'red';
+}
+
+function getContractSuccessChance(player, offer) {
+    const o = normalizeOfferContract({ ...(offer || {}) });
+    const ev = evaluateContractPackage(player, o, 'club');
+    const budget = ev && ev.limits ? ev.limits.budget : getOfferClubBudget(o);
+    const annual = Math.max(1, (o.newSalary || 0) * 1000);
+    const packageCost = annual + Math.max(0, Math.round(o.signingBonus || 0)) + Math.round(annual * getOfferCommissionRate(o));
+    const overBudget = packageCost > budget || !!(ev && ev.hardReason === 'budget');
+    const chance = (overBudget || (ev && ev.hardReject))
+        ? 0
+        : clampNumber(Math.round((ev && ev.score) || 0), 0, 100);
+    return {
+        chance,
+        overBudget: !!overBudget,
+        tone: getContractChanceTone(chance),
+        verdict: ev ? ev.verdict : 'reject'
+    };
+}
+
+function buildContractChanceHTML(player, offer) {
+    const info = getContractSuccessChance(player, offer);
+    return `<div class="neg-chance neg-chance-${info.tone}" id="neg-chance" data-chance="${info.chance}">
+        <div class="neg-chance-head">
+            <span>🎯 ${LANG.t('Шанс подписания')}</span>
+            <b>${info.chance}%</b>
+        </div>
+        <div class="neg-chance-track"><i style="width:${info.chance}%"></i></div>
+        ${info.overBudget ? `<div class="neg-chance-warn">⚠ ${LANG.t('Превышен бюджет!')}</div>` : ''}
+    </div>`;
+}
+
+function updateNegotiationChance(player) {
+    const neg = activeNegotiation;
+    const el = document.getElementById('neg-chance');
+    if (!neg || !el || !player) return;
+    const info = getContractSuccessChance(player, neg.draft);
+    el.className = `neg-chance neg-chance-${info.tone}`;
+    el.setAttribute('data-chance', String(info.chance));
+    const head = el.querySelector('.neg-chance-head b');
+    if (head) head.textContent = info.chance + '%';
+    const fill = el.querySelector('.neg-chance-track i');
+    if (fill) fill.style.width = info.chance + '%';
+    const warn = el.querySelector('.neg-chance-warn');
+    if (info.overBudget && !warn) {
+        el.insertAdjacentHTML('beforeend', `<div class="neg-chance-warn">⚠ ${LANG.t('Превышен бюджет!')}</div>`);
+    } else if (!info.overBudget && warn) {
+        warn.remove();
+    }
+}
+
 // Терпение/интерес клуба в процентах для шкал HUD.
 function getNegotiationGauges(neg) {
     const patience = clampNumber(Math.round(neg.patience ?? 100), 0, 100);
@@ -1327,11 +1482,13 @@ const TRAINING_WEEKS = 2;
 // Сколько уникальных свободных агентов приходит за одно ТО.
 // Зависит от уровня агента: N = 5 + agentLevel * 2 (потолок 60).
 function getScoutedPlayersPerWindow() { return Math.min(60, 5 + agentLevel * 2); }
-// Базовый рейтинг и потенциал генерируемых талантов зависят от уровня Скаутинга
+// Базовый рейтинг и потенциал генерируемых талантов зависят от уровня Скаутинга.
+// v1.2.1: жёсткий потолок на 1 уровне — 53 (не выше 52–55). Таланты 70+
+// появляются только после прокачки скаутинга (примерно с 12–13 уровня).
 function getScoutingRatingRange() {
-    const s = upgrades.scouting;
-    const baseMin = Math.min(55, 15 + Math.round(s * 1.4));        // ур.1 → 16, ур.25 → 50
-    const baseMax = Math.min(88, 30 + Math.round(s * 2.2));        // ур.1 → 32, ур.25 → 85
+    const s = Math.max(1, Math.min(25, upgrades.scouting || 1));
+    const baseMin = Math.min(52, 28 + Math.round((s - 1) * 1.0));   // ур.1 → 28, ур.25 → 52
+    const baseMax = Math.min(88, 48 + Math.round((s - 1) * 1.67));  // ур.1 → 48, ур.13 → 68, ур.25 → 88
     return { min: baseMin, max: baseMax };
 }
 // Стартовая лояльность отсканенных игроков: ур.1 → 60, ур.25 → 95
@@ -1363,7 +1520,10 @@ function generateFreeAgentProfile(range, usedNames) {
     const generated = generatePlayerName(ln);
     const name = makeUniqueName(generated.name, ln, usedNames);
     const p = createPlayer(name, '', ln, pos, age, rating, potential, generated.nationality);
+    // v1.2.2: сырой юниор — свободный агент без клуба и без готового контракта.
     p.club = '';
+    p.contractYears = 0;
+    p.agentId = null;
     p.isScouted = true;
     p.loyalty = getScoutedLoyalty(); // повышенная лояльность — скауты наладили контакт
     return p;
@@ -2603,7 +2763,7 @@ function checkAllGoals() {
                         if (nextGoal.reward.xp) addXP(nextGoal.reward.xp);
                         if (nextGoal.reward.money) {
                             const cut = getCareerGoalMoney(nextGoal);
-                            agentMoney += cut;
+                            applyMoney(cut, `Награда за цель: ${nextGoal.title}`);
                             addNews(`💰 Награда за цель: +$${formatInt(cut)}`, "info");
                         }
                         if (nextGoal.reward.slot) upgrades.office = Math.min(25, upgrades.office + nextGoal.reward.slot);
@@ -2707,50 +2867,215 @@ function generateClubData() {
     }
 }
 
-function simulateClubEconomy() {
-    for (const key of Object.keys(clubData)) {
-        const c = clubData[key];
-        const u = c.upgrades;
-        // Билеты — зависят от стадиона и престижа
-        const capacity = getStadiumCapacity(u.stadium);
-        const tickets = Math.round(c.prestige * 800 * (0.5 + u.stadium * 0.03) * (capacity / 30000));
-        // Спонсоры — зависят от маркетинга
-        const sponsorCount = getMarketingSponsors(u.marketing);
-        const sponsorMult = getMarketingMultiplier(u.marketing);
-        const sponsors = Math.round(sponsorCount * 200000 * sponsorMult);
-        // ТВ — по лиге
-        let tv = 100000;
-        if (c.league === "NHL") tv = 3000000;
-        else if (c.league === "KHL") tv = 800000;
-        else if (c.league === "SHL" || c.league === "NL_Switzerland") tv = 500000;
-        else if (c.league === "AHL" || c.league === "Liiga") tv = 300000;
-        const income = tickets + sponsors + tv;
+// ============ БАТЧ 2: ЗАМКНУТЫЙ КОНТУР ЭКОНОМИКИ ============
+// Зеркало экономической истории клуба. Хранится в корне сейва, чтобы
+// PackedClub оставался прежним. Здесь же — решение совета о повышении
+// потолка кассы (по умолчанию потолок = 2× годовой выручки).
+function createEmptyClubFinance() {
+    return {
+        v: 1,
+        season: 0,
+        seasonRevenue: 0,
+        seasonExpenses: 0,
+        weeks: 0,
+        lastSeasonRevenue: 0,
+        lastSeasonExpenses: 0,
+        seasonBudget: 0,
+        excessTotal: 0,
+        capExceptionUntilSeason: 0
+    };
+}
 
-        // Расходы — только зарплаты игроков (без infrastructure)
-        const cps = players.filter(p => p.club === c.club && p.league === c.league);
-        const topSal = [...cps].sort((a,b) => b.salary - a.salary).slice(0,6);
-        const salaries = Math.round(topSal.reduce((s,p) => s + p.salary, 0) * 1000 / 52);
-        const staff = Math.round((u.training + u.medical + u.scouting) * 20000);
-        const expenses = salaries + staff;
-
-        c.budget += income - expenses;
-        c.weeklyIncome = income;
-        c.weeklyExpenses = expenses;
-        c.weeklyResult = income - expenses;
-
-        // Престиж: падает разово при входе в долг, растёт разово при выходе.
-        // Без этого клуб мог «упасть» в престиже навсегда, даже когда
-        // финансы давно выправились.
-        if (c.budget < 0) {
-            if (!c._wasInDebt) {
-                c.prestige = Math.max(20, c.prestige - 2);
-                c._wasInDebt = true;
-            }
-        } else if (c._wasInDebt && c.budget > 500000) {
-            c.prestige = Math.min(99, c.prestige + 1);
-            c._wasInDebt = false;
+function ensureClubFinance(key) {
+    if (!clubFinance[key]) clubFinance[key] = createEmptyClubFinance();
+    const fin = clubFinance[key];
+    if (fin.season !== currentSeason) {
+        if (fin.weeks > 0) {
+            fin.lastSeasonRevenue = fin.seasonRevenue;
+            fin.lastSeasonExpenses = fin.seasonExpenses;
         }
+        fin.season = currentSeason;
+        fin.seasonRevenue = 0;
+        fin.seasonExpenses = 0;
+        fin.weeks = 0;
     }
+    return fin;
+}
+
+function normalizeClubFinance(raw) {
+    const out = {};
+    if (!raw || typeof raw !== 'object') return out;
+    for (const [key, value] of Object.entries(raw)) {
+        if (!value || typeof value !== 'object') continue;
+        const fin = createEmptyClubFinance();
+        fin.season = Number.isFinite(value.season) ? value.season : 0;
+        fin.seasonRevenue = Math.max(0, Number(value.seasonRevenue) || 0);
+        fin.seasonExpenses = Math.max(0, Number(value.seasonExpenses) || 0);
+        fin.weeks = Math.max(0, Math.round(Number(value.weeks) || 0));
+        fin.lastSeasonRevenue = Math.max(0, Number(value.lastSeasonRevenue) || 0);
+        fin.lastSeasonExpenses = Math.max(0, Number(value.lastSeasonExpenses) || 0);
+        fin.seasonBudget = Math.max(0, Number(value.seasonBudget) || 0);
+        fin.excessTotal = Math.max(0, Number(value.excessTotal) || 0);
+        fin.capExceptionUntilSeason = Math.max(0, Number(value.capExceptionUntilSeason) || 0);
+        out[key] = fin;
+    }
+    return out;
+}
+
+function normalizeSeasonReviews(raw) {
+    const out = {};
+    if (!raw || typeof raw !== 'object') return out;
+    for (const [key, value] of Object.entries(raw)) {
+        if (!value || typeof value !== 'object') continue;
+        const history = Array.isArray(value.history)
+            ? value.history.filter(r => r && Number.isFinite(r.season)).slice(0, 20)
+            : [];
+        const latest = value.latest && Number.isFinite(value.latest.season)
+            ? value.latest
+            : (history[0] || null);
+        out[key] = { v: 1, latest, history };
+    }
+    return out;
+}
+
+function normalizePresidentWarmup(raw) {
+    const out = { v: 1, until: 0, weeks: 0, clubKey: null, clubName: '', reason: '', count: 0 };
+    if (!raw || typeof raw !== 'object') return out;
+    out.until = Math.max(0, Number(raw.until) || 0);
+    out.weeks = Math.max(0, Math.round(Number(raw.weeks) || 0));
+    out.clubKey = typeof raw.clubKey === 'string' ? raw.clubKey : null;
+    out.clubName = typeof raw.clubName === 'string' ? raw.clubName : '';
+    out.reason = typeof raw.reason === 'string' ? raw.reason : '';
+    out.count = Math.max(0, Math.round(Number(raw.count) || 0));
+    return out;
+}
+
+function getClubAnnualRevenue(clubOrKey) {
+    const key = typeof clubOrKey === 'string' ? clubOrKey : null;
+    const club = key ? clubData[key] : clubOrKey;
+    if (!club) return 0;
+    const fin = key ? ensureClubFinance(key) : (clubFinance[club.league + '_' + club.club] || null);
+    if (fin && fin.weeks > 0) return Math.round((fin.seasonRevenue / fin.weeks) * 52);
+    if (fin && fin.lastSeasonRevenue > 0) return Math.round(fin.lastSeasonRevenue);
+    if ((club.weeklyIncome || 0) > 0) return Math.round(club.weeklyIncome * 52);
+    return Math.round(getLeagueBudget(club.league) * 0.25);
+}
+
+// Поддержка фанатов: результат матчей + престиж + титулы.
+// У президентского клуба источником истины остаётся недельная шкала.
+function getClubFanbase(clubOrKey) {
+    const key = typeof clubOrKey === 'string' ? clubOrKey : (clubOrKey ? clubOrKey.league + '_' + clubOrKey.club : null);
+    if (key && key === presidentClubKey && presidentDecisions) {
+        return Math.max(0, Math.min(100, Math.round(presidentDecisions.meters.fans)));
+    }
+    const club = key ? clubData[key] : clubOrKey;
+    if (!club) return 50;
+    const form = Array.isArray(club.form) ? club.form : [];
+    const wins = form.filter(f => f === 'W').length;
+    const losses = form.filter(f => f === 'L').length;
+    const formPart = form.length > 0 ? ((wins - losses) / form.length) * 18 : 0;
+    const base = 32 + (club.prestige || 50) * 0.45 + Math.min(club.titles || 0, 20) * 0.4 + formPart;
+    return Math.max(20, Math.min(99, Math.round(base)));
+}
+
+function getClubCashCap(clubOrKey) {
+    return cashCapForRevenue(getClubAnnualRevenue(clubOrKey));
+}
+
+// Решение совета: разрешить временно держать кассу выше 2× выручки.
+// Без этого решения избыток автоматически выводится собственникам.
+function approveClubCashCap(clubKey, seasons = 1) {
+    const club = clubData[clubKey];
+    if (!club) return null;
+    const fin = ensureClubFinance(clubKey);
+    fin.capExceptionUntilSeason = currentSeason + Math.max(1, Math.round(seasons));
+    return { clubKey, untilSeason: fin.capExceptionUntilSeason };
+}
+
+function enforceClubCashCap(clubOrKey) {
+    const key = typeof clubOrKey === 'string' ? clubOrKey : (clubOrKey ? clubOrKey.league + '_' + clubOrKey.club : null);
+    const club = key ? clubData[key] : clubOrKey;
+    if (!club || !key) return { capped: false, cap: 0, excess: 0 };
+    const fin = ensureClubFinance(key);
+    const annualRevenue = getClubAnnualRevenue(club);
+    const cap = cashCapForRevenue(annualRevenue);
+    const approved = fin.capExceptionUntilSeason >= currentSeason;
+    if (!approved && Number.isFinite(cap) && cap > 0 && club.budget > cap) {
+        const excess = club.budget - cap;
+        club.budget = cap;
+        fin.excessTotal = (fin.excessTotal || 0) + excess;
+        if (key === presidentClubKey && excess >= 100000) {
+            addNews(`🏦 Избыток кассы сверх 2× выручки выведен собственникам: ${formatMoney(excess)}`, 'info');
+        }
+        return { capped: true, cap, annualRevenue, excess };
+    }
+    return { capped: false, cap, annualRevenue, excess: 0 };
+}
+
+function getClubMatchTactic(clubKey) {
+    if (clubKey !== presidentClubKey || !presidentDecisions) return CLUB_TACTICS.balanced;
+    return getTacticMods(tacticForStance(presidentDecisions.stance));
+}
+
+function simulateClubEconomyForClub(key) {
+    const c = clubData[key];
+    if (!c) return null;
+    const u = c.upgrades;
+    const fin = ensureClubFinance(key);
+    // Билеты — зависят от стадиона, престижа и реальной поддержки фанатов.
+    const capacity = getStadiumCapacity(u.stadium);
+    const fanbase = getClubFanbase(c);
+    const fanMult = 0.70 + (fanbase / 100) * 0.60;
+    const tickets = Math.round(c.prestige * 800 * (0.5 + u.stadium * 0.03) * (capacity / 30000) * fanMult);
+    // Спонсоры — зависят от маркетинга
+    const sponsorCount = getMarketingSponsors(u.marketing);
+    const sponsorMult = getMarketingMultiplier(u.marketing);
+    const sponsors = Math.round(sponsorCount * 200000 * sponsorMult);
+    // ТВ — по лиге
+    let tv = 100000;
+    if (c.league === "NHL") tv = 3000000;
+    else if (c.league === "KHL") tv = 800000;
+    else if (c.league === "SHL" || c.league === "NL_Switzerland") tv = 500000;
+    else if (c.league === "AHL" || c.league === "Liiga") tv = 300000;
+    const income = tickets + sponsors + tv;
+
+    // Расходы — только зарплаты игроков (без infrastructure)
+    const cps = players.filter(p => p.club === c.club && p.league === c.league);
+    const topSal = [...cps].sort((a,b) => b.salary - a.salary).slice(0,6);
+    const salaries = Math.round(topSal.reduce((s,p) => s + p.salary, 0) * 1000 / 52);
+    const staff = Math.round((u.training + u.medical + u.scouting) * 20000);
+    const expenses = salaries + staff;
+
+    c.budget += income - expenses;
+    c.weeklyIncome = income;
+    c.weeklyExpenses = expenses;
+    c.weeklyResult = income - expenses;
+
+    fin.seasonRevenue += income;
+    fin.seasonExpenses += expenses;
+    fin.weeks++;
+
+    // Престиж: падает разово при входе в долг, растёт разово при выходе.
+    if (c.budget < 0) {
+        if (!c._wasInDebt) {
+            c.prestige = Math.max(20, c.prestige - 2);
+            c._wasInDebt = true;
+        }
+    } else if (c._wasInDebt && c.budget > 500000) {
+        c.prestige = Math.min(99, c.prestige + 1);
+        c._wasInDebt = false;
+    }
+
+    const capInfo = enforceClubCashCap(key);
+    return {
+        key, income, expenses, result: income - expenses, fanbase,
+        annualRevenue: getClubAnnualRevenue(c), cap: capInfo.cap,
+        capped: capInfo.capped, excess: capInfo.excess, budget: c.budget
+    };
+}
+
+function simulateClubEconomy() {
+    for (const key of Object.keys(clubData)) simulateClubEconomyForClub(key);
 }
 
 function calculateDividends() {
@@ -2766,7 +3091,7 @@ function calculateDividends() {
             // Ур.1 = 1.5%, Ур.10 = 2.4%, Ур.20 = 3.3%
             const divPct = 0.015 + (agentLevel - 1) * 0.001;
             const d = Math.round(wr * (h.shares / 100) * divPct);
-            if (d > 0) { total += d; addNews(`👑 Дивиденды от ${data.club}: +$${formatInt(d)}`, "positive"); }
+            if (d > 0) { total += d; logTransaction('income', d, `Дивиденды: ${data.club}`); addNews(`👑 Дивиденды от ${data.club}: +${formatInt(d)}`, "positive"); }
         }
     }
     if (total > 0) agentMoney += total;
@@ -2780,10 +3105,9 @@ function getIncomeMultiplier() {
 }
 
 function getEventMoneyMultiplier() {
-    // Множитель для РАЗОВЫХ сумм: событий, цепочек, штрафов, наград за цели.
-    // Ур.1 = ×0.08, Ур.5 = ×0.36, Ур.10 = ×0.71, Ур.15 = ×1.06, Ур.20 = ×1.41
-    // Рост медленный, чтобы события оставались «приятным бонусом», а не основой дохода.
-    return 0.08 + (agentLevel - 1) * 0.07;
+    // v1.2: единая формула вынесена в event-rewards.js, чтобы тесты
+    // проверяли те же капы, что и боевой код.
+    return getEventMoneyMultiplierForLevel(agentLevel);
 }
 
 function scaleEventMoney(amount) {
@@ -2813,7 +3137,7 @@ function payTransferCommission(player, oldSalary, newSalary) {
         // Потолок на разовый трансфер: на низком уровне агента не больше $100K
         const cap = 50000 + agentLevel * 25000;
         if (comm > cap) comm = cap;
-        if (comm > 0) { agentMoney += comm; addNews(`💰 Комиссия за переход ${player.name}: +$${formatInt(comm)}`, "positive"); }
+        if (comm > 0) { applyMoney(comm, `Комиссия за переход: ${player.name}`); addNews(`💰 Комиссия за переход ${player.name}: +${formatInt(comm)}`, "positive"); }
     }
 }
 
@@ -2960,21 +3284,28 @@ function checkTaskProgress(club, task, seasonArg) {
 function simulateAIUpgrades() {
     let totalUpgrades = 0;
     for (const key of Object.keys(clubData)) {
-        if (key === presidentClubKey) continue; // твой клуб не качается автоматически
+        if (key === presidentClubKey) continue; // твой клуб качается только за твои решения
         const club = clubData[key];
-        if (!club.upgrades) continue;
+        if (!club || !club.upgrades) continue;
 
-        // Раз в 3 сезона (33% шанс) клуб получает +1 уровень
-        if (simRandom() > 0.33) continue;
-
-        // Выбираем случайную карточку, которая ещё не на максимуме
-        const cardKeys = Object.keys(CLUB_UPGRADE_CARDS).filter(k => (club.upgrades[k] || 1) < 25);
-        if (cardKeys.length === 0) continue;
-
-        const pick = simChoice(cardKeys);
-        club.upgrades[pick] = (club.upgrades[pick] || 1) + 1;
-        totalUpgrades++;
+        // Батч 2: ИИ-клубы reinvestируют деньги в штат/инфраструктуру.
+        // Это тот же контур «деньги → штат → сила», что и у игрока.
+        const reserve = Math.max(getLeagueBudget(club.league) * 0.05, (club.weeklyExpenses || 0) * 4);
+        const attempts = club.budget > reserve * 2 ? 2 : 1;
+        for (let n = 0; n < attempts; n++) {
+            if (simRandom() > 0.70) continue;
+            const cardKeys = Object.keys(CLUB_UPGRADE_CARDS).filter(k => (club.upgrades[k] || 1) < 25);
+            if (cardKeys.length === 0) break;
+            const pick = simChoice(cardKeys);
+            const level = club.upgrades[pick] || 1;
+            const cost = clubUpgradeCost(pick, level, club.league);
+            if (club.budget < cost + reserve) continue;
+            club.budget -= cost;
+            club.upgrades[pick] = level + 1;
+            totalUpgrades++;
+        }
     }
+    if (totalUpgrades > 0) refreshTeamStrengths();
     if (window.DEBUG) console.log(`🏗 AI-клубы улучшились: ${totalUpgrades} карточек`);
 }
 
@@ -3047,6 +3378,11 @@ function getEffectiveTeamStrength(lk, club) {
     if (eff && Number.isFinite(eff.until) && eff.until >= worldClockKey()) {
         const mult = Number(eff.mult);
         if (Number.isFinite(mult)) base *= mult;
+    }
+    // Батч 1: недельный курс президента влияет на силу его клуба.
+    if (presidentClubKey === lk + '_' + club && presidentDecisions && presidentDecisions.stance) {
+        const stance = getPresidentStanceData(presidentDecisions.stance);
+        if (stance && Number.isFinite(stance.strengthMult)) base *= stance.strengthMult;
     }
     return Math.max(0.35, Math.min(1.0, base));
 }
@@ -3233,14 +3569,32 @@ function recalculateStockPrice(club) {
 function updateAllStockPrices() {
     for (const key of Object.keys(clubData)) {
         const c = clubData[key];
-        const r = simRandom();
-        c.form.push(r < 0.45 ? 'W' : r < 0.75 ? 'L' : 'OT');
-        if (c.form.length > 5) c.form.shift();
+        // Форма клуба обновляется по реальным результатам в simulateStandingsWeek.
+        // Здесь только переоценка цены — без второго случайного броска.
         recalculateStockPrice(c);
     }
 }
 
 function getPortfolioKey(club, lk) { return lk + "_" + club; }
+
+// Защита от старых/повреждённых сейвов: доля клуба не может быть < 0 или > 100%.
+function normalizePortfolio(raw) {
+    const out = {};
+    if (!raw || typeof raw !== 'object') return out;
+    for (const [key, pos] of Object.entries(raw)) {
+        if (!pos || typeof pos !== 'object') continue;
+        const shares = Number(pos.shares);
+        if (!Number.isFinite(shares) || shares <= 0.001) continue;
+        const avgPrice = Number(pos.avgPrice);
+        out[key] = {
+            ...pos,
+            shares: Math.min(100, shares),
+            avgPrice: Number.isFinite(avgPrice) && avgPrice > 0 ? avgPrice : 0
+        };
+    }
+    return out;
+}
+
 function getTotalSharesCount() { let t = 0; for (const k of Object.keys(myPortfolio)) t += myPortfolio[k].shares; return t; }
 
 // ============ 11. ТАБЛИЦЫ ============
@@ -3284,6 +3638,14 @@ function computeClubStrength(lk, club, rosterArg) {
     const avgAll = avg(roster);
     const bestG = goalies.length ? Math.max(...goalies.map(p => p.rating)) : Math.min(70, avgAll);
     let raw = avgTop6 * 0.55 + avgAll * 0.20 + bestG * 0.25;
+    // Батч 2: деньги → штат → сила. Уровни тренировок/медицины/скаутинга
+    // дают детерминированный множитель 0.97…1.03 (без RNG).
+    const clubInfo = clubData[lk + '_' + club];
+    if (clubInfo && clubInfo.upgrades) {
+        const staffAvg = ((clubInfo.upgrades.training || 1) + (clubInfo.upgrades.medical || 1) + (clubInfo.upgrades.scouting || 1)) / 3;
+        const staffPart = Math.max(0, Math.min(1, (staffAvg - 1) / 24));
+        raw *= 0.97 + staffPart * 0.06;
+    }
     // Небольшая детерминированная вариативность вместо старого simRandom-шума.
     raw += ((hashString(lk + '|' + club) % 1000) / 1000 - 0.5) * 2;
     return Math.max(0.35, Math.min(1.0, Math.round(raw) / 100));
@@ -3325,6 +3687,27 @@ function sortStandingsFn(a,b) {
     return (b.gf||0) - (a.gf||0);
 }
 
+function updateClubFormFromResult(lk, homeClub, awayClub, result) {
+    const homeWon = result.homeScore > result.awayScore;
+    const setForm = (club, outcome) => {
+        const c = clubData[lk + '_' + club];
+        if (!c) return;
+        c.form.push(outcome);
+        if (c.form.length > 5) c.form.shift();
+    };
+    setForm(homeClub, homeWon ? 'W' : 'L');
+    setForm(awayClub, homeWon ? 'L' : 'W');
+    // Результат → фанаты президентского клуба (без RNG).
+    if (presidentClubKey && presidentDecisions) {
+        const key = presidentClubKey;
+        if (key === lk + '_' + homeClub) {
+            presidentDecisions.meters.fans = Math.max(0, Math.min(100, presidentDecisions.meters.fans + (homeWon ? 1 : -1)));
+        } else if (key === lk + '_' + awayClub) {
+            presidentDecisions.meters.fans = Math.max(0, Math.min(100, presidentDecisions.meters.fans + (homeWon ? -1 : 1)));
+        }
+    }
+}
+
 function simulateStandingsWeek() {
     // Индекс «лига+клуб → игроки» строится один раз за неделю,
     // чтобы не фильтровать 4500+ игроков на каждый матч
@@ -3336,6 +3719,9 @@ function simulateStandingsWeek() {
         weekMatches.forEach(m => {
             const result = simulateMatchWithDetails(m, lk, index);
             m.result = result;
+            // Батч 2: форма клуба теперь берётся из реальных результатов,
+            // а не из отдельного случайного броска.
+            updateClubFormFromResult(lk, m.home, m.away, result);
         });
     }
     simulateClubEconomy();
@@ -3375,9 +3761,14 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
     if (dataH && dataH.upgrades) sH = Math.min(1.0, sH * (1 + getStadiumHomeBonus(dataH.upgrades.stadium || 1)));
     if (dataA && dataA.upgrades) sA = Math.min(1.0, sA * (1 + getStadiumHomeBonus(dataA.upgrades.stadium || 1)));
 
+    // Батч 2: тактика президентского клуба (курс недели). Для остальных —
+    // balanced с множителями 1.0, поэтому их матчи не меняются.
+    const tacticH = getClubMatchTactic(lk + '_' + homeClub);
+    const tacticA = getClubMatchTactic(lk + '_' + awayClub);
+
     // Счёт
-    let goalsH = Math.max(0, Math.floor(simRandom() * 4 * sH + simRandom() * 3 - 0.5));
-    let goalsA = Math.max(0, Math.floor(simRandom() * 4 * sA + simRandom() * 3 - 0.5));
+    let goalsH = Math.max(0, Math.floor(simRandom() * 4 * sH * tacticH.attack * (2 - tacticA.defense) + simRandom() * 3 - 0.5));
+    let goalsA = Math.max(0, Math.floor(simRandom() * 4 * sA * tacticA.attack * (2 - tacticH.defense) + simRandom() * 3 - 0.5));
 
     // Овертайм если ничья
     let isOT = false, isSO = false;
@@ -3548,6 +3939,7 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
         gr += (simRandom() - 0.5) * 0.4;
         goalieHome.stats.ratingSum += Math.max(1, Math.min(10, gr));
         goalieHome.stats.pim += simInt(0, 2);
+        recordGoalieAppearance(goalieHome, goalsA);
     }
     if (goalieAway) {
         goalieAway.stats.gp++;
@@ -3558,6 +3950,7 @@ function simulateMatchWithDetails(match, lk, clubIndex) {
         gr += (simRandom() - 0.5) * 0.4;
         goalieAway.stats.ratingSum += Math.max(1, Math.min(10, gr));
         goalieAway.stats.pim += simInt(0, 2);
+        recordGoalieAppearance(goalieAway, goalsH);
     }
     // === КОНЕЦ ФИКСА ===
 
@@ -3648,6 +4041,587 @@ function resetWorldPlayerStats() {
     players.forEach(p => {
         p.stats = {gp:0,goals:0,assists:0,pim:0,plusMinus:0,ratingSum:0,goalsAgainst:0};
     });
+    // v1.3: вратарская статистика сезона (сейвы/сухари) живёт только до конца сезона.
+    seasonGoalie = {};
+}
+
+// =====================================================================
+// v1.3: ЗАЛ СЛАВЫ АГЕНТСТВА, ЛИГОВЫЕ РЕКОРДЫ И ДОСТИЖЕНИЯ
+// Всё живёт в корне сейва. PackedPlayer/PackedClub (v23) не меняются.
+// =====================================================================
+
+const LEAGUE_RECORD_CATS = ['goals', 'assists', 'points'];
+const LEAGUE_GOALIE_CATS = ['shutouts', 'saves'];
+
+function blankLeagueRecord() {
+    return {
+        v: 1,
+        updatedSeason: 0,
+        cats: { goals: [], assists: [], points: [], goalie: { shutouts: [], saves: [] } }
+    };
+}
+
+function normalizeRecordRows(rows) {
+    if (!Array.isArray(rows)) return [];
+    const map = new Map();
+    rows.forEach(row => {
+        if (!row || typeof row.name !== 'string' || !row.name) return;
+        const value = Math.max(0, Math.round(Number(row.value) || 0));
+        if (value <= 0) return;
+        const item = {
+            name: row.name,
+            club: typeof row.club === 'string' ? row.club : '',
+            season: Math.round(Number(row.season) || 0),
+            value
+        };
+        const prev = map.get(item.name);
+        if (!prev || item.value > prev.value || (item.value === prev.value && item.season > prev.season)) {
+            map.set(item.name, item);
+        }
+    });
+    return [...map.values()]
+        .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+        .slice(0, LEAGUE_RECORD_LIMIT);
+}
+
+function normalizeLeagueRecords(raw) {
+    const out = {};
+    if (!raw || typeof raw !== 'object') return out;
+    for (const lk of Object.keys(LEAGUE_DATA)) {
+        const r = raw[lk];
+        if (!r) continue;
+        const rec = blankLeagueRecord();
+        rec.updatedSeason = Math.max(0, Math.round(Number(r.updatedSeason) || 0));
+        LEAGUE_RECORD_CATS.forEach(cat => {
+            rec.cats[cat] = normalizeRecordRows(r.cats && r.cats[cat]);
+        });
+        const g = (r.cats && r.cats.goalie) || {};
+        rec.cats.goalie.shutouts = normalizeRecordRows(g.shutouts);
+        rec.cats.goalie.saves = normalizeRecordRows(g.saves);
+        out[lk] = rec;
+    }
+    return out;
+}
+
+function normalizeAgencyHall(raw) {
+    const out = { v: 1, entries: [] };
+    if (!raw || !Array.isArray(raw.entries)) return out;
+    raw.entries.forEach(e => {
+        if (!e || typeof e.name !== 'string' || !e.name) return;
+        const num = (v) => Math.max(0, Math.round(Number(v) || 0));
+        out.entries.push({
+            name: e.name,
+            position: typeof e.position === 'string' ? e.position : 'C',
+            nationality: e.nationality || null,
+            status: ['active', 'retired', 'released'].includes(e.status) ? e.status : 'retired',
+            firstSeason: num(e.firstSeason) || currentSeason,
+            lastSeason: num(e.lastSeason) || currentSeason,
+            bestRating: num(e.bestRating),
+            gp: num(e.gp),
+            goals: num(e.goals),
+            assists: num(e.assists),
+            points: num(e.points) || (num(e.goals) + num(e.assists)),
+            gaa: Math.max(0, Number(e.gaa) || 0),
+            bestGoals: num(e.bestGoals),
+            bestAssists: num(e.bestAssists),
+            bestPoints: num(e.bestPoints),
+            bestShutouts: num(e.bestShutouts),
+            bestSaves: num(e.bestSaves),
+            trophies: Array.isArray(e.trophies) ? e.trophies.filter(t => t && t.name).slice(-20) : [],
+            awards: Array.isArray(e.awards) ? e.awards.filter(a => a && a.name).slice(-20) : [],
+            clubs: Array.isArray(e.clubs) ? e.clubs.filter(c => c && c.club).slice(0, 12) : []
+        });
+    });
+    out.entries.sort((a, b) => computeHallLegacy(b) - computeHallLegacy(a));
+    out.entries = out.entries.slice(0, HALL_ENTRY_LIMIT);
+    return out;
+}
+
+function normalizeAchievements(raw) {
+    const out = { v: 1, unlocked: {}, counters: {} };
+    if (raw && raw.unlocked && typeof raw.unlocked === 'object' && !Array.isArray(raw.unlocked)) {
+        Object.entries(raw.unlocked).forEach(([id, val]) => {
+            if (!val) return;
+            out.unlocked[id] = {
+                season: Math.round(Number(val.season) || currentSeason),
+                week: Math.round(Number(val.week) || currentWeek)
+            };
+        });
+    }
+    return out;
+}
+
+// ---------- Имена для виртуальной истории лиг (детерминированно) ----------
+const RECORD_POOL_BY_FLAG = (() => {
+    const map = {};
+    Object.entries(POOL_TO_FLAG).forEach(([pool, flag]) => { if (!map[flag]) map[flag] = pool; });
+    return map;
+})();
+
+function pickVirtualRecordName(rng, lk) {
+    const info = LEAGUE_DATA[lk] || {};
+    const flag = String(info.country || '🇷🇺').split(' ')[0];
+    const key = RECORD_POOL_BY_FLAG[flag] || 'RU';
+    const pool = NAME_POOLS[key] || NAME_POOLS.RU;
+    const first = pool.first[Math.floor(rng() * pool.first.length)] || 'Alex';
+    const last = pool.last[Math.floor(rng() * pool.last.length)] || 'Legend';
+    return toLatin(`${first} ${last}`);
+}
+
+function generateVirtualLeagueRecords() {
+    const out = {};
+    const seasonsBack = 6;
+    for (const lk of Object.keys(LEAGUE_DATA)) {
+        const rec = blankLeagueRecord();
+        const clubs = getAllClubs(lk);
+        if (!clubs.length) { out[lk] = rec; continue; }
+        const rng = makeSeededRNG(hashString(`records|${lk}|${currentSeason}`));
+        const pickClub = () => clubs[Math.floor(rng() * clubs.length)];
+        const used = new Set();
+        const uniqueName = () => {
+            let name = '';
+            let guard = 0;
+            do {
+                name = pickVirtualRecordName(rng, lk);
+                guard++;
+            } while (used.has(name) && guard < 40);
+            used.add(name);
+            return name;
+        };
+        const tier = Math.max(0.35, Math.min(1, ((LEAGUE_DATA[lk].max || 70) / 99)));
+        const rows = (lo, hi, count = 7) => {
+            const list = [];
+            for (let i = 0; i < count; i++) {
+                const value = Math.max(1, Math.round((lo + rng() * (hi - lo)) * tier + rng() * 4));
+                list.push({
+                    name: uniqueName(),
+                    club: pickClub(),
+                    season: currentSeason - (1 + Math.floor(rng() * seasonsBack)),
+                    value
+                });
+            }
+            return normalizeRecordRows(list);
+        };
+        rec.cats.goals = rows(30, 52);
+        rec.cats.assists = rows(34, 60);
+        rec.cats.points = rows(60, 96);
+        rec.cats.goalie.shutouts = rows(8, 16, 6);
+        rec.cats.goalie.saves = rows(900, 1800, 6);
+        rec.updatedSeason = 0;
+        out[lk] = rec;
+    }
+    return out;
+}
+
+// ---------- Лиговые рекорды ----------
+function statValueForRecord(p, cat) {
+    const s = (p && p.stats) || {};
+    if (cat === 'goals') return s.goals || 0;
+    if (cat === 'assists') return s.assists || 0;
+    return (s.goals || 0) + (s.assists || 0);
+}
+
+function mergeRecordList(list, candidates) {
+    const map = new Map();
+    (Array.isArray(list) ? list : []).forEach(e => {
+        if (e && typeof e.name === 'string' && e.name) map.set(e.name, { ...e });
+    });
+    (candidates || []).forEach(c => {
+        if (!c || typeof c.name !== 'string' || !c.name) return;
+        const value = Math.round(Number(c.value) || 0);
+        if (value <= 0) return;
+        const prev = map.get(c.name);
+        if (!prev || value > prev.value || (value === prev.value && (c.season || 0) > (prev.season || 0))) {
+            map.set(c.name, { name: c.name, club: c.club || '', season: c.season || currentSeason, value });
+        }
+    });
+    return [...map.values()]
+        .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+        .slice(0, LEAGUE_RECORD_LIMIT);
+}
+
+// Вызывается в конце сезона, когда stats всех игроков ещё живые.
+function updateLeagueRecords(force = false) {
+    if (!leagueRecords || typeof leagueRecords !== 'object') leagueRecords = {};
+    for (const lk of Object.keys(LEAGUE_DATA)) {
+        const rec = leagueRecords[lk] || (leagueRecords[lk] = blankLeagueRecord());
+        if (!force && rec.updatedSeason === currentSeason) continue;
+        const rows = (players || []).filter(p =>
+            p && p.league === lk && p.club && p.stats && p.stats.gp > 0
+        );
+        LEAGUE_RECORD_CATS.forEach(cat => {
+            rec.cats[cat] = mergeRecordList(rec.cats[cat], rows.map(p => ({
+                name: p.name,
+                club: p.club,
+                season: currentSeason,
+                value: statValueForRecord(p, cat)
+            })));
+        });
+        const goalies = rows.filter(p => p.position === 'G' && seasonGoalie[p.name]);
+        rec.cats.goalie.shutouts = mergeRecordList(rec.cats.goalie.shutouts, goalies.map(p => ({
+            name: p.name,
+            club: p.club,
+            season: currentSeason,
+            value: (seasonGoalie[p.name] || {}).shutouts || 0
+        })));
+        rec.cats.goalie.saves = mergeRecordList(rec.cats.goalie.saves, goalies.map(p => ({
+            name: p.name,
+            club: p.club,
+            season: currentSeason,
+            value: (seasonGoalie[p.name] || {}).saves || 0
+        })));
+        rec.updatedSeason = currentSeason;
+    }
+    invalidateHallRecordCache();
+}
+
+// Детерминированная запись вратаря: без simRandom, чтобы не сдвигать сезон.
+function recordGoalieAppearance(goalie, goalsAgainst) {
+    if (!goalie || !goalie.name) return;
+    const rec = seasonGoalie[goalie.name] || (seasonGoalie[goalie.name] = { gp: 0, saves: 0, shutouts: 0 });
+    const rating = Number(goalie.rating) || 50;
+    const ga = Math.max(0, Math.round(Number(goalsAgainst) || 0));
+    const shots = Math.max(ga, Math.round(22 + (rating - 50) * 0.12 + Math.max(0, 8 - ga) * 0.5));
+    rec.gp += 1;
+    rec.saves += Math.max(0, shots - ga);
+    if (ga === 0) rec.shutouts += 1;
+}
+
+// Кэш: сколько рекордов у имени. Пересобирается после обновления таблиц.
+let hallRecordCountCache = null;
+
+function invalidateHallRecordCache() {
+    hallRecordCountCache = null;
+}
+
+function getHallRecordCount(name) {
+    if (!name) return 0;
+    if (!hallRecordCountCache) {
+        const counts = Object.create(null);
+        Object.keys(leagueRecords || {}).forEach(lk => {
+            const rec = leagueRecords[lk];
+            if (!rec || !rec.cats) return;
+            LEAGUE_RECORD_CATS.forEach(cat => {
+                (rec.cats[cat] || []).forEach(row => {
+                    if (row && row.name) counts[row.name] = (counts[row.name] || 0) + 1;
+                });
+            });
+            LEAGUE_GOALIE_CATS.forEach(cat => {
+                (((rec.cats.goalie || {})[cat]) || []).forEach(row => {
+                    if (row && row.name) counts[row.name] = (counts[row.name] || 0) + 1;
+                });
+            });
+        });
+        hallRecordCountCache = counts;
+    }
+    return hallRecordCountCache[name] || 0;
+}
+
+function getClientRecordRows(name) {
+    const rows = [];
+    if (!name) return rows;
+    Object.keys(leagueRecords || {}).forEach(lk => {
+        const rec = leagueRecords[lk];
+        if (!rec || !rec.cats) return;
+        LEAGUE_RECORD_CATS.forEach(cat => {
+            (rec.cats[cat] || []).forEach((row, idx) => {
+                if (row.name === name) rows.push({ league: lk, cat, place: idx + 1, value: row.value, season: row.season });
+            });
+        });
+        LEAGUE_GOALIE_CATS.forEach(cat => {
+            (((rec.cats.goalie || {})[cat]) || []).forEach((row, idx) => {
+                if (row.name === name) {
+                    rows.push({ league: lk, cat: 'goalie_' + cat, place: idx + 1, value: row.value, season: row.season });
+                }
+            });
+        });
+    });
+    return rows;
+}
+
+function isMyClientName(name) {
+    if (!name) return false;
+    return (myRoster || []).some(p => p && p.name === name) ||
+        ((agencyHall && agencyHall.entries) || []).some(e => e && e.name === name);
+}
+
+// ---------- Зал Славы агентства ----------
+function computeHallLegacy(entry) {
+    if (!entry) return 0;
+    const records = getHallRecordCount(entry.name);
+    return Math.round(
+        (entry.points || 0) +
+        (entry.goals || 0) * 1.5 +
+        ((entry.trophies || []).length) * 40 +
+        ((entry.awards || []).length) * 15 +
+        (entry.bestRating || 0) * 2 +
+        records * 50 +
+        (entry.bestShutouts || 0) * 6 +
+        (entry.bestSaves || 0) * 0.01
+    );
+}
+
+function buildHallEntry(p, status, existing) {
+    const hist = Array.isArray(p.seasonHistory) ? p.seasonHistory : [];
+    const acc = { gp: 0, goals: 0, assists: 0, goalsAgainst: 0 };
+    let bestGoals = 0, bestAssists = 0, bestPoints = 0;
+    const clubs = [];
+    const seenClubs = new Set();
+    const addClub = (club, league, season) => {
+        if (!club) return;
+        const key = `${league || ''}|${club}`;
+        if (seenClubs.has(key)) return;
+        seenClubs.add(key);
+        clubs.push({ club, league: league || '', season: season || 0 });
+    };
+    hist.forEach(h => {
+        const gp = Math.max(0, Number(h.gp) || 0);
+        const g = Math.max(0, Number(h.goals) || 0);
+        const a = Math.max(0, Number(h.assists) || 0);
+        acc.gp += gp; acc.goals += g; acc.assists += a;
+        acc.goalsAgainst += Math.max(0, Number(h.goalsAgainst) || 0);
+        bestGoals = Math.max(bestGoals, g);
+        bestAssists = Math.max(bestAssists, a);
+        bestPoints = Math.max(bestPoints, g + a);
+        addClub(h.club, h.league, h.season);
+    });
+    const s = p.stats || {};
+    const liveGp = Math.max(0, Number(s.gp) || 0);
+    const liveGoals = Math.max(0, Number(s.goals) || 0);
+    const liveAssists = Math.max(0, Number(s.assists) || 0);
+    acc.gp += liveGp; acc.goals += liveGoals; acc.assists += liveAssists;
+    acc.goalsAgainst += Math.max(0, Number(s.goalsAgainst) || 0);
+    bestGoals = Math.max(bestGoals, liveGoals);
+    bestAssists = Math.max(bestAssists, liveAssists);
+    bestPoints = Math.max(bestPoints, liveGoals + liveAssists);
+    addClub(p.club, p.league, currentSeason);
+    const sg = seasonGoalie[p.name] || null;
+    const gaa = acc.gp > 0 ? Math.round((acc.goalsAgainst / acc.gp) * 100) / 100 : 0;
+    return {
+        name: p.name,
+        position: p.position || 'C',
+        nationality: p.nationality || getPlayerCountry(p) || null,
+        status,
+        firstSeason: (existing && existing.firstSeason) || currentSeason,
+        lastSeason: currentSeason,
+        bestRating: Math.max((existing && existing.bestRating) || 0, Number(p.rating) || 0),
+        gp: acc.gp,
+        goals: acc.goals,
+        assists: acc.assists,
+        points: acc.goals + acc.assists,
+        gaa,
+        bestGoals,
+        bestAssists,
+        bestPoints,
+        bestShutouts: Math.max((existing && existing.bestShutouts) || 0, sg ? sg.shutouts || 0 : 0),
+        bestSaves: Math.max((existing && existing.bestSaves) || 0, sg ? sg.saves || 0 : 0),
+        trophies: (p.trophies || []).slice(-20).map(t => ({ name: t.name, season: t.season, club: t.club })),
+        awards: (p.awards || []).slice(-20).map(a => ({ name: a.name, season: a.season, league: a.league })),
+        clubs: clubs.slice(0, 12)
+    };
+}
+
+function upsertAgencyHallEntry(p, status = 'active') {
+    if (!p || !p.name) return null;
+    if (!agencyHall || !Array.isArray(agencyHall.entries)) agencyHall = { v: 1, entries: [] };
+    const idx = agencyHall.entries.findIndex(e => e && e.name === p.name);
+    const existing = idx >= 0 ? agencyHall.entries[idx] : null;
+    const finalStatus = (existing && existing.status === 'retired' && status !== 'retired')
+        ? 'retired' : status;
+    const entry = buildHallEntry(p, finalStatus, existing);
+    if (idx >= 0) agencyHall.entries[idx] = entry;
+    else agencyHall.entries.push(entry);
+    agencyHall.entries.sort((a, b) => computeHallLegacy(b) - computeHallLegacy(a));
+    if (agencyHall.entries.length > HALL_ENTRY_LIMIT) agencyHall.entries.length = HALL_ENTRY_LIMIT;
+    return entry;
+}
+
+// Постоянный снимок текущих клиентов: экран живой ещё до завершения карьеры.
+function syncAgencyHallActive() {
+    if (!Array.isArray(myRoster)) return;
+    // myRoster — это и есть клиенты агентства (agentId может быть -1/null в тестах).
+    myRoster.forEach(p => {
+        if (p && p.name) upsertAgencyHallEntry(p, 'active');
+    });
+}
+
+// ---------- Достижения ----------
+function getClientSeasonBests() {
+    const best = { goals: 0, assists: 0, points: 0, shutouts: 0, saves: 0 };
+    const scan = (g, a) => {
+        const goals = Math.max(0, Number(g) || 0);
+        const assists = Math.max(0, Number(a) || 0);
+        best.goals = Math.max(best.goals, goals);
+        best.assists = Math.max(best.assists, assists);
+        best.points = Math.max(best.points, goals + assists);
+    };
+    (myRoster || []).forEach(p => {
+        (p.seasonHistory || []).forEach(h => scan(h.goals, h.assists));
+        scan((p.stats || {}).goals, (p.stats || {}).assists);
+        const sg = seasonGoalie[p.name];
+        if (sg) {
+            best.shutouts = Math.max(best.shutouts, sg.shutouts || 0);
+            best.saves = Math.max(best.saves, sg.saves || 0);
+        }
+    });
+    ((agencyHall && agencyHall.entries) || []).forEach(e => {
+        best.goals = Math.max(best.goals, e.bestGoals || 0);
+        best.assists = Math.max(best.assists, e.bestAssists || 0);
+        best.points = Math.max(best.points, e.bestPoints || 0);
+        best.shutouts = Math.max(best.shutouts, e.bestShutouts || 0);
+        best.saves = Math.max(best.saves, e.bestSaves || 0);
+    });
+    return best;
+}
+
+function buildAchievementContext() {
+    const best = getClientSeasonBests();
+    const recordRows = [];
+    const seen = new Set();
+    const addRows = (name) => {
+        getClientRecordRows(name).forEach(r => {
+            const key = `${r.league}|${r.cat}|${name}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            recordRows.push({ ...r, name });
+        });
+    };
+    ((agencyHall && agencyHall.entries) || []).forEach(e => addRows(e.name));
+    (myRoster || []).forEach(p => addRows(p.name));
+    const leagues = new Set(recordRows.map(r => r.league));
+    const catsByLeague = {};
+    recordRows.forEach(r => {
+        if (!catsByLeague[r.league]) catsByLeague[r.league] = new Set();
+        catsByLeague[r.league].add(r.cat);
+    });
+    const hasTop = (cat) => recordRows.some(r => r.cat === cat && r.place === 1);
+    const entries = (agencyHall && agencyHall.entries) || [];
+    return {
+        money: agentMoney,
+        clients: Math.max(careerCounters.clientsEverSigned || 0, (myRoster || []).length, entries.length),
+        transfers: careerCounters.transfersDone || 0,
+        trophies: getGoalProgress('trophies_total'),
+        cups: careerCounters.cupsWon || 0,
+        seasons: Math.max(1, currentSeason - 2026 + 1),
+        best,
+        recordRows,
+        recordRowsCount: recordRows.length,
+        recordLeagues: leagues.size,
+        fullSet: Object.values(catsByLeague).some(set => set.size >= 4),
+        sniperKing: hasTop('goals'),
+        playmakerKing: hasTop('assists'),
+        scorerKing: hasTop('points'),
+        wallKing: hasTop('goalie_shutouts'),
+        poachSuccess: careerCounters.poachSuccess || 0,
+        poachTop: careerCounters.poachTopSuccess || 0,
+        closedAgencies: Object.keys(closedAgencies || {}).length,
+        newsCount: Math.max((newsFeed || []).length, careerCounters.newsCount || 0),
+        newsNegative: (newsFeed || []).filter(n => n.type === 'negative').length,
+        countries: getGoalProgress('countries_count'),
+        leaguesCount: getGoalProgress('leagues_count'),
+        hasPresident: presidentClubKey ? 1 : 0,
+        clubTitles: getGoalProgress('club_titles'),
+        youth90: getGoalProgress('young_reached_90'),
+        hallCount: entries.length,
+        hallImmortal: entries.filter(e => (e.trophies || []).length >= 3).length
+    };
+}
+
+const ACHIEVEMENT_CATS = {
+    money: { icon: '💰', name: 'Деньги' },
+    career: { icon: '🏒', name: 'Карьера' },
+    league: { icon: '🏆', name: 'Лига и рекорды' },
+    trophies: { icon: '🥇', name: 'Трофеи' },
+    intrigue: { icon: '🎭', name: 'Интриги' },
+    legacy: { icon: '🏛', name: 'Наследие' }
+};
+
+const ACHIEVEMENTS = [
+    { id: 'money_10k', icon: '💵', cat: 'money', title: 'Первые $10K', desc: 'Заработай первые 10 000', target: 10000, check: c => c.money, reward: { xp: 100 } },
+    { id: 'money_100k', icon: '💵', cat: 'money', title: 'Сто тысяч', desc: 'Баланс $100 000', target: 100000, check: c => c.money, reward: { money: 10000 } },
+    { id: 'money_1m', icon: '💰', cat: 'money', title: 'Первый миллион', desc: 'Баланс $1 000 000', target: 1000000, check: c => c.money, reward: { money: 25000, title: 'Миллионер' } },
+    { id: 'money_5m', icon: '💰', cat: 'money', title: 'Пять миллионов', desc: 'Баланс $5 000 000', target: 5000000, check: c => c.money, reward: { money: 50000, rep: 1 } },
+    { id: 'money_10m', icon: '💎', cat: 'money', title: 'Десять миллионов', desc: 'Баланс $10 000 000', target: 10000000, check: c => c.money, reward: { money: 50000, title: 'Магнат' } },
+    { id: 'money_50m', icon: '👑', cat: 'money', title: 'Финансовая империя', desc: 'Баланс $50 000 000', target: 50000000, check: c => c.money, reward: { money: 50000, title: 'Император денег' } },
+
+    { id: 'first_client', icon: '🤝', cat: 'career', title: 'Первый клиент', desc: 'Подпиши первого игрока', target: 1, check: c => c.clients, reward: { xp: 100 } },
+    { id: 'clients_5', icon: '👥', cat: 'career', title: 'Пять клиентов', desc: 'Собери команду из 5 игроков', target: 5, check: c => c.clients, reward: { money: 10000 } },
+    { id: 'clients_10', icon: '🏢', cat: 'career', title: 'Десять клиентов', desc: 'Серьёзное агентство', target: 10, check: c => c.clients, reward: { rep: 1 } },
+    { id: 'transfer_1', icon: '📤', cat: 'career', title: 'Первая сделка', desc: 'Проведи первый трансфер', target: 1, check: c => c.transfers, reward: { xp: 150 } },
+    { id: 'transfer_10', icon: '🔁', cat: 'career', title: 'Десять сделок', desc: 'Трансферный конвейер', target: 10, check: c => c.transfers, reward: { money: 25000 } },
+    { id: 'season_5', icon: '📅', cat: 'career', title: 'Пятилетка', desc: 'Отыграй 5 сезонов', target: 5, check: c => c.seasons, reward: { xp: 500 } },
+    { id: 'season_10', icon: '🗓', cat: 'career', title: 'Династия агента', desc: 'Отыграй 10 сезонов', target: 10, check: c => c.seasons, reward: { title: 'Ветеран' } },
+
+    { id: 'record_debut', icon: '📜', cat: 'league', title: 'Первопроходец', desc: 'Клиент попал в топ-10 истории лиги', target: 1, check: c => c.recordRowsCount, reward: { xp: 300 } },
+    { id: 'sniper_king', icon: '🎯', cat: 'league', title: 'Король снайперов', desc: 'Клиент — лучший снайпер в истории лиги', target: 1, check: c => c.sniperKing ? 1 : 0, reward: { money: 25000, title: 'Король снайперов' } },
+    { id: 'playmaker_king', icon: '🧠', cat: 'league', title: 'Маэстро передач', desc: 'Клиент — лучший ассистент в истории лиги', target: 1, check: c => c.playmakerKing ? 1 : 0, reward: { money: 25000 } },
+    { id: 'scorer_king', icon: '👑', cat: 'league', title: 'Легенда лиги', desc: 'Клиент — лучший бомбардир в истории лиги', target: 1, check: c => c.scorerKing ? 1 : 0, reward: { title: 'Легенда лиги' } },
+    { id: 'wall_king', icon: '🧱', cat: 'league', title: 'Стена', desc: 'Клиент — лучший вратарь по сухим играм', target: 1, check: c => c.wallKing ? 1 : 0, reward: { money: 25000 } },
+    { id: 'full_set', icon: '🧩', cat: 'league', title: 'Полный комплект', desc: 'Клиент в 4 категориях рекордов одной лиги', target: 1, check: c => c.fullSet ? 1 : 0, reward: { rep: 2 } },
+    { id: 'world_records', icon: '🌍', cat: 'league', title: 'Мировой рекордсмен', desc: 'Рекорды клиентов в 3 разных лигах', target: 3, check: c => c.recordLeagues, reward: { money: 50000, title: 'Мировой рекордсмен' } },
+    { id: 'sniper_50', icon: '🔥', cat: 'league', title: 'Снайпер', desc: 'Клиент забросил 50 голов за сезон', target: 50, check: c => c.best.goals, reward: { xp: 500 } },
+    { id: 'wall_10', icon: '🥶', cat: 'league', title: 'Сухой сезон', desc: 'Клиент-вратарь сделал 10 сухих игр за сезон', target: 10, check: c => c.best.shutouts, reward: { xp: 500 } },
+
+    { id: 'trophy_1', icon: '🥇', cat: 'trophies', title: 'Первый трофей', desc: 'Первый трофей клиента', target: 1, check: c => c.trophies, reward: { money: 10000 } },
+    { id: 'trophy_5', icon: '🏅', cat: 'trophies', title: 'Коллекционер', desc: '5 трофеев клиентов', target: 5, check: c => c.trophies, reward: { money: 25000 } },
+    { id: 'trophy_20', icon: '🏆', cat: 'trophies', title: 'Трофейщик', desc: '20 трофеев клиентов', target: 20, check: c => c.trophies, reward: { title: 'Трофейщик' } },
+    { id: 'cup_1', icon: '🏆', cat: 'trophies', title: 'Первый Кубок', desc: 'Клиент взял Кубок', target: 1, check: c => c.cups, reward: { xp: 500 } },
+    { id: 'cup_5', icon: '🏆', cat: 'trophies', title: 'Пятикратный', desc: '5 Кубков с клиентами', target: 5, check: c => c.cups, reward: { money: 50000 } },
+
+    { id: 'poach_1', icon: '🎭', cat: 'intrigue', title: 'Первое переманивание', desc: 'Уведи клиента у конкурента', target: 1, check: c => c.poachSuccess, reward: { xp: 200 } },
+    { id: 'poach_5', icon: '🕶', cat: 'intrigue', title: 'Охотник', desc: '5 удачных переманиваний', target: 5, check: c => c.poachSuccess, reward: { rep: 1 } },
+    { id: 'agencies_5', icon: '⚡', cat: 'intrigue', title: 'Гроза авторитетов', desc: 'Закрой 5 агентств конкурентов', target: 5, check: c => c.closedAgencies, reward: { money: 50000, title: 'Гроза авторитетов' } },
+    { id: 'poach_top', icon: '🎯', cat: 'intrigue', title: 'Против топов', desc: 'Перемани клиента у топ-агентства', target: 1, check: c => c.poachTop, reward: { money: 25000 } },
+
+    { id: 'president_1', icon: '🏛', cat: 'legacy', title: 'Хозяин клуба', desc: 'Стань президентом клуба', target: 1, check: c => c.hasPresident, reward: { xp: 500 } },
+    { id: 'club_champion', icon: '🏆', cat: 'legacy', title: 'Кубок с клубом', desc: 'Выиграй титул как президент', target: 1, check: c => c.clubTitles, reward: { money: 50000 } },
+    { id: 'media_100', icon: '📺', cat: 'legacy', title: 'Медиа-фигура', desc: '100 новостей о тебе', target: 100, check: c => c.newsCount, reward: { xp: 500 } },
+    { id: 'scandal_5', icon: '📰', cat: 'legacy', title: 'Скандалист', desc: '5 негативных новостей', target: 5, check: c => c.newsNegative, reward: { xp: 300 } },
+    { id: 'countries_10', icon: '🌍', cat: 'legacy', title: 'Космополит', desc: 'Клиенты из 10 стран', target: 10, check: c => c.countries, reward: { rep: 1 } },
+    { id: 'youth_90', icon: '🎓', cat: 'legacy', title: 'Кузница звёзд', desc: 'Вырасти юниора до 90+', target: 1, check: c => c.youth90, reward: { money: 50000 } },
+    { id: 'hall_1', icon: '🏛', cat: 'legacy', title: 'Бессмертный', desc: 'Клиент с 3+ трофеями в Зале Славы агентства', target: 1, check: c => c.hallImmortal, reward: { title: 'Бессмертный' } },
+    { id: 'hall_10', icon: '🏛', cat: 'legacy', title: 'Пантеон', desc: '10 записей в Зале Славы агентства', target: 10, check: c => c.hallCount, reward: { money: 50000, title: 'Хранитель пантеона' } }
+];
+
+function grantAchievementReward(a) {
+    const r = a.reward || {};
+    if (r.xp) addXP(r.xp);
+    if (r.money) applyMoney(Math.min(50000, Math.round(r.money)), `Достижение: ${a.title}`);
+    if (r.rep) upgrades.reputation = Math.min(25, (upgrades.reputation || 1) + r.rep);
+    if (r.title) addNews(`🏅 ${LANG.t('Новый титул')}: ${LANG.t(r.title)}`, 'positive');
+}
+
+function showAchievementToast(a) {
+    if (typeof showWorldToast !== 'function') return;
+    showWorldToast(
+        `${LANG.t(a.title)} — ${LANG.t(a.desc)}`,
+        'positive',
+        a.icon || '🎖',
+        LANG.t('Достижение получено')
+    );
+}
+
+function checkAchievements(opts = {}) {
+    if (!achievements || typeof achievements !== 'object') achievements = { v: 1, unlocked: {}, counters: {} };
+    if (!achievements.unlocked || typeof achievements.unlocked !== 'object') achievements.unlocked = {};
+    const ctx = buildAchievementContext();
+    const unlockedNow = [];
+    ACHIEVEMENTS.forEach(a => {
+        if (achievements.unlocked[a.id]) return;
+        let value = 0;
+        try { value = Number(a.check(ctx)) || 0; } catch (e) { value = 0; }
+        if (value >= (a.target || 1)) {
+            achievements.unlocked[a.id] = { season: currentSeason, week: currentWeek };
+            unlockedNow.push(a);
+            if (!opts.silent) {
+                grantAchievementReward(a);
+                addNews(`🎖 ${LANG.t('Достижение')}: ${LANG.t(a.title)}`, 'positive');
+                showAchievementToast(a);
+            }
+        }
+    });
+    if (unlockedNow.length > 0 && opts.save !== false) saveGame();
+    return unlockedNow.map(a => a.id);
 }
 
 // Обновление слотов после завершения КЧ
@@ -3959,6 +4933,7 @@ function simulateWorldCupPlayoffRound() {
         if (clubData[champKey]) {
             const prize = 20000000;
             clubData[champKey].budget += prize;
+            enforceClubCashCap(champKey);
             addNews(`🏆 Кубок Чемпионов ${currentSeason}: ${champ.club}! Призовые ${formatMoney(prize)}`, "positive");
         }
 
@@ -4512,13 +5487,16 @@ function saveGame() {
         t: Date.now(), // метаданные сейва: в симуляцию и снапшоты не входят
         agentName, agencyName, agencyCountry, agencyFlag,
         money: agentMoney, s: currentSeason, w: currentWeek,
+        financeHistory: financeHistory.slice(-FINANCE_HISTORY_LIMIT),
         upgrades, rosterNames: myRoster.map(p => p.name), news: newsFeed.slice(0, 150),
+        formerClientNames: formerClientNames.slice(-FORMER_CLIENT_HISTORY_LIMIT),
         standings, teamStrengths, npcAgencies,
         clubs: packedClubs, portfolio: myPortfolio,
         agentXP, agentLevel,
         transferOffers, activeCommissions, pendingClubReturn,
         playerNegotiations,
         trainingAuto: { ...trainingAuto },
+        groupTrainingAttr: groupTrainingAttr || null,
         worldState: JSON.parse(JSON.stringify(worldState)),
         contractExtras: Object.fromEntries(players.map(p => {
             const years = Math.max(0, Math.round(p.contractYears || 0));
@@ -4536,8 +5514,16 @@ function saveGame() {
         phase: seasonPhase, phaseWeeks: transferPhaseWeeksLeft,
         playoffState, playoffRound,
         championsHistory, presidentClubKey, seasonSchedule,
-        clubSeasonPositions, clubCouncil,
+        clubSeasonPositions, clubCouncil, presidentDecisions,
+        clubFinance: JSON.parse(JSON.stringify(clubFinance || {})),
+        seasonReviews: JSON.parse(JSON.stringify(seasonReviews || {})),
+        presidentWarmup: JSON.parse(JSON.stringify(presidentWarmup || {})),
         careerGoals, careerCounters,
+        // v1.3: Зал Славы, лиговые рекорды, достижения (корень сейва).
+        agencyHall: JSON.parse(JSON.stringify(agencyHall || { v: 1, entries: [] })),
+        leagueRecords: JSON.parse(JSON.stringify(leagueRecords || {})),
+        achievements: JSON.parse(JSON.stringify(achievements || { v: 1, unlocked: {}, counters: {} })),
+        seasonGoalie: JSON.parse(JSON.stringify(seasonGoalie || {})),
         activeTasks, eventCooldowns, eventHistory, weeklyEventCounter, lastEventWeek,
         activeChains,
         npcCooldownWeeks: npcCooldownWeeks || 0,
@@ -4628,13 +5614,17 @@ async function loadGame() {
         agentMoney = d.money ?? 3000;
         currentSeason = d.s ?? 2026;
         currentWeek = d.w ?? 1;
+        financeHistory = normalizeFinanceHistory(d.financeHistory);
         agentXP = d.agentXP ?? 0;
         agentLevel = d.agentLevel ?? 1;
         newsFeed = d.news ?? [];
         standings = d.standings ?? {};
         teamStrengths = d.teamStrengths ?? {};
         npcAgencies = d.npcAgencies ?? generateNpcAgencies();
-        myPortfolio = d.portfolio ?? {};
+        myPortfolio = normalizePortfolio(d.portfolio);
+        formerClientNames = Array.isArray(d.formerClientNames)
+            ? d.formerClientNames.filter(n => typeof n === 'string' && n).slice(-FORMER_CLIENT_HISTORY_LIMIT)
+            : [];
         normalizeLoadedSave(d);
         upgrades = d.upgrades;
         transferOffers = d.transferOffers ?? {};
@@ -4647,6 +5637,8 @@ async function loadGame() {
                 }
             });
         }
+        groupTrainingAttr = (typeof d.groupTrainingAttr === 'string' && getTrainingByAttr(d.groupTrainingAttr))
+            ? d.groupTrainingAttr : null;
         worldState = normalizeWorldState(d.worldState);
         activeCommissions = d.activeCommissions ?? [];
         pendingClubReturn = d.pendingClubReturn ?? [];
@@ -4743,8 +5735,30 @@ async function loadGame() {
         }
         clubSeasonPositions = d.clubSeasonPositions || {};
         clubCouncil = d.clubCouncil || null;
+        // Пункт 11: ключ клуба передаём в нормализатор явно, чтобы старый
+        // сейв без clubKey не терял шкалы/лог/отложенные последствия.
+        const loadedPresidentClubKey = d.presidentClubKey || null;
+        const rawPresidentState = d.presidentDecisions || d.presidentState || null;
+        presidentDecisions = rawPresidentState
+            ? normalizePresidentDecisions(rawPresidentState, loadedPresidentClubKey)
+            : (loadedPresidentClubKey ? createDefaultPresidentState(loadedPresidentClubKey) : null);
+        if (presidentDecisions) seedFormerClientsFromRoster(presidentDecisions);
+        clubFinance = normalizeClubFinance(d.clubFinance);
+        seasonReviews = normalizeSeasonReviews(d.seasonReviews);
+        presidentWarmup = normalizePresidentWarmup(d.presidentWarmup);
         careerGoals = d.careerGoals || {};
         careerCounters = d.careerCounters || { poachSuccess: 0, poachFails: 0, clientsEverSigned: 0, trophiesTotal: 0, cupsWon: 0, newsCount: 0 };
+        // v1.3: восстанавливаем Зал Славы/рекорды/достижения. Старый сейв
+        // получает виртуальную историю лиг и снимки текущих клиентов.
+        leagueRecords = normalizeLeagueRecords(d.leagueRecords);
+        agencyHall = normalizeAgencyHall(d.agencyHall);
+        achievements = normalizeAchievements(d.achievements);
+        seasonGoalie = (d.seasonGoalie && typeof d.seasonGoalie === 'object' && !Array.isArray(d.seasonGoalie))
+            ? JSON.parse(JSON.stringify(d.seasonGoalie)) : {};
+        if (Object.keys(leagueRecords).length === 0) leagueRecords = generateVirtualLeagueRecords();
+        invalidateHallRecordCache();
+        syncAgencyHallActive();
+        checkAchievements({ silent: true, save: false });
         activeTasks = d.activeTasks || [];
         eventCooldowns = d.eventCooldowns || {};
         eventHistory = d.eventHistory || [];
@@ -4753,7 +5767,7 @@ async function loadGame() {
         activeChains = d.activeChains || [];
         npcCooldownWeeks = d.npcCooldownWeeks || 0;
         lostPlayerThisSeason = !!d.lostPlayerThisSeason;
-        presidentClubKey = d.presidentClubKey || null;
+        presidentClubKey = loadedPresidentClubKey;
         nationalTournament = d.nationalTournament || null;
         nationalTournamentHistory = d.nationalTournamentHistory || [];
         favoriteNationalTeam = d.favoriteNationalTeam || null;
@@ -4916,11 +5930,20 @@ function resetGame() {
         if (typeof window.applyFakeTeamNames === 'function') window.applyFakeTeamNames();
     }
 
+    // v1.2.3: обучение — часть каждой новой карьеры, а не глобальных настроек.
+    gameSettings.tutorialAgentDone = false;
+    gameSettings.tutorialPresidentDone = false;
+    saveSettings();
     agentMoney = 3000;
     players = [];
     myRoster = [];
+    formerClientNames = [];
     currentSeason = 2026;
     currentWeek = 1;
+    financeHistory = [];
+    // Пункт 12: мир новой игры воспроизводится от имени агентства,
+    // а не от Math.random. Одинаковые seed/решения → идентичный сезон.
+    setSimulationSeed(matchSeed([agentName || '', agencyName || '', 'game', currentSeason]));
     newsFeed = [];
     agentXP = 0;
     agentLevel = 1;
@@ -4929,6 +5952,8 @@ function resetGame() {
     transferOffers = {};
     playerNegotiations = {};
     trainingAuto = {};
+    groupTrainingAttr = null;
+    agencyShowAllUpgrades = false;
     worldState = createEmptyWorldState();
     activeCommissions = [];
     pendingClubReturn = [];
@@ -4954,8 +5979,22 @@ function resetGame() {
     generateAllSchedules();
     presidentClubKey = null;
     clubCouncil = null;
+    presidentDecisions = null;
+    clubFinance = {};
+    seasonReviews = {};
+    presidentWarmup = { v: 1, until: 0, weeks: 0, clubKey: null, clubName: '', reason: '', count: 0 };
     careerGoals = {};
     careerCounters = { poachSuccess: 0, poachFails: 0, clientsEverSigned: 0, trophiesTotal: 0, cupsWon: 0, newsCount: 0, idSeq: 0 };
+    agencyHall = { v: 1, entries: [] };
+    leagueRecords = {};
+    achievements = { v: 1, unlocked: {}, counters: {} };
+    seasonGoalie = {};
+    leagueRecords = generateVirtualLeagueRecords();
+    invalidateHallRecordCache();
+    hallTab = 'agency';
+    hallLeague = 'NHL';
+    hallAchFilter = 'all';
+    hallSelectedEntry = null;
     activeTasks = [];
     eventCooldowns = {};
     eventHistory = [];
@@ -5118,6 +6157,67 @@ function showMobileScreen(id) {
     if (t) t.style.display = 'flex';
     showBottomNav();
     if (id === 'office-screen') renderOffice();
+}
+
+// Идентификатор видимого экрана (для возврата «туда, откуда пришли»).
+function getVisibleScreenId(fallback = 'office-screen') {
+    const visible = Array.from(document.querySelectorAll('.mobile-screen')).find(s => s.style.display !== 'none');
+    return visible ? visible.id : fallback;
+}
+
+// Точечная перерисовка экрана после возврата.
+function refreshScreenById(id) {
+    if (id === 'office-screen') renderOffice();
+    else if (id === 'clients-screen') renderClientsScreen();
+    else if (id === 'leagues-screen') renderLeaguesScreen();
+    else if (id === 'standings-screen' && currentStandingsLeague) renderStandingsScreen(currentStandingsLeague);
+    else if (id === 'news-feed-screen') renderNewsFeedScreen();
+    else if (id === 'leaderboard-screen') renderLeaderboard();
+    else if (id === 'market-screen') renderMarketScreen();
+    else if (id === 'agency-screen') renderAgencyScreen();
+    else if (id === 'public-club-hub-screen') renderPublicClubHub();
+    else if (id === 'world-cup-screen') renderWorldCupScreen();
+    else if (id === 'national-tournament-screen') renderNationalTournamentScreen();
+    else if (id === 'event-history-screen') renderEventHistory();
+    else if (id === 'career-goals-screen') {
+        if (currentBranchKey) renderBranchDetail();
+        else renderCareerGoalsTree();
+    }
+    else if (id === 'hall-of-fame-screen') renderHallOfFameScreen();
+}
+
+// Показать экран по id с корректной навигацией и перерисовкой.
+function restoreScreenById(id, fallback = 'office-screen') {
+    hidePagination();
+    const targetId = id || fallback;
+    if (targetId === 'club-hub-screen') {
+        return showPresidentClubHub() ? 'club-hub-screen' : null;
+    }
+    document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
+    const target = document.getElementById(targetId) || document.getElementById(fallback);
+    if (!target) return null;
+    target.style.display = 'flex';
+    if (target.id === 'club-hub-screen') {
+        showClubBottomNav();
+        renderClubHub();
+    } else {
+        hideClubBottomNav();
+        showBottomNav();
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        const navKey = {
+            'office-screen': 'office',
+            'clients-screen': 'clients',
+            'leagues-screen': 'leagues',
+            'market-screen': 'market',
+            'agency-screen': 'agency'
+        }[target.id];
+        if (navKey) {
+            const nav = document.querySelector(`.nav-item[data-nav="${navKey}"]`);
+            if (nav) nav.classList.add('active');
+        }
+        refreshScreenById(target.id);
+    }
+    return target.id;
 }
 
 // showStub удалён в v1.0 (мёртвый код — не вызывался)
@@ -5696,16 +6796,884 @@ function buildBranchCard(branchKey, isMain) {
     return div;
 }
 
-// ============ 16.7. ИНФРАСТРУКТУРА КЛУБА ============
-function showInfrastructureScreen() {
+// ============ 16.7. НЕДЕЛЬНЫЕ РЕШЕНИЯ И СОБЫТИЯ ПРЕЗИДЕНТА ============
+// Батч 1 чек-листа: у каждой недели есть выбор с видимой ценой,
+// у событий — 2+ варианта и отложенные последствия.
+const PRESIDENT_EVENT_COOLDOWN_WEEKS = 8;
+const PRESIDENT_DECISION_LOG_LIMIT = 40;
+// Пункт 9: бывший клиент даёт измеримую скидку, но и измеримый риск.
+// Жёсткие лимиты: 2 подписания за сезон и 4 за срок полномочий.
+const FORMER_CLIENT_SEASON_LIMIT = 2;
+const FORMER_CLIENT_TERM_LIMIT = 4;
+const FORMER_CLIENT_HISTORY_LIMIT = 60;
+const FORMER_CLIENT_LOG_LIMIT = 20;
+
+function presidentAbsWeek() {
+    return (currentSeason || 2026) * 52 + (currentWeek || 1);
+}
+
+function presidentFormat(key, vars = {}) {
+    let out = LANG.t(key);
+    Object.entries(vars).forEach(([k, v]) => {
+        out = out.split(`{${k}}`).join(String(v));
+    });
+    return out;
+}
+
+function createDefaultPresidentState(clubKey = null) {
+    const club = clubKey ? clubData[clubKey] : null;
+    const prestige = club ? (club.prestige || 50) : 50;
+    return {
+        v: 1,
+        clubKey,
+        weekKey: null,
+        ready: false,
+        stance: null,
+        briefIds: [],
+        chosenBriefId: null,
+        chosenOptionId: null,
+        eventId: null,
+        eventChoiceId: null,
+        delayed: [],
+        cooldowns: {},
+        log: [],
+        meters: {
+            fans: Math.max(20, Math.min(90, Math.round(35 + prestige * 0.35))),
+            dressing: 55
+        },
+        conflict: 0,
+        tutorialStep: 0,
+        onboardingSeen: false,
+        decisions: 0,
+        // Пункт 9: история бывших клиентов и лимиты подписаний.
+        formerClients: [],
+        formerClientSignings: {
+            season: 0,
+            seasonCount: 0,
+            termStartSeason: 0,
+            termCount: 0
+        },
+        formerClientSigningLog: []
+    };
+}
+
+function normalizePresidentDecisions(raw, fallbackClubKey = null) {
+    if (!raw || typeof raw !== 'object') return null;
+    const clubKey = (typeof raw.clubKey === 'string' && raw.clubKey)
+        || fallbackClubKey || presidentClubKey || null;
+    const st = createDefaultPresidentState(clubKey);
+    st.v = 1;
+    st.weekKey = raw.weekKey ?? null;
+    st.ready = !!raw.ready;
+    st.stance = raw.stance || null;
+    st.briefIds = Array.isArray(raw.briefIds) ? raw.briefIds.filter(x => typeof x === 'string').slice(0, 6) : [];
+    st.chosenBriefId = raw.chosenBriefId || null;
+    st.chosenOptionId = raw.chosenOptionId || null;
+    st.eventId = raw.eventId || null;
+    st.eventChoiceId = raw.eventChoiceId || null;
+    st.delayed = Array.isArray(raw.delayed) ? raw.delayed.filter(d => d && Number.isFinite(d.due)).slice(0, 40) : [];
+    st.cooldowns = (raw.cooldowns && typeof raw.cooldowns === 'object') ? { ...raw.cooldowns } : {};
+    st.log = Array.isArray(raw.log) ? raw.log.slice(0, PRESIDENT_DECISION_LOG_LIMIT) : [];
+    st.meters = {
+        fans: Number.isFinite(raw.meters?.fans) ? Math.max(0, Math.min(100, raw.meters.fans)) : st.meters.fans,
+        dressing: Number.isFinite(raw.meters?.dressing) ? Math.max(0, Math.min(100, raw.meters.dressing)) : st.meters.dressing
+    };
+    st.conflict = Number.isFinite(raw.conflict) ? Math.max(0, Math.min(100, raw.conflict)) : 0;
+    st.tutorialStep = Number.isFinite(raw.tutorialStep) ? Math.max(0, Math.min(3, raw.tutorialStep)) : 0;
+    st.onboardingSeen = !!raw.onboardingSeen;
+    st.decisions = Number.isFinite(raw.decisions) ? raw.decisions : 0;
+    st.formerClients = Array.isArray(raw.formerClients)
+        ? raw.formerClients.filter(n => typeof n === 'string' && n).slice(-FORMER_CLIENT_HISTORY_LIMIT)
+        : [];
+    const book = (raw.formerClientSignings && typeof raw.formerClientSignings === 'object')
+        ? raw.formerClientSignings : {};
+    st.formerClientSignings = {
+        season: Number.isFinite(book.season) ? book.season : 0,
+        seasonCount: Number.isFinite(book.seasonCount)
+            ? Math.max(0, Math.min(FORMER_CLIENT_SEASON_LIMIT, Math.round(book.seasonCount))) : 0,
+        termStartSeason: Number.isFinite(book.termStartSeason) ? book.termStartSeason : 0,
+        termCount: Number.isFinite(book.termCount)
+            ? Math.max(0, Math.min(FORMER_CLIENT_TERM_LIMIT, Math.round(book.termCount))) : 0
+    };
+    st.formerClientSigningLog = Array.isArray(raw.formerClientSigningLog)
+        ? raw.formerClientSigningLog.filter(x => x && typeof x === 'object').slice(0, FORMER_CLIENT_LOG_LIMIT)
+        : [];
+    return st;
+}
+
+function ensurePresidentDecisions() {
+    if (!presidentClubKey) return null;
+    if (!presidentDecisions || presidentDecisions.clubKey !== presidentClubKey) {
+        presidentDecisions = createDefaultPresidentState(presidentClubKey);
+        seedFormerClientsFromRoster(presidentDecisions);
+    }
+    ensureFormerClientBookkeeping(presidentDecisions);
+    return presidentDecisions;
+}
+
+// Пункт 9: при вступлении в должность клиенты замороженного агентства
+// становятся «бывшими» — их можно подписать в клуб со скидкой.
+function seedFormerClientsFromRoster(st = presidentDecisions) {
+    if (!st) return;
+    if (!Array.isArray(st.formerClients)) st.formerClients = [];
+    const add = (name) => {
+        if (name && !st.formerClients.includes(name)) st.formerClients.push(name);
+    };
+    formerClientNames.forEach(add);
+    myRoster.forEach(p => add(p && p.name));
+    if (st.formerClients.length > FORMER_CLIENT_HISTORY_LIMIT) {
+        st.formerClients = st.formerClients.slice(-FORMER_CLIENT_HISTORY_LIMIT);
+    }
+}
+
+function rememberFormerClient(name) {
+    if (!name) return;
+    if (!Array.isArray(formerClientNames)) formerClientNames = [];
+    if (!formerClientNames.includes(name)) formerClientNames.push(name);
+    if (formerClientNames.length > FORMER_CLIENT_HISTORY_LIMIT) {
+        formerClientNames = formerClientNames.slice(-FORMER_CLIENT_HISTORY_LIMIT);
+    }
+    if (!presidentDecisions) return;
+    if (!Array.isArray(presidentDecisions.formerClients)) presidentDecisions.formerClients = [];
+    if (!presidentDecisions.formerClients.includes(name)) {
+        presidentDecisions.formerClients.push(name);
+    }
+    if (presidentDecisions.formerClients.length > FORMER_CLIENT_HISTORY_LIMIT) {
+        presidentDecisions.formerClients = presidentDecisions.formerClients.slice(-FORMER_CLIENT_HISTORY_LIMIT);
+    }
+}
+
+function ensureFormerClientBookkeeping(st = presidentDecisions) {
+    if (!st) return null;
+    if (!Array.isArray(st.formerClients)) st.formerClients = [];
+    const season = currentSeason || 2026;
+    const book = (st.formerClientSignings && typeof st.formerClientSignings === 'object')
+        ? st.formerClientSignings : {};
+    const next = {
+        season: Number.isFinite(book.season) ? book.season : season,
+        seasonCount: Number.isFinite(book.seasonCount)
+            ? Math.max(0, Math.min(FORMER_CLIENT_SEASON_LIMIT, Math.round(book.seasonCount))) : 0,
+        termStartSeason: Number.isFinite(book.termStartSeason) ? book.termStartSeason : season,
+        termCount: Number.isFinite(book.termCount)
+            ? Math.max(0, Math.min(FORMER_CLIENT_TERM_LIMIT, Math.round(book.termCount))) : 0
+    };
+    if (next.season !== season) {
+        next.season = season;
+        next.seasonCount = 0;
+    }
+    st.formerClientSignings = next;
+    return next;
+}
+
+function getFormerClientCandidate() {
+    const st = ensurePresidentDecisions();
+    if (!st || !presidentClubKey) return null;
+    const club = clubData[presidentClubKey];
+    if (!club) return null;
+    const names = st.formerClients.length > 0 ? st.formerClients.slice() : myRoster.map(p => p.name);
+    for (let i = names.length - 1; i >= 0; i--) {
+        const p = players.find(x => x.name === names[i]);
+        if (!p) continue;
+        if (p.club === club.club && p.league === club.league) continue;
+        return p;
+    }
+    return null;
+}
+
+// Измеримая сделка: рыночная цена, скидка, экономия и риск аудита.
+function getFormerClientDeal() {
+    const st = ensurePresidentDecisions();
+    const club = presidentClubKey ? clubData[presidentClubKey] : null;
+    const player = getFormerClientCandidate();
+    if (!st || !club || !player) return null;
+    ensureFormerClientBookkeeping(st);
+    const loyalty = Math.max(0, Math.min(100, Number.isFinite(player.loyalty) ? player.loyalty : 50));
+    const rating = Math.max(1, Math.min(99, player.rating || 50));
+    const discountPct = Math.max(15, Math.min(35, Math.round((0.15 + loyalty / 400) * 1000) / 10)); // 15.0–35.0%
+    const marketFee = Math.max(300000, Math.round((900000 + Math.max(0, rating - 45) * 40000) / 10000) * 10000);
+    const fee = Math.max(100000, Math.round((marketFee * (1 - discountPct / 100)) / 10000) * 10000);
+    const risk = Math.max(10, Math.min(40, Math.round(10 + (100 - loyalty) / 4 + (st.conflict || 0) / 12)));
+    const book = st.formerClientSignings;
+    return {
+        player,
+        playerName: player.name,
+        clubKey: presidentClubKey,
+        clubName: club.club,
+        marketFee,
+        fee,
+        savings: marketFee - fee,
+        discountPct,
+        risk,
+        seasonCount: book.seasonCount,
+        termCount: book.termCount,
+        seasonLeft: Math.max(0, FORMER_CLIENT_SEASON_LIMIT - book.seasonCount),
+        termLeft: Math.max(0, FORMER_CLIENT_TERM_LIMIT - book.termCount)
+    };
+}
+
+function getFormerClientSigningBlockReason(deal = getFormerClientDeal()) {
+    if (!deal) return null;
+    if (deal.seasonLeft <= 0) return 'Лимит бывших клиентов за сезон исчерпан (2)';
+    if (deal.termLeft <= 0) return 'Лимит бывших клиентов за срок исчерпан (4)';
+    return null;
+}
+
+function commitFormerClientSigning(deal = getFormerClientDeal()) {
+    const st = ensurePresidentDecisions();
+    const club = presidentClubKey ? clubData[presidentClubKey] : null;
+    if (!st || !club || !deal || !deal.player) return { ok: false, reason: 'Нет клуба' };
+    const book = ensureFormerClientBookkeeping(st);
+    book.seasonCount = Math.min(FORMER_CLIENT_SEASON_LIMIT, book.seasonCount + 1);
+    book.termCount = Math.min(FORMER_CLIENT_TERM_LIMIT, book.termCount + 1);
+    const p = deal.player;
+    p.club = club.club;
+    p.league = club.league;
+    p.contractYears = Math.max(1, Math.round(p.contractYears || 1));
+    if (!Array.isArray(st.formerClientSigningLog)) st.formerClientSigningLog = [];
+    st.formerClientSigningLog.unshift({
+        season: currentSeason, week: currentWeek, name: p.name,
+        marketFee: deal.marketFee, fee: deal.fee, savings: deal.savings,
+        discountPct: deal.discountPct, risk: deal.risk
+    });
+    st.formerClientSigningLog = st.formerClientSigningLog.slice(0, FORMER_CLIENT_LOG_LIMIT);
+    st.conflict = Math.max(0, Math.min(100, (st.conflict || 0) + deal.risk));
+    refreshTeamStrengths();
+    addNews(
+        presidentFormat('Бывший клиент {name} перешёл в клуб: скидка {pct}%, риск +{risk}', {
+            name: p.name, pct: deal.discountPct, risk: deal.risk
+        }),
+        'info'
+    );
+    return { ok: true, deal };
+}
+
+// Единая точка проверки лимитов (2/сезон и 4/срок) для тестов и UI.
+function registerFormerClientSigning() {
+    const deal = getFormerClientDeal();
+    const block = getFormerClientSigningBlockReason(deal);
+    if (block) return { ok: false, reason: block, deal };
+    return commitFormerClientSigning(deal);
+}
+
+// Единая точка вступления в должность: фиксируем клиентов агентства
+// как бывших клиентов и обнуляем лимиты нового срока.
+function startPresidentTerm(clubKey) {
+    presidentClubKey = clubKey;
+    clubCouncil = null;
+    presidentDecisions = createDefaultPresidentState(clubKey);
+    seedFormerClientsFromRoster(presidentDecisions);
+    ensureFormerClientBookkeeping(presidentDecisions);
+    ensureCouncil();
+    return presidentDecisions;
+}
+
+function getPresidentMeters() {
+    const st = ensurePresidentDecisions();
+    return st ? st.meters : { fans: 50, dressing: 55 };
+}
+
+function getPresidentTrust() {
+    ensureCouncil();
+    return clubCouncil ? clubCouncil.loyalty : 60;
+}
+
+function presidentEventPool() {
+    return Array.isArray(window.PRESIDENT_EVENTS) ? window.PRESIDENT_EVENTS : [];
+}
+
+function presidentBriefPool() {
+    return Array.isArray(window.PRESIDENT_BRIEFS) ? window.PRESIDENT_BRIEFS : [];
+}
+
+function presidentStancePool() {
+    return Array.isArray(window.PRESIDENT_STANCES) ? window.PRESIDENT_STANCES : [];
+}
+
+function getPresidentEventData(id) {
+    if (!id) return null;
+    const ev = presidentEventPool().find(e => e.id === id) || null;
+    return ev && ev.id === 'E15' ? buildFormerClientOffer(ev) : ev;
+}
+
+function getPresidentBriefData(id) {
+    if (!id) return null;
+    const brief = presidentBriefPool().find(b => b.id === id) || null;
+    return brief && brief.id === 'former_client' ? buildFormerClientOffer(brief) : brief;
+}
+
+// Пункт 9: вариант «подписать бывшего клиента» собирается из реальной
+// сделки — скидка и риск видны до выбора, лимиты блокируют кнопку.
+function buildFormerClientOffer(base) {
+    const deal = getFormerClientDeal();
+    if (!deal) return base;
+    const block = getFormerClientSigningBlockReason(deal);
+    const savings = formatMoney(deal.savings);
+    const text = presidentFormat(
+        'Бывший клиент {name} готов перейти в ваш клуб. Скидка {pct}% ({savings}), риск аудита +{risk}. До лимита: {seasonLeft}/2 за сезон, {termLeft}/4 за срок.',
+        {
+            name: deal.playerName, pct: deal.discountPct, savings,
+            risk: deal.risk, seasonLeft: deal.seasonLeft, termLeft: deal.termLeft
+        }
+    );
+    const signCost = presidentFormat('−{fee} • Риск +{risk} • Фанаты +3', {
+        fee: formatMoney(deal.fee), risk: deal.risk
+    });
+    const gmCost = presidentFormat('−{fee} • Риск +5', { fee: formatMoney(deal.marketFee) });
+    const options = (base.options || []).map(opt => {
+        if (opt.id === 'sign') {
+            return {
+                ...opt,
+                label: presidentFormat('Подписать со скидкой {pct}%', { pct: deal.discountPct }),
+                desc: presidentFormat('{name}: экономия {savings} к рыночной цене', {
+                    name: deal.playerName, savings
+                }),
+                cost: signCost,
+                effects: { cash: -deal.fee, fans: 3, dressing: 2, conflict: deal.risk },
+                delayed: {
+                    weeks: 4,
+                    title: 'Сделка с бывшим клиентом',
+                    text: 'Пресса спрашивает, не купили ли вы своего.',
+                    effects: { trust: -4, conflict: 10 }
+                },
+                disabledReason: block || null
+            };
+        }
+        if (opt.id === 'gm') {
+            return {
+                ...opt,
+                cost: gmCost,
+                effects: { cash: -deal.marketFee, conflict: 5 },
+                disabledReason: block || null
+            };
+        }
+        return { ...opt };
+    });
+    return { ...base, text, options };
+}
+
+function presidentOptionBlockReason(option) {
+    return option && option.disabledReason ? option.disabledReason : null;
+}
+
+function getPresidentStanceData(id) {
+    if (!id) return null;
+    return presidentStancePool().find(s => s.id === id) || null;
+}
+
+function presidentSeedRng(tag) {
+    return makeSeededRNG(matchSeed([agentName || '', agencyName || '', 'president', tag, currentSeason, currentWeek, seasonPhase]));
+}
+
+function getPresidentContext() {
+    const club = presidentClubKey ? clubData[presidentClubKey] : null;
+    const st = ensurePresidentDecisions();
+    if (!club || !st) return null;
+    const squad = players.filter(p => p.league === club.league && p.club === club.club);
+    const star = squad.slice().sort((a, b) => (b.rating || 0) - (a.rating || 0))[0] || null;
+    const injuredStar = squad.filter(p => (p.injuryWeeks || 0) > 0).sort((a, b) => (b.rating || 0) - (a.rating || 0))[0] || null;
+    const table = (standings[club.league] || []).slice().sort(sortStandingsFn);
+    const place = table.findIndex(t => t.club === club.club) + 1;
+    const spots = Math.max(2, (LEAGUE_DATA[club.league]?.playoffSpots || 4) * (LEAGUE_DATA[club.league]?.divisions?.length || 1));
+    const losses = (club.form || []).filter(f => f === 'L').length;
+    return {
+        club, st, squad, star, injuredStar, place: place || null, spots, losses,
+        trust: getPresidentTrust(),
+        fans: st.meters.fans,
+        dressing: st.meters.dressing,
+        cash: club.budget || 0,
+        wageLoad: getClubSalaryLoad(club),
+        prestige: club.prestige || 50
+    };
+}
+
+function presidentEventEligible(ev) {
+    if (!ev || !ev.trigger) return false;
+    const ctx = getPresidentContext();
+    if (!ctx) return false;
+    switch (ev.trigger) {
+        case 'tutorial': return ctx.st.tutorialStep === 0 && ctx.st.decisions === 0;
+        case 'low_dressing': return ctx.dressing < 45 || ctx.losses >= 2;
+        case 'star_unhappy': return !!ctx.star && ctx.star.rating >= 80 && ctx.dressing < 50;
+        case 'captain_coach': return ctx.dressing < 55;
+        case 'youth_ice': return currentWeek >= 8;
+        case 'veteran_contract': return currentWeek >= 6;
+        case 'finance_crisis': return ctx.cash < 2000000 || ctx.trust < 45;
+        case 'sponsor_terms': return currentWeek >= 8 && currentWeek <= 40;
+        case 'bank_call': return ctx.cash < 0;
+        case 'board_injection': return ctx.trust > 65 && ctx.cash < 2000000;
+        case 'wage_audit': return ctx.wageLoad > 95;
+        case 'fan_prices': return ctx.fans < 45;
+        case 'ultras': return ctx.fans > 65;
+        case 'social_scandal': return true;
+        case 'agency_heat': return ctx.st.conflict >= 40;
+        case 'ex_client': return !!getFormerClientDeal() && !getFormerClientSigningBlockReason() && ctx.st.conflict < 80;
+        case 'agency_top': return currentWeek >= 10;
+        case 'coach_transfer': return seasonPhase === 'transfer_mid' || seasonPhase === 'transfer_off' || currentWeek >= 10;
+        case 'scout_gem': return true;
+        case 'medical_star': return !!ctx.injuredStar || currentWeek >= 12;
+        case 'gm_power': return ctx.trust > 60;
+        case 'staff_conflict': return ctx.trust < 60 || currentWeek >= 15;
+        case 'poach_coach': return currentWeek >= 35;
+        case 'arena_accident': return true;
+        case 'salary_cap': return currentWeek <= 6;
+        case 'national_team': return currentWeek >= 20 && currentWeek <= 30;
+        case 'tv_show': return ctx.fans > 70;
+        case 'draft': return seasonPhase === 'transfer_off' || seasonPhase === 'draft';
+        case 'playoff_prices': return seasonPhase === 'playoffs';
+        case 'bookmaker': return true;
+        case 'city_land': return ctx.prestige > 65 && ctx.cash > 5000000;
+        default: return false;
+    }
+}
+
+function pickPresidentEvent() {
+    const st = ensurePresidentDecisions();
+    if (!st) return null;
+    if (st.tutorialStep === 0 && st.decisions === 0) {
+        const tutorial = presidentEventPool().find(e => e.id === 'E00');
+        if (tutorial) return tutorial.id;
+    }
+    const now = presidentAbsWeek();
+    const rng = presidentSeedRng('event-pick');
+    if (rng() > 0.72) return null; // спокойная неделя тоже возможна
+    const eligible = presidentEventPool().filter(ev => {
+        if (ev.id === 'E00') return false;
+        const cd = st.cooldowns[ev.id] || 0;
+        if (cd > now) return false;
+        if (!presidentEventEligible(ev)) return false;
+        const chance = Number.isFinite(ev.chance) ? ev.chance : 0.3;
+        return rng() < chance;
+    });
+    if (eligible.length === 0) return null;
+    const pick = eligible[Math.floor(rng() * eligible.length)];
+    st.cooldowns[pick.id] = now + PRESIDENT_EVENT_COOLDOWN_WEEKS;
+    return pick.id;
+}
+
+function pickPresidentBriefs() {
+    const st = ensurePresidentDecisions();
+    if (!st) return [];
+    if (st.tutorialStep < 3) {
+        const order = ['ticket_price', 'youth_play', 'marketing_push'];
+        const id = order[st.tutorialStep];
+        const allBriefs = presidentBriefPool();
+        if (allBriefs.some(b => b.id === id)) {
+            const rest = allBriefs.filter(b => b.id !== id).slice(0, 2).map(b => b.id);
+            return [id, ...rest];
+        }
+    }
+    const rng = presidentSeedRng('brief-pick');
+    const formerAvailable = !!getFormerClientDeal() && !getFormerClientSigningBlockReason();
+    const pool = presidentBriefPool()
+        .map(b => b.id)
+        .filter(id => id !== 'former_client' || formerAvailable);
+    for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, 3);
+}
+
+function applyPresidentEffects(effects, title, text) {
+    if (!effects) return;
+    const club = presidentClubKey ? clubData[presidentClubKey] : null;
+    const st = ensurePresidentDecisions();
+    if (!club || !st) return;
+    if (Number.isFinite(effects.cash) && effects.cash !== 0) {
+        club.budget = Math.round((club.budget || 0) + effects.cash);
+    }
+    if (Number.isFinite(effects.trust) && effects.trust !== 0) {
+        ensureCouncil();
+        if (clubCouncil) clubCouncil.loyalty = Math.max(0, Math.min(100, (clubCouncil.loyalty || 60) + effects.trust));
+    }
+    if (Number.isFinite(effects.fans) && effects.fans !== 0) {
+        st.meters.fans = Math.max(0, Math.min(100, st.meters.fans + effects.fans));
+    }
+    if (Number.isFinite(effects.dressing) && effects.dressing !== 0) {
+        st.meters.dressing = Math.max(0, Math.min(100, st.meters.dressing + effects.dressing));
+    }
+    if (Number.isFinite(effects.prestige) && effects.prestige !== 0) {
+        club.prestige = Math.max(20, Math.min(99, (club.prestige || 50) + effects.prestige));
+    }
+    if (Number.isFinite(effects.conflict) && effects.conflict !== 0) {
+        st.conflict = Math.max(0, Math.min(100, st.conflict + effects.conflict));
+    }
+    if (Number.isFinite(effects.cash) && effects.cash !== 0 && presidentClubKey) {
+        enforceClubCashCap(presidentClubKey);
+    }
+    if (text) addNews(`🏛️ ${LANG.t(title)}: ${LANG.t(text)}`, (effects.cash || 0) >= 0 && (effects.trust || 0) >= 0 ? 'info' : 'negative');
+}
+
+function schedulePresidentDelayed(option, sourceTitle) {
+    if (!option || !option.delayed) return;
+    const st = ensurePresidentDecisions();
+    if (!st) return;
+    const d = option.delayed;
+    // Рискованные последствия срабатывают не всегда; бросок детерминирован.
+    const chance = Number.isFinite(d.chance) ? Math.max(0, Math.min(1, d.chance)) : 1;
+    if (chance < 1) {
+        const rng = makeSeededRNG(matchSeed([
+            agentName || '', agencyName || '', 'president-delayed',
+            option.id || '', sourceTitle || '', currentSeason, currentWeek, st.delayed.length
+        ]));
+        if (rng() > chance) return;
+    }
+    st.delayed.push({
+        id: `pd_${presidentAbsWeek()}_${st.delayed.length}_${st.decisions || 0}`,
+        due: presidentAbsWeek() + Math.max(1, Math.min(5, d.weeks || 1)),
+        title: d.title || sourceTitle || LANG.t('Последствие решения'),
+        text: d.text || '',
+        effects: d.effects || {},
+        source: sourceTitle || ''
+    });
+    if (st.delayed.length > 40) st.delayed = st.delayed.slice(-40);
+}
+
+function resolvePresidentDelayed() {
+    const st = ensurePresidentDecisions();
+    if (!st || st.delayed.length === 0) return 0;
+    const now = presidentAbsWeek();
+    const due = st.delayed.filter(d => d.due <= now);
+    if (due.length === 0) return 0;
+    st.delayed = st.delayed.filter(d => d.due > now);
+    due.forEach(d => applyPresidentEffects(d.effects, d.title, d.text));
+    addNews(`⏳ ${LANG.t('Отложенные последствия:')} ${due.map(d => LANG.t(d.title)).join('; ')}`, 'info');
+    return due.length;
+}
+
+function ensurePresidentWeek() {
+    const st = ensurePresidentDecisions();
+    if (!st) return null;
+    const key = `${currentSeason}:${currentWeek}:${seasonPhase}`;
+    if (st.weekKey !== key) {
+        resolvePresidentDelayed();
+        st.weekKey = key;
+        st.ready = false;
+        st.stance = null;
+        st.briefIds = pickPresidentBriefs();
+        st.chosenBriefId = null;
+        st.chosenOptionId = null;
+        st.eventId = pickPresidentEvent();
+        st.eventChoiceId = null;
+    }
+    return st;
+}
+
+function canAffordPresidentOption(option) {
+    if (!option || !option.effects) return true;
+    const club = presidentClubKey ? clubData[presidentClubKey] : null;
+    const cash = club ? (club.budget || 0) : 0;
+    return cash + (option.effects.cash || 0) >= 0;
+}
+
+function presidentWeekReady() {
+    if (!presidentClubKey) return true;
+    const st = ensurePresidentWeek();
+    if (!st) return true;
+    if (!st.ready) return false;
+    if (!st.stance || !st.chosenBriefId || !st.chosenOptionId) return false;
+    if (st.eventId && !st.eventChoiceId) return false;
+    return true;
+}
+
+function applyPresidentWeekChoices() {
+    const st = ensurePresidentWeek();
+    if (!st) return { ok: false, reason: 'Нет клуба' };
+    if (!st.stance) return { ok: false, reason: 'Выберите курс недели' };
+    const brief = getPresidentBriefData(st.chosenBriefId);
+    const option = brief ? brief.options.find(o => o.id === st.chosenOptionId) : null;
+    if (!brief || !option) return { ok: false, reason: 'Выберите один брифинг' };
+    if (presidentOptionBlockReason(option)) return { ok: false, reason: presidentOptionBlockReason(option) };
+    if (!canAffordPresidentOption(option)) return { ok: false, reason: 'Недостаточно денег в кассе клуба' };
+    const stance = getPresidentStanceData(st.stance);
+    if (!stance) return { ok: false, reason: 'Выберите курс недели' };
+    const ev = st.eventId ? getPresidentEventData(st.eventId) : null;
+    const evOpt = ev && st.eventChoiceId ? (ev.options.find(o => o.id === st.eventChoiceId) || (st.eventChoiceId === 'defer' ? { id: 'defer', label: 'Отложить', effects: { trust: -1 }, delayed: null } : null)) : null;
+    if (ev && !evOpt) return { ok: false, reason: 'Отреагируйте на событие недели' };
+    if (evOpt && presidentOptionBlockReason(evOpt)) return { ok: false, reason: presidentOptionBlockReason(evOpt) };
+    if (evOpt && !canAffordPresidentOption(evOpt)) return { ok: false, reason: 'Недостаточно денег для реакции на событие' };
+
+    // Пункт 9: лимиты проверяются ДО применения эффектов, чтобы не было
+    // частично применённой сделки. Подписание бывшего клиента — не больше
+    // одного за неделю (2 за сезон / 4 за срок), GM-вариант тоже считается.
+    const formerIds = new Set(['sign', 'gm']);
+    const briefFormer = brief.id === 'former_client' && formerIds.has(option.id);
+    const eventFormer = !!ev && ev.id === 'E15' && !!evOpt && formerIds.has(evOpt.id);
+    if (briefFormer && eventFormer) {
+        return { ok: false, reason: 'За неделю можно подписать только одного бывшего клиента' };
+    }
+    const formerDeal = briefFormer || eventFormer ? getFormerClientDeal() : null;
+    if ((briefFormer || eventFormer) && !formerDeal) {
+        return { ok: false, reason: 'Нет доступного бывшего клиента' };
+    }
+    const formerBlock = getFormerClientSigningBlockReason(formerDeal);
+    if (formerBlock) return { ok: false, reason: formerBlock };
+
+    applyPresidentEffects(stance.effects, 'Курс недели', stance.label);
+    applyPresidentEffects(option.effects, brief.title, option.label);
+    schedulePresidentDelayed(option, brief.title);
+    if (evOpt) {
+        applyPresidentEffects(evOpt.effects, ev ? ev.title : 'Событие', evOpt.label);
+        schedulePresidentDelayed(evOpt, ev ? ev.title : 'Событие');
+    }
+    if (formerDeal) commitFormerClientSigning(formerDeal);
+
+    st.decisions = (st.decisions || 0) + 1;
+    if (st.tutorialStep < 3) st.tutorialStep = Math.min(3, st.tutorialStep + 1);
+    st.log.unshift({
+        season: currentSeason, week: currentWeek,
+        stance: stance.label,
+        brief: brief.title,
+        choice: option.label,
+        event: ev ? ev.title : null,
+        eventChoice: evOpt ? evOpt.label : null
+    });
+    st.log = st.log.slice(0, PRESIDENT_DECISION_LOG_LIMIT);
+    st.ready = true;
+    addNews(`🗳️ ${LANG.t('Решения недели')}: ${LANG.t(stance.label)} + «${LANG.t(option.label)}»${evOpt ? `; ${LANG.t('Событие недели')} «${LANG.t(evOpt.label)}»` : ''}`, 'info');
+    saveGame();
+    return { ok: true };
+}
+
+function finishPresidentWeek() {
+    if (!presidentClubKey || !presidentDecisions) return;
+    presidentDecisions.ready = false;
+    presidentDecisions.weekKey = null;
+    presidentDecisions.stance = null;
+    presidentDecisions.chosenBriefId = null;
+    presidentDecisions.chosenOptionId = null;
+    presidentDecisions.eventId = null;
+    presidentDecisions.eventChoiceId = null;
+}
+
+function showPresidentDecisionsScreen() {
     if (!presidentClubKey) { uiAlert(LANG.t('Вы не президент ни одного клуба.')); return; }
     hidePagination();
-    clubHubTab = 'overview';
+    clubHubTab = 'decisions';
     document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
     const s = document.getElementById('club-hub-screen');
     if (s) s.style.display = 'flex';
     showClubBottomNav();
     renderClubHub();
+}
+
+function startPresidentOnboarding() {
+    const st = ensurePresidentDecisions();
+    if (!st || st.onboardingSeen) return;
+    const modal = document.getElementById('president-onboarding-modal');
+    const body = document.getElementById('president-onboarding-body');
+    if (!modal || !body) return;
+    body.innerHTML = `
+        <div class="po-step"><b>${LANG.t('1. Вы владелец, не тренер.')}</b><span>${LANG.t('Вы задаёте рамку: бюджет, штаб, трансферы выше лимита, инфраструктура, кризисы. Тактику и состав ведёт тренер.')}</span></div>
+        <div class="po-step"><b>${LANG.t('2. У вас есть мандат совета.')}</b><span>${LANG.t('Три цели на сезон: спорт, финансы, наследие. Доверие совета — ваш срок жизни. Поддержка фанатов — ваш доход и домашний бонус.')}</span></div>
+        <div class="po-step"><b>${LANG.t('3. Каждая неделя — минимум одно решение.')}</b><span>${LANG.t('Курс недели + один брифинг из трёх + реакция на событие. У каждого варианта видимая цена, у многих — последствия через 1–5 недель.')}</span></div>
+        <div class="po-step"><b>${LANG.t('4. Ошибка не конец.')}</b><span>${LANG.t('Клуб можно покинуть, продать или потерять — агентство заморожено и вернётся к вам. Наследие останется в истории клуба.')}</span></div>
+    `;
+    modal.style.display = 'flex';
+    const start = document.getElementById('president-onboarding-start');
+    if (start) {
+        start.onclick = () => {
+            st.onboardingSeen = true;
+            modal.style.display = 'none';
+            saveGame();
+            showPresidentDecisionsScreen();
+            maybeStartPresidentTutorial();
+        };
+    }
+}
+
+function whyButton(text) {
+    return `<button class="why-btn" type="button" aria-label="${LANG.t('Почему?')}" data-why="${escapeHtml(text)}">?</button>`;
+}
+
+function hideWhyPopover() {
+    const pop = document.getElementById('why-popover');
+    if (pop) pop.style.display = 'none';
+}
+
+function showWhyPopover(btn) {
+    const pop = document.getElementById('why-popover');
+    if (!pop || !btn) return;
+    pop.textContent = btn.getAttribute('data-why') || '';
+    pop.style.display = 'block';
+    const r = btn.getBoundingClientRect();
+    const maxW = Math.min(320, window.innerWidth - 24);
+    pop.style.maxWidth = maxW + 'px';
+    const left = Math.max(12, Math.min(window.innerWidth - maxW - 12, r.left - 12));
+    const top = Math.min(window.innerHeight - 140, r.bottom + 8);
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+}
+
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('.why-btn');
+    if (btn) {
+        e.preventDefault();
+        e.stopPropagation();
+        showWhyPopover(btn);
+        return;
+    }
+    hideWhyPopover();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideWhyPopover(); });
+
+function presidentMeterChip(icon, label, value, suffix = '') {
+    const v = Math.round(value);
+    const tone = v >= 65 ? 'good' : v >= 40 ? 'mid' : 'bad';
+    return `<div class="pdec-chip ${tone}"><span>${icon} ${LANG.t(label)}</span><b>${v}${suffix}</b></div>`;
+}
+
+function renderPresidentDecisions(c, club) {
+    const st = ensurePresidentWeek();
+    if (!st) return;
+    c.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'pdec-wrap';
+
+    const head = document.createElement('div');
+    head.className = 'pdec-head';
+    head.innerHTML = `
+        <div class="pdec-title">🗳️ ${LANG.t('Решения недели')}</div>
+        <div class="pdec-sub">${LANG.t('Сезон')} ${currentSeason}/${currentSeason + 1} • ${LANG.t('Неделя')} ${currentWeek}</div>
+        <div class="pdec-meters">
+            ${presidentMeterChip('🏛️', 'Совет', getPresidentTrust(), '%')}
+            ${presidentMeterChip('📣', 'Фанаты', st.meters.fans)}
+            ${presidentMeterChip('🫂', 'Раздевалка', st.meters.dressing)}
+            ${presidentMeterChip('⭐', 'Престиж', club.prestige)}
+            <div class="pdec-chip cash"><span>💰 ${LANG.t('Касса')}</span><b>${formatMoney(club.budget)}</b></div>
+            <div class="pdec-chip ${getClubSalaryLoad(club) > 90 ? 'bad' : 'good'}"><span>📉 ${LANG.t('Ведомость')}</span><b>${getClubSalaryLoad(club)}%</b></div>
+        </div>
+    `;
+    wrap.appendChild(head);
+
+    const stanceSec = document.createElement('div');
+    stanceSec.className = 'pdec-section';
+    stanceSec.innerHTML = `<div class="pdec-section-title">1. ${LANG.t('Курс недели')}</div><div class="pdec-stances"></div>`;
+    const stanceGrid = stanceSec.querySelector('.pdec-stances');
+    presidentStancePool().forEach(s => {
+        const btn = document.createElement('button');
+        btn.className = 'pdec-stance' + (st.stance === s.id ? ' selected' : '');
+        btn.type = 'button';
+        btn.innerHTML = `<b>${s.icon} ${LANG.t(s.label)}</b><span>${LANG.t(s.desc)}</span><em>${LANG.t(s.cost)}</em>`;
+        btn.addEventListener('click', () => { st.stance = s.id; st.ready = false; renderClubHub(); });
+        stanceGrid.appendChild(btn);
+    });
+    wrap.appendChild(stanceSec);
+
+    const briefSec = document.createElement('div');
+    briefSec.className = 'pdec-section';
+    const chosenBrief = getPresidentBriefData(st.chosenBriefId);
+    briefSec.innerHTML = `<div class="pdec-section-title">2. ${LANG.t('Один брифинг из трёх')}</div><div class="pdec-briefs"></div>`;
+    const briefsBox = briefSec.querySelector('.pdec-briefs');
+    (st.briefIds || []).forEach(id => {
+        const brief = getPresidentBriefData(id);
+        if (!brief) return;
+        const card = document.createElement('div');
+        card.className = 'pdec-brief' + (chosenBrief && chosenBrief.id === brief.id ? ' selected' : '');
+        card.innerHTML = `<div class="pdec-brief-title">${brief.icon || '📋'} ${LANG.t(brief.title)}</div><div class="pdec-brief-text">${escapeHtml(LANG.t(brief.text))}</div>`;
+        brief.options.forEach(opt => {
+            const blockReason = presidentOptionBlockReason(opt);
+            const affordable = canAffordPresidentOption(opt) && !blockReason;
+            const ob = document.createElement('button');
+            ob.type = 'button';
+            ob.className = 'pdec-option' + (st.chosenBriefId === brief.id && st.chosenOptionId === opt.id ? ' selected' : '') + (affordable ? '' : ' disabled');
+            ob.disabled = !affordable;
+            ob.innerHTML = `<b>${LANG.t(opt.label)}</b><span>${escapeHtml(LANG.t(opt.desc || ''))}</span><em>${escapeHtml(LANG.t(opt.cost || ''))}</em>`;
+            ob.title = blockReason ? LANG.t(blockReason)
+                : affordable ? LANG.t(opt.cost || '') : LANG.t('Недостаточно денег в кассе клуба');
+            ob.addEventListener('click', () => {
+                st.chosenBriefId = brief.id;
+                st.chosenOptionId = opt.id;
+                st.ready = false;
+                renderClubHub();
+            });
+            card.appendChild(ob);
+        });
+        briefsBox.appendChild(card);
+    });
+    wrap.appendChild(briefSec);
+
+    const evSec = document.createElement('div');
+    evSec.className = 'pdec-section';
+    const ev = st.eventId ? getPresidentEventData(st.eventId) : null;
+    if (ev) {
+        evSec.innerHTML = `<div class="pdec-section-title">3. ${LANG.t('Событие недели')}</div><div class="pdec-event"><div class="pdec-event-title">${ev.icon || '📰'} ${LANG.t(ev.title)}</div><div class="pdec-event-text">${escapeHtml(LANG.t(ev.text))}</div><div class="pdec-event-options"></div></div>`;
+        const opts = evSec.querySelector('.pdec-event-options');
+        ev.options.forEach(opt => {
+            const blockReason = presidentOptionBlockReason(opt);
+            const affordable = canAffordPresidentOption(opt) && !blockReason;
+            const ob = document.createElement('button');
+            ob.type = 'button';
+            ob.className = 'pdec-option' + (st.eventChoiceId === opt.id ? ' selected' : '') + (affordable ? '' : ' disabled');
+            ob.disabled = !affordable;
+            ob.innerHTML = `<b>${LANG.t(opt.label)}</b><span>${escapeHtml(LANG.t(opt.desc || ''))}</span><em>${escapeHtml(LANG.t(opt.cost || ''))}</em>`;
+            if (blockReason) ob.title = LANG.t(blockReason);
+            ob.addEventListener('click', () => { st.eventChoiceId = opt.id; st.ready = false; renderClubHub(); });
+            opts.appendChild(ob);
+        });
+        const defer = document.createElement('button');
+        defer.type = 'button';
+        defer.className = 'pdec-option defer' + (st.eventChoiceId === 'defer' ? ' selected' : '');
+        defer.innerHTML = `<b>${LANG.t('Отложить')}</b><span>${LANG.t('Закрыть событие без реакции. Оно не вернётся.')}</span><em>${LANG.t('Доверие −1')}</em>`;
+        defer.addEventListener('click', () => { st.eventChoiceId = 'defer'; st.ready = false; renderClubHub(); });
+        opts.appendChild(defer);
+    } else {
+        evSec.innerHTML = `<div class="pdec-section-title">3. ${LANG.t('Событие недели')}</div><div class="pdec-quiet">🕊️ ${LANG.t('Спокойная неделя: событий нет.')}</div>`;
+    }
+    wrap.appendChild(evSec);
+
+    const delayed = (st.delayed || []).slice().sort((a, b) => a.due - b.due).slice(0, 5);
+    if (delayed.length > 0) {
+        const dSec = document.createElement('div');
+        dSec.className = 'pdec-section';
+        dSec.innerHTML = `<div class="pdec-section-title">⏳ ${LANG.t('Последствия впереди')}</div>` +
+            delayed.map(d => `<div class="pdec-delayed"><b>${escapeHtml(LANG.t(d.title))}</b><span>${escapeHtml(LANG.t(d.text))}</span><em>${Math.max(0, d.due - presidentAbsWeek())} ${LANG.t('нед.')}</em></div>`).join('');
+        wrap.appendChild(dSec);
+    }
+
+    const footer = document.createElement('div');
+    footer.className = 'pdec-footer';
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'pdec-confirm';
+    const ready = !!(st.stance && st.chosenBriefId && st.chosenOptionId && (!st.eventId || st.eventChoiceId));
+    confirm.disabled = !ready;
+    confirm.textContent = ready ? '✅ ' + LANG.t('Подтвердить и играть неделю') : LANG.t('Выберите курс, брифинг и реакцию');
+    confirm.addEventListener('click', () => {
+        const res = applyPresidentWeekChoices();
+        if (!res.ok) { uiAlert(LANG.t(res.reason)); return; }
+        requestPlayWeek();
+    });
+    footer.appendChild(confirm);
+    const play = document.createElement('button');
+    play.type = 'button';
+    play.className = 'pdec-play';
+    play.textContent = st.ready ? '▶ ' + LANG.t('Играть неделю') : LANG.t('Сначала подтвердите решения');
+    play.disabled = !st.ready;
+    play.addEventListener('click', () => requestPlayWeek());
+    footer.appendChild(play);
+    wrap.appendChild(footer);
+
+    c.appendChild(wrap);
+}
+
+// ============ 16.7. ИНФРАСТРУКТУРА КЛУБА ============
+function showPresidentClubHub(tab) {
+    if (!presidentClubKey) return false;
+    if (tab) clubHubTab = tab;
+    hidePagination();
+    document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
+    const s = document.getElementById('club-hub-screen');
+    if (!s) return false;
+    s.style.display = 'flex';
+    showClubBottomNav();
+    renderClubHub();
+    return true;
+}
+
+function showInfrastructureScreen() {
+    if (!presidentClubKey) { uiAlert(LANG.t('Вы не президент ни одного клуба.')); return; }
+    showPresidentClubHub('overview');
 }
 
 function showClubBottomNav() {
@@ -5744,6 +7712,7 @@ function renderClubHub() {
     c.innerHTML = '';
 
     if (clubHubTab === 'overview') renderClubOverview(c, club);
+    else if (clubHubTab === 'decisions') renderPresidentDecisions(c, club);
     else if (clubHubTab === 'roster') renderClubRoster(c, club);
     else if (clubHubTab === 'upgrade') renderClubUpgrade(c, club);
     else if (clubHubTab === 'tasks') renderClubTasks(c, club);
@@ -5760,6 +7729,18 @@ function renderClubOverview(c, club) {
     const positions = clubSeasonPositions[presidentClubKey] || [];
     const lastPos = positions.length > 0 ? positions[positions.length - 1].place : null;
     const totalTeams = getAllClubs(club.league).length;
+    const pd = ensurePresidentWeek();
+    const fans = pd ? pd.meters.fans : 50;
+    const dressing = pd ? pd.meters.dressing : 55;
+    const budgetWhy = presidentFormat('Баланс клуба = прошлый баланс + недельная выручка {income} − расходы {expenses} + трансферы/кредиты. Сейчас: {budget}, недельный результат {result}.', {
+        income: formatMoney(club.weeklyIncome || 0), expenses: formatMoney(club.weeklyExpenses || 0),
+        budget: formatMoney(club.budget), result: formatMoney(club.weeklyResult || 0)
+    });
+    const wageWhy = presidentFormat('Загрузка ведомости = сумма годовых ЗП игроков / бюджет клуба. Сейчас: {load}%. Красная зона — выше 95%: совет снижает доверие и блокирует трансферы.', {
+        load: salaryLoad
+    });
+    const fansWhy = LANG.t('Поддержка фанатов растёт от побед, звёзд и молодёжи; падает от высоких цен, продажи лидеров и скучного хоккея. Влияет на посещаемость и домашний бонус.');
+    const dressingWhy = LANG.t('Раздевалка — мораль игроков. Растёт от побед, честных обещаний и сильного тренера; падает от обменов, штрафов и конфликтов. Даёт до ±6% силы.');
 
     const header = document.createElement('div');
     header.className = 'ov-header';
@@ -5768,12 +7749,12 @@ function renderClubOverview(c, club) {
             <div class="ov-club-logo">${getTeamLogoHTML(club.club, club.league)}</div>
             <div class="ov-club-info">
                 <div class="ov-club-name">${club.club}</div>
-                <div class="ov-club-meta">${getLeagueName(club.league)} • ${LANG.t('Престиж')} ${club.prestige}</div>
+                <div class="ov-club-meta">${getLeagueName(club.league)} • ${LANG.t('Престиж')} ${club.prestige} ${whyButton(`Престиж — долгосрочная привлекательность клуба: спонсоры, ТВ, интерес игроков. Растёт от титулов и плей-офф, падает от скандалов и провалов.`)}</div>
             </div>
         </div>
         <div class="ov-stats-grid">
             <div class="ov-stat">
-                <span class="ov-stat-lbl">💰 ${LANG.t('Баланс')}</span>
+                <span class="ov-stat-lbl">💰 ${LANG.t('Баланс')} ${whyButton(budgetWhy)}</span>
                 <span class="ov-stat-val ${club.budget < 0 ? 'negative' : ''}">${formatMoney(club.budget)}</span>
             </div>
             <div class="ov-stat">
@@ -5781,13 +7762,39 @@ function renderClubOverview(c, club) {
                 <span class="ov-stat-val">${avgLvl}/25</span>
             </div>
             <div class="ov-stat">
-                <span class="ov-stat-lbl">📉 ${LANG.t('Нагрузка ЗП')}</span>
+                <span class="ov-stat-lbl">📉 ${LANG.t('Нагрузка ЗП')} ${whyButton(wageWhy)}</span>
                 <span class="ov-stat-val ${loadClass}">${salaryLoad}%</span>
             </div>
+            <div class="ov-stat">
+                <span class="ov-stat-lbl">📣 ${LANG.t('Фанаты')} ${whyButton(fansWhy)}</span>
+                <span class="ov-stat-val">${fans}</span>
+            </div>
+            <div class="ov-stat">
+                <span class="ov-stat-lbl">🫂 ${LANG.t('Раздевалка')} ${whyButton(dressingWhy)}</span>
+                <span class="ov-stat-val">${dressing}</span>
+            </div>
         </div>
-        ${club.budget < 0 ? '<div class="ov-debt-warn">🔴 Клуб в долгах! Улучшения недоступны</div>' : ''}
+        ${club.budget < 0 ? `<div class="ov-debt-warn">🔴 ${LANG.t('Клуб в долгах! Улучшения недоступны')}</div>` : ''}
     `;
     c.appendChild(header);
+
+    // ===== 1b. Оценка прошлого сезона и бюджет на следующий =====
+    const review = getLatestSeasonReview(presidentClubKey);
+    if (review) {
+        const gradeClass = review.grade === 'S' || review.grade === 'A' ? 'grade-top'
+            : review.grade === 'B' || review.grade === 'C' ? 'grade-mid' : 'grade-low';
+        const reviewBlock = document.createElement('div');
+        reviewBlock.className = 'ov-review';
+        reviewBlock.innerHTML = `
+            <div class="ov-review-grade ${gradeClass}">${review.grade}</div>
+            <div class="ov-review-body">
+                <div class="ov-review-title">📊 ${LANG.t('Оценка сезона')} ${review.season}</div>
+                <div class="ov-review-line">${LANG.t('Место')}: ${review.place}/${review.totalTeams} • ${LANG.t('Задачи совета')}: ${review.tasksDone}/${review.tasksTotal}</div>
+                <div class="ov-review-line">${LANG.t('Бюджет на следующий сезон')}: <b>${formatMoney(review.budgetNext)}</b></div>
+            </div>
+        `;
+        c.appendChild(reviewBlock);
+    }
 
     // ===== 2. Место в лиге =====
     if (lastPos !== null) {
@@ -5824,7 +7831,25 @@ function renderClubOverview(c, club) {
         c.appendChild(councilBlock);
     }
 
-    // ===== 4. Трофеи =====
+    // ===== 4. Решения недели (одно решение = один ход, без микроменеджмента) =====
+    const decisionsDone = presidentWeekReady();
+    const decisionBlock = document.createElement('div');
+    decisionBlock.className = 'ov-decisions' + (decisionsDone ? ' done' : '');
+    decisionBlock.innerHTML = `
+        <div class="ov-decisions-head">
+            <span class="ov-decisions-title">🗳️ ${LANG.t('Решения недели')}</span>
+            <span class="ov-decisions-status">${decisionsDone ? LANG.t('приняты') : LANG.t('ждут решения')}</span>
+        </div>
+        <div class="ov-decisions-text">${decisionsDone ? LANG.t('Курс, брифинг и событие зафиксированы. Можно играть неделю.') : LANG.t('Выберите курс, один брифинг и реакцию на событие. У каждого варианта есть цена.')}</div>
+        <button type="button" class="ov-decisions-btn">${decisionsDone ? '▶ ' + LANG.t('Играть неделю') : '→ ' + LANG.t('Открыть решения')}</button>
+    `;
+    decisionBlock.querySelector('.ov-decisions-btn').addEventListener('click', () => {
+        if (decisionsDone) requestPlayWeek();
+        else showPresidentDecisionsScreen();
+    });
+    c.appendChild(decisionBlock);
+
+    // ===== 5. Трофеи =====
     const trophies = getClubTrophiesList(club);
     if (trophies.length > 0) {
         const trophyBlock = document.createElement('div');
@@ -5838,7 +7863,7 @@ function renderClubOverview(c, club) {
         c.appendChild(trophyBlock);
     }
 
-    // ===== 5. График позиций =====
+    // ===== 6. График позиций =====
     const graphHTML = buildClubPositionGraph(presidentClubKey);
     if (graphHTML) {
         const graphWrap = document.createElement('div');
@@ -5856,11 +7881,12 @@ function renderClubOverview(c, club) {
     footer.className = 'infra-footer';
     const leaveBtn = document.createElement('button');
     leaveBtn.className = 'infra-leave-btn';
-    leaveBtn.textContent = '🚪 Покинуть пост президента';
+    leaveBtn.textContent = '🚪 ' + LANG.t('Покинуть пост президента');
     leaveBtn.addEventListener('click', async () => {
         if (!(await uiConfirm(LANG.t('Покинуть пост президента? Акции останутся у вас.')))) return;
         presidentClubKey = null;
         clubCouncil = null;
+        presidentDecisions = null;
         saveGame();
         hideClubBottomNav();
         hidePagination();
@@ -5882,7 +7908,7 @@ function renderClubRoster(c, club) {
     const teamPlayers = players.filter(p => p.club === club.club && p.league === club.league);
 
     if (teamPlayers.length === 0) {
-        c.innerHTML = '<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">Состав пуст</div><div class="empty-desc">У этого клуба пока нет игроков</div></div>';
+        c.innerHTML = `<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">${LANG.t('Состав пуст')}</div><div class="empty-desc">${LANG.t('У этого клуба пока нет игроков')}</div></div>`;
         return;
     }
 
@@ -5893,11 +7919,11 @@ function renderClubRoster(c, club) {
     const summary = document.createElement('div');
     summary.className = 'roster-summary';
     summary.innerHTML = `
-        <div class="rs-title">👥 СОСТАВ ${club.club.toUpperCase()}</div>
+        <div class="rs-title">👥 ${LANG.t('СОСТАВ')} ${club.club.toUpperCase()}</div>
         <div class="rs-stats">
-            <div class="rs-stat"><span class="v">${teamPlayers.length}</span><span class="l">Игроков</span></div>
-            <div class="rs-stat"><span class="v">${avgRating}</span><span class="l">Ср. рейтинг</span></div>
-            <div class="rs-stat"><span class="v">${avgAge}</span><span class="l">Ср. возраст</span></div>
+            <div class="rs-stat"><span class="v">${teamPlayers.length}</span><span class="l">${LANG.t('Игроков')}</span></div>
+            <div class="rs-stat"><span class="v">${avgRating}</span><span class="l">${LANG.t('Ср. рейтинг')}</span></div>
+            <div class="rs-stat"><span class="v">${avgAge}</span><span class="l">${LANG.t('Ср. возраст')}</span></div>
         </div>
     `;
     c.appendChild(summary);
@@ -5929,7 +7955,7 @@ function renderClubRoster(c, club) {
     else if (clubRosterFilter === 'exp') filtered = teamPlayers.filter(p => p.contractYears === 1);
 
     if (filtered.length === 0) {
-        c.innerHTML += '<div class="empty-state-small">Нет игроков в этой категории</div>';
+        c.innerHTML += `<div class="empty-state-small">${LANG.t('Нет игроков в этой категории')}</div>`;
         return;
     }
 
@@ -5971,7 +7997,7 @@ function buildRosterRow(p) {
     row.className = 'roster-row' + (isMine ? ' my-client' : '');
     row.style.cursor = 'pointer';
     row.addEventListener('click', () => {
-        playerReturnContext = null;
+        playerReturnContext = { type: 'president-club', clubKey: presidentClubKey, tab: clubHubTab || 'roster' };
         openPlayerScreen(p, 'public');
     });
     const rc = p.rating >= 80 ? 'high' : p.rating >= 65 ? 'mid' : 'low';
@@ -5989,8 +8015,8 @@ function buildRosterRow(p) {
                 <span class="rr-pos">${p.position}</span>
             </div>
             <div class="rr-meta">
-                <span>${p.age} лет</span>
-                <span>${contractEnd} ${p.contractYears} г. • ${formatSalary(p.salary)}</span>
+                <span>${p.age} ${LANG.t('лет')}</span>
+                <span>${contractEnd} ${p.contractYears} ${LANG.t('г.')} • ${formatSalary(p.salary)}</span>
             </div>
         </div>
         <div class="rr-right">
@@ -5998,7 +8024,7 @@ function buildRosterRow(p) {
             <div class="rr-form">${formIcon}</div>
         </div>
         <div class="rr-stats">
-            И:${s.gp} • Г:${s.goals} • П:${s.assists} • О:${pts}
+            ${LANG.t('И:')}${s.gp} • ${LANG.t('Г:')}${s.goals} • ${LANG.t('П:')}${s.assists} • ${LANG.t('О:')}${pts}
         </div>
     `;
     return row;
@@ -6007,7 +8033,7 @@ function buildRosterRow(p) {
 function renderClubTasks(c, club) {
     c.innerHTML = '';
     ensureCouncil();
-    if (!clubCouncil) { c.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">Нет задач</div></div>'; return; }
+    if (!clubCouncil) { c.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">${LANG.t('Нет задач')}</div></div>`; return; }
 
     // Шапка совета
     const loy = clubCouncil.loyalty;
@@ -6053,14 +8079,14 @@ function renderClubTasks(c, club) {
     // Дедлайн
     const hint = document.createElement('div');
     hint.className = 'council-hint';
-    hint.innerHTML = `📅 Дедлайн: конец сезона (неделя 52)`;
+    hint.innerHTML = `📅 ${LANG.t('Дедлайн: конец сезона (неделя 52)')}`;
     c.appendChild(hint);
 
     // История (если есть)
     if (clubCouncil.history && clubCouncil.history.length > 0) {
         const histTitle = document.createElement('div');
         histTitle.className = 'council-section-title';
-        histTitle.innerHTML = '📜 История';
+        histTitle.innerHTML = '📜 ' + LANG.t('История');
         c.appendChild(histTitle);
 
         const lastSeasons = clubCouncil.history.slice(-5).reverse();
@@ -6070,7 +8096,7 @@ function renderClubTasks(c, club) {
             const cls = h.done === h.total ? 'good' : h.done >= h.total / 2 ? 'mid' : 'bad';
             row.innerHTML = `
                 <span class="chr-season">${h.season}</span>
-                <span class="chr-result ${cls}">${h.done} из ${h.total}</span>
+                <span class="chr-result ${cls}">${h.done} ${LANG.t('из')} ${h.total}</span>
             `;
             c.appendChild(row);
         });
@@ -6145,15 +8171,15 @@ function renderClubReports(c, club) {
     if (clubCouncil && clubCouncil.history && clubCouncil.history.length > 0) {
         const histTitle = document.createElement('div');
         histTitle.className = 'reports-section-title';
-        histTitle.innerHTML = '📋 Задачи совета';
+        histTitle.innerHTML = '📋 ' + LANG.t('Задачи совета');
         c.appendChild(histTitle);
 
         const histTable = document.createElement('div');
         histTable.className = 'reports-table';
         histTable.innerHTML = `
             <div class="rt-head">
-                <div class="rt-col-season">Сезон</div>
-                <div class="rt-col-num" style="grid-column: span 2;">Выполнено задач</div>
+                <div class="rt-col-season">${LANG.t('Сезон')}</div>
+                <div class="rt-col-num" style="grid-column: span 2;">${LANG.t('Выполнено задач')}</div>
             </div>
         `;
         clubCouncil.history.slice().reverse().forEach((h, idx) => {
@@ -6162,7 +8188,7 @@ function renderClubReports(c, club) {
             const cls = h.done === h.total ? 'good' : h.done >= h.total / 2 ? 'mid' : 'bad';
             row.innerHTML = `
                 <div class="rt-col-season">${h.season}/${(h.season + 1).toString().slice(-2)}</div>
-                <div class="rt-col-num ${cls}" style="grid-column: span 2;">${h.done} из ${h.total}</div>
+                <div class="rt-col-num ${cls}" style="grid-column: span 2;">${h.done} ${LANG.t('из')} ${h.total}</div>
             `;
             histTable.appendChild(row);
         });
@@ -6234,19 +8260,19 @@ function renderClubUpgrade(c, club) {
         <div class="infra-club-league">${getLeagueName(club.league)} • ${LANG.t('Престиж')} ${club.prestige}</div>
         <div class="infra-stats-row">
             <div class="infra-stat">
-                <span class="infra-stat-lbl">💰 Баланс</span>
+                <span class="infra-stat-lbl">💰 ${LANG.t('Баланс')}</span>
                 <span class="infra-stat-val ${club.budget < 0 ? 'negative' : ''}">${formatMoney(club.budget)}</span>
             </div>
             <div class="infra-stat">
-                <span class="infra-stat-lbl">📊 Средний ур.</span>
+                <span class="infra-stat-lbl">📊 ${LANG.t('Средний ур.')}</span>
                 <span class="infra-stat-val">${avgLvl}/25</span>
             </div>
             <div class="infra-stat">
-                <span class="infra-stat-lbl">📉 Нагрузка ЗП</span>
+                <span class="infra-stat-lbl">📉 ${LANG.t('Нагрузка ЗП')}</span>
                 <span class="infra-stat-val ${loadClass}">${salaryLoad}%</span>
             </div>
         </div>
-        ${club.budget < 0 ? '<div class="infra-debt-warn">🔴 Клуб в долгах! Улучшения недоступны</div>' : ''}
+        ${club.budget < 0 ? `<div class="infra-debt-warn">🔴 ${LANG.t('Клуб в долгах! Улучшения недоступны')}</div>` : ''}
     `;
     c.appendChild(header);
 
@@ -6256,7 +8282,7 @@ function renderClubUpgrade(c, club) {
         const trophyBlock = document.createElement('div');
         trophyBlock.className = 'infra-trophies';
         trophyBlock.innerHTML = `
-            <div class="infra-trophies-title">🏆 Трофеи клуба</div>
+            <div class="infra-trophies-title">🏆 ${LANG.t('Трофеи клуба')}</div>
             <div class="infra-trophies-grid">
                 ${trophies.map(t => `<div class="infra-trophy"><span class="infra-trophy-icon">${t.icon}</span><span class="infra-trophy-name">${t.name}</span><span class="infra-trophy-count">×${t.count}</span></div>`).join('')}
             </div>
@@ -6272,11 +8298,12 @@ function renderClubUpgrade(c, club) {
     footer.className = 'infra-footer';
     const leaveBtn = document.createElement('button');
     leaveBtn.className = 'infra-leave-btn';
-    leaveBtn.textContent = '🚪 Покинуть пост президента';
+    leaveBtn.textContent = '🚪 ' + LANG.t('Покинуть пост президента');
     leaveBtn.addEventListener('click', async () => {
         if (!(await uiConfirm(LANG.t('Покинуть пост президента? Акции останутся у вас.')))) return;
         presidentClubKey = null;
-        clubCouncil = null; // v1.0: сброс совета при потере поста
+        clubCouncil = null;
+        presidentDecisions = null; // v1.0: сброс совета при потере поста
         saveGame();
         hideClubBottomNav();
         hidePagination();
@@ -6324,7 +8351,7 @@ function buildClubUpgradeCard(club, cardKey) {
         const effNext = getCardEffects(cardKey, lvl + 1);
         nextBlock = `
             <div class="infra-next-section">
-                <div class="infra-next-title">СЛЕДУЮЩИЙ УРОВЕНЬ</div>
+                <div class="infra-next-title">${LANG.t('СЛЕДУЮЩИЙ УРОВЕНЬ')}</div>
                 ${effNext.labels.map((lbl, i) => `<div class="infra-effect-row next"><span class="infra-effect-lbl">${lbl}</span><span class="infra-effect-val-next">${formatEffectVal(cardKey, i, effNext.values[i])}</span></div>`).join('')}
             </div>
         `;
@@ -6334,8 +8361,8 @@ function buildClubUpgradeCard(club, cardKey) {
         <div class="infra-card-head">
             <div class="infra-card-icon">${card.icon}</div>
             <div class="infra-card-title-block">
-                <div class="infra-card-title">${card.name.toUpperCase()}</div>
-                <div class="infra-card-desc">${card.desc}</div>
+                <div class="infra-card-title">${LANG.t(card.name).toUpperCase()}</div>
+                <div class="infra-card-desc">${LANG.t(card.desc)}</div>
             </div>
             <div class="infra-card-level">${lvl}<span class="infra-card-level-max">/25</span></div>
         </div>
@@ -6382,6 +8409,8 @@ function purchaseClubUpgrade(cardKey) {
 
     club.budget -= cost;
     club.upgrades[cardKey] = lvl + 1;
+    // Деньги → штат → сила: покупка сразу пересчитывает силу клуба.
+    refreshTeamStrengths();
 
     const card = CLUB_UPGRADE_CARDS[cardKey];
     addNews(`🏗 ${card.icon} ${card.name} улучшен до ${lvl + 1} (${club.club})`, "positive");
@@ -6392,12 +8421,12 @@ function purchaseClubUpgrade(cardKey) {
 }
 
 function getCardEffects(cardKey, lvl) {
-    if (cardKey === 'stadium') return { labels: ['Вместимость', 'Дом. бонус'], values: [getStadiumCapacity(lvl), getStadiumHomeBonus(lvl)] };
-    if (cardKey === 'marketing') return { labels: ['Спонсоров', 'Множитель дохода'], values: [getMarketingSponsors(lvl), getMarketingMultiplier(lvl)] };
-    if (cardKey === 'medical') return { labels: ['Снижение травм', 'Восстановление'], values: [getMedicalInjuryReduction(lvl), getMedicalRecoveryWeeks(lvl)] };
-    if (cardKey === 'training') return { labels: ['Бонус к росту'], values: [getTrainingGrowthBonus(lvl)] };
-    if (cardKey === 'scouting') return { labels: ['Мин. рейтинг новичка', 'Шанс таланта'], values: [getScoutingMinRating(lvl), getScoutingTalentChance(lvl)] };
-    if (cardKey === 'academy') return { labels: ['Бонус к потенциалу'], values: [getAcademyPotentialBonus(lvl)] };
+    if (cardKey === 'stadium') return { labels: [LANG.t('Вместимость'), LANG.t('Дом. бонус')], values: [getStadiumCapacity(lvl), getStadiumHomeBonus(lvl)] };
+    if (cardKey === 'marketing') return { labels: [LANG.t('Спонсоров'), LANG.t('Множитель дохода')], values: [getMarketingSponsors(lvl), getMarketingMultiplier(lvl)] };
+    if (cardKey === 'medical') return { labels: [LANG.t('Снижение травм'), LANG.t('Восстановление')], values: [getMedicalInjuryReduction(lvl), getMedicalRecoveryWeeks(lvl)] };
+    if (cardKey === 'training') return { labels: [LANG.t('Бонус к росту')], values: [getTrainingGrowthBonus(lvl)] };
+    if (cardKey === 'scouting') return { labels: [LANG.t('Мин. рейтинг новичка'), LANG.t('Шанс таланта')], values: [getScoutingMinRating(lvl), getScoutingTalentChance(lvl)] };
+    if (cardKey === 'academy') return { labels: [LANG.t('Бонус к потенциалу')], values: [getAcademyPotentialBonus(lvl)] };
     return { labels: [], values: [] };
 }
 
@@ -6541,7 +8570,10 @@ function renderNewsFeedScreen() {
             ev.stopPropagation();
             const name = span.getAttribute('data-player');
             const client = myRoster.find(p => p.name === name);
-            if (client) openPlayerScreen(client, 'my');
+            if (client) {
+                playerReturnContext = { type: 'screen', screenId: 'news-feed-screen' };
+                openPlayerScreen(client, 'my');
+            }
         });
     });
 }
@@ -6556,6 +8588,8 @@ document.querySelectorAll('#news-feed-screen .clients-tab').forEach(t => t.addEv
 function updateAllDisplays() {
     renderOffice();
     checkAllGoals();
+    // v1.3: достижения проверяются по уже посчитанным счётчикам (идемпотентно).
+    checkAchievements();
 }
 
 // ============ 17. КЛИЕНТЫ ============
@@ -6587,7 +8621,10 @@ function renderMyClients(c) {
         const row = document.createElement('div');
         row.className = 'player-row';
         row.innerHTML = buildPlayerRow(p);
-        row.addEventListener('click', () => openPlayerScreen(p, 'my'));
+        row.addEventListener('click', () => {
+            playerReturnContext = null;
+            openPlayerScreen(p, 'my');
+        });
         c.appendChild(row);
     });
     showPagination(myRoster.length, () => { c.innerHTML = ''; renderMyClients(c); });
@@ -6667,6 +8704,7 @@ function renderSearchClients(c) {
         card.innerHTML = buildTalentCard(p);
         card.addEventListener('click', (e) => {
             if (e.target.closest && e.target.closest('[data-attr-help]')) return;
+            playerReturnContext = null;
             openPlayerScreen(p, 'search');
         });
         frag.appendChild(card);
@@ -6740,6 +8778,7 @@ function buildTalentCard(p) {
                 <div class="talent-name-line"><span class="p-name${pot.glow}">${p.name}</span><span class="p-flag">${flag}</span></div>
                 <div class="talent-tags">
                     <span class="p-pos">${p.position}</span>
+                    ${!p.club ? `<span class="talent-fa-badge">FA</span>` : ''}
                     <span class="talent-arch">${arch.icon} ${LANG.t(arch.label)}</span>
                     <span class="talent-age">${p.age} ${LANG.t('лет')}</span>
                 </div>
@@ -6787,6 +8826,7 @@ function renderPlayerScreen() {
     else if (playerTab === 'development') renderPlayerDevelopment(c, p);
     else if (playerTab === 'transfer') renderPlayerTransfer(c, p);
     else if (playerTab === 'history') renderPlayerHistory(c, p);
+    else if (playerTab === 'dialogue') renderPlayerDialogue(c, p);
 }
 
 function renderPlayerInfo(c, p) {
@@ -6945,6 +8985,7 @@ function buildGoalieStatsHTML(s) {
 
 function buildPlayerActions(p) {
     if (currentPlayerSource === 'search') {
+        if (myRoster.some(x => x.name === p.name)) return `<div class="pp-warning">✅ ${LANG.t('Игрок уже в агентстве')}</div>`;
         if (myRoster.length >= getSlots()) return `<div class="pp-warning">⚠️ ${LANG.t('Вы должны улучшить свой Офис для большего количества игроков или отпустить некоторых (Максимум {n})').replace('{n}', getSlots())}</div>`;
         return `<button class="btn-success pp-sign-btn" id="btn-pp-sign">✓ ${LANG.t('Подписать')}</button>`;
     }
@@ -7316,6 +9357,7 @@ function renderNegotiationModal(player) {
     renderPhoneActions(player);
     closeEventModal();
     negotiationModal.style.display = 'flex';
+    notifyTutorial('negotiation');
     scrollChatToBottom();
 }
 
@@ -7423,11 +9465,13 @@ function renderNegotiationBuilder(player) {
             const valEl = negBuilderBody.querySelector(`#neg-val-${key}`);
             if (valEl && spec) valEl.textContent = formatNegotiationSliderValue(spec, raw);
             updateBuilderCommissionTotal();
+            updateNegotiationChance(player);
         });
     });
 
     // Итоговая комиссия агента за год — под ползунками.
-    negBuilderBody.insertAdjacentHTML('beforeend', `<div class="neg-builder-total" id="neg-builder-total"></div>`);
+    negBuilderBody.insertAdjacentHTML('beforeend', buildContractChanceHTML(player, draft) + `<div class="neg-builder-total" id="neg-builder-total"></div>`);
+    updateNegotiationChance(player);
     updateBuilderCommissionTotal();
 
     // Кнопка «Сделать предложение» активна только в фазе конструктора.
@@ -7595,7 +9639,7 @@ function acceptNegotiation(player, termsOverride) {
 
     // Подписной бонус — мгновенно агенту
     if (o.signingBonus) {
-        agentMoney += o.signingBonus;
+        applyMoney(o.signingBonus, `Подписной бонус: ${player.name}`);
         addNews(`🎁 ${LANG.t('Подписной бонус')}: +${formatMoney(o.signingBonus)}`, "positive");
     }
 
@@ -7794,7 +9838,7 @@ function startPlayerTraining(p, attr) {
     const cost = getTrainingCost(p);
     if (agentMoney < cost) { uiAlert(LANG.t('Недостаточно средств')); return; }
 
-    agentMoney -= cost;
+    applyMoney(-cost, `Тренировка: ${p.name}`);
     p.trainingWeeks = TRAINING_WEEKS;
     p.trainingAttr = attr;
 
@@ -7838,6 +9882,28 @@ function toggleAutoTraining(p, attr) {
     if (changed) { saveGame(); updateAllDisplays(); renderPlayerScreen(); }
 }
 
+// v1.2: групповая тренировка — один атрибут на всех клиентов сразу.
+function setGroupTraining(attr) {
+    if (!attr) {
+        groupTrainingAttr = null;
+        myRoster.forEach(p => { if (p && p.name) delete trainingAuto[p.name]; });
+        addNews(`🛑 ${LANG.t('Групповая тренировка отключена')}`, "info");
+    } else {
+        if (!getTrainingByAttr(attr)) return;
+        groupTrainingAttr = attr;
+        const t = getTrainingByAttr(attr);
+        myRoster.forEach(p => {
+            if (!p || !p.name) return;
+            trainingAuto[p.name] = attr;
+            if ((p.trainingWeeks || 0) === 0) tryStartAutoTraining(p);
+        });
+        addNews(`👥 ${LANG.t('Групповая тренировка')}: ${LANG.t(t.name)}`, "info");
+    }
+    saveGame();
+    updateAllDisplays();
+    renderAgencyScreen();
+}
+
 // Запускает следующий блок автотренировки. Возвращает true, если блок стартовал.
 // Никаких simRandom() вызовов — результат тренировки не сдвигается.
 function tryStartAutoTraining(p) {
@@ -7862,7 +9928,7 @@ function tryStartAutoTraining(p) {
         return false;
     }
 
-    agentMoney -= cost;
+    applyMoney(-cost, `Автотренировка: ${p.name}`);
     p.trainingWeeks = TRAINING_WEEKS;
     p.trainingAttr = attr;
     const t = getTrainingByAttr(attr);
@@ -8043,6 +10109,351 @@ function renderPlayerTransfer(c, p) {
     });
 }
 
+// ============ v1.2.1: ЕДИНОЕ ОКНО ИГРОКА — ВКЛАДКА «ДИАЛОГ» ============
+const DIALOGUE_PROMISES = Object.freeze([
+    { id: 'nhl',       icon: '🏒', label: 'Вывести в NHL' },
+    { id: 'star',      icon: '⭐', label: 'Сделать звездой' },
+    { id: 'media',     icon: '📺', label: 'Медийная поддержка' },
+    { id: 'stability', icon: '🛡', label: 'Стабильность' },
+    { id: 'personal',  icon: '🤝', label: 'Личное внимание' }
+]);
+
+function getPlayerDialogueAgency(player) {
+    if (!player || player.agentId === null || player.agentId === undefined || player.agentId === -1) return null;
+    return npcAgencies.find(a => a.id === player.agentId) || null;
+}
+
+function isMyAgencyPlayer(player) {
+    return !!player && (myRoster.some(x => x.name === player.name) || player.agentId === -1);
+}
+
+function getDialogueSigningBonusMax(player) {
+    const salary = Math.max(1, (player && player.salary) || 1);
+    const bySalary = Math.round(salary * 1000 * 2);
+    const affordable = Math.max(0, Math.floor(agentMoney));
+    return Math.max(0, Math.min(affordable, bySalary));
+}
+
+function getDialogueOfferQuality(player, signingBonus, promises) {
+    const maxBonus = Math.max(1, Math.round(((player && player.salary) || 25) * 1000 * 2));
+    const bonusPart = clampOfferQuality((signingBonus || 0) / maxBonus);
+    const promisePart = clampOfferQuality((Array.isArray(promises) ? promises.length : 0) / 3);
+    return clampOfferQuality(bonusPart * 0.55 + promisePart * 0.45);
+}
+
+// Шанс переманивания: жёстко от разницы репутаций + уровень «Переговорщика»
+// + качество пакета (подъёмные и обещания). Лояльность игрока — небольшой штраф.
+function getDialoguePoachChanceWithRep(player, agencyRep, signingBonus = 0, promises = [], myRep = getMyAgentReputation()) {
+    const diff = myRep - (Number.isFinite(agencyRep) ? agencyRep : 50);
+    const negotiator = Math.max(0, (upgrades.negotiator || 1) - 1);
+    const quality = getDialogueOfferQuality(player, signingBonus, promises);
+    const loyalty = Number.isFinite(player && player.loyalty) ? player.loyalty : 50;
+
+    let chance = 32 + diff * 1.6 + negotiator * 2 + quality * 18 - loyalty * 0.12;
+    if (diff < -40) chance = Math.min(chance, 8);
+    if (!Number.isFinite(chance)) chance = 5;
+    return Math.max(5, Math.min(90, Math.round(chance)));
+}
+
+function getDialoguePoachChance(player, agency, signingBonus = 0, promises = []) {
+    const agencyRep = agency && Number.isFinite(agency.rep) ? agency.rep : 50;
+    return getDialoguePoachChanceWithRep(player, agencyRep, signingBonus, promises);
+}
+
+function renderPlayerDialogue(c, p) {
+    normalizeContractData(p);
+    const mine = isMyAgencyPlayer(p);
+    const agency = getPlayerDialogueAgency(p);
+    const isFree = !mine && !agency;
+    const flag = getPlayerCountry(p);
+    const myRep = getMyAgentReputation();
+
+    let statusBlock = '';
+    if (isFree) {
+        statusBlock = `
+            <div class="dlg-status dlg-status-free">
+                <div class="dlg-status-icon">🕊️</div>
+                <div>
+                    <div class="dlg-status-title">${LANG.t('Свободный агент')}</div>
+                    <div class="dlg-status-sub">${LANG.t('Игрок без агентства — можно предложить контракт напрямую.')}</div>
+                </div>
+            </div>`;
+    } else if (agency) {
+        const diff = myRep - agency.rep;
+        const diffCls = diff >= 0 ? 'positive' : 'negative';
+        statusBlock = `
+            <div class="dlg-status dlg-status-rival">
+                <div class="dlg-status-icon">🏢</div>
+                <div>
+                    <div class="dlg-status-title">${agency.country.split(' ')[0]} ${agency.name}</div>
+                    <div class="dlg-status-sub">${LANG.t('Репутация агентства')}: ⭐ ${agency.rep}</div>
+                </div>
+            </div>
+            <div class="dlg-rep-compare">
+                <div class="dlg-rep-side"><span>${LANG.t('Ты')}</span><b>⭐ ${myRep}</b></div>
+                <div class="dlg-rep-diff ${diffCls}">${diff >= 0 ? '+' : ''}${diff}</div>
+                <div class="dlg-rep-side"><span>${LANG.t('Конкурент')}</span><b>⭐ ${agency.rep}</b></div>
+            </div>`;
+    } else {
+        const end = (p.contractYears && p.contractYears > 0) ? (currentSeason + p.contractYears) : null;
+        const commission = activeCommissions.find(x => x.playerName === p.name);
+        statusBlock = `
+            <div class="dlg-contract-card">
+                <div class="dlg-contract-title">📝 ${LANG.t('Текущие условия контракта')}</div>
+                <div class="dlg-contract-grid">
+                    <div><span>${LANG.t('Клуб')}</span><b>${p.club || '—'}</b></div>
+                    <div><span>${LANG.t('Зарплата')}</span><b>${formatSalary(p.salary)}</b></div>
+                    <div><span>${LANG.t('Срок')}</span><b>${end ? `${LANG.t('до')} ${end}` : '—'}</b></div>
+                    <div><span>${LANG.t('Лояльность')}</span><b>${p.loyalty ?? 100}%</b></div>
+                    <div><span>${LANG.t('Комиссия')}</span><b>${commission ? Math.round(commission.commissionRate * 100) + '%' : '—'}</b></div>
+                    <div><span>${LANG.t('Слотов занято')}</span><b>${myRoster.length} / ${getSlots()}</b></div>
+                </div>
+            </div>`;
+    }
+
+    let actionBlock = '';
+    if (isFree) {
+        actionBlock = `<button class="dlg-main-btn dlg-main-btn-sign" id="player-dialogue-offer-btn">🤝 ${LANG.t('Предложить контракт')}</button>`;
+    } else if (agency) {
+        const chance = getDialoguePoachChance(p, agency, 0, []);
+        actionBlock = `
+            <button class="dlg-main-btn dlg-main-btn-poach" id="player-dialogue-poach-btn">🎯 ${LANG.t('Переманить')}</button>
+            <div class="dlg-hint">${LANG.t('Базовый шанс')}: <b>${chance}%</b> · ${LANG.t('зависит от репутации и «Переговорщика»')}</div>`;
+    } else {
+        actionBlock = `<button class="dlg-main-btn dlg-main-btn-release" id="player-dialogue-release-btn">🚪 ${LANG.t('Разорвать контракт')}</button>`;
+    }
+
+    c.innerHTML = `
+        <div class="dlg-hero">
+            <div class="dlg-avatar">${getPlayerAvatar(p)}</div>
+            <div class="dlg-hero-info">
+                <div class="dlg-name">${p.name} <span class="p-flag">${flag}</span></div>
+                <div class="dlg-meta">${p.position} · ${p.age} ${LANG.t('лет')} · ⭐ ${p.rating}</div>
+                <div class="dlg-myrep">${LANG.t('Твоя репутация')}: ⭐ ${myRep}</div>
+            </div>
+        </div>
+        ${statusBlock}
+        <div class="dlg-action-zone">${actionBlock}</div>
+    `;
+
+    document.getElementById('player-dialogue-offer-btn')?.addEventListener('click', () => {
+        openPlayerOfferDialog(p, 'sign');
+    });
+    document.getElementById('player-dialogue-poach-btn')?.addEventListener('click', () => {
+        openPlayerOfferDialog(p, 'poach', agency);
+    });
+    document.getElementById('player-dialogue-release-btn')?.addEventListener('click', async () => {
+        const ok = await uiConfirm(LANG.t('Расторгнуть контракт с игроком?'), { okText: LANG.t('Разорвать контракт') });
+        if (!ok) return;
+        releasePlayerContract(p);
+        renderPlayerScreen();
+    });
+}
+
+function releasePlayerContract(player) {
+    if (!isMyAgencyPlayer(player)) return false;
+    removeClientFromRoster(player);
+    player.agentId = null;
+    player.loyalty = Math.max(0, (player.loyalty ?? 50) - 15);
+    upgrades.reputation = Math.max(1, (upgrades.reputation || 1) - 1);
+    addNews(`📄 ${player.name}: ${LANG.t('контракт расторгнут по инициативе агентства')}`, "negative");
+    updateAllDisplays();
+    saveGame();
+    return true;
+}
+
+function signFreeAgentFromDialogue(player, signingBonus = 0, promises = []) {
+    if (!player || isMyAgencyPlayer(player)) return { ok: false, reason: 'already-mine' };
+    if (player.agentId !== null && player.agentId !== undefined && player.agentId !== -1) {
+        return { ok: false, reason: 'has-agency' };
+    }
+    if (myRoster.length >= getSlots()) return { ok: false, reason: 'no-slots' };
+    const cost = Math.max(0, Math.round(signingBonus || 0));
+    if (cost > agentMoney) return { ok: false, reason: 'no-money' };
+
+    if (cost > 0) applyMoney(-cost, `Подписной бонус: ${player.name}`);
+    player.agentId = -1;
+    player.loyalty = Math.min(100, (player.loyalty ?? 60) + 5 + promises.length * 2);
+    player.contractYears = Math.max(1, player.contractYears || 1);
+    myRoster.push(player);
+    if (groupTrainingAttr) {
+        trainingAuto[player.name] = groupTrainingAttr;
+        tryStartAutoTraining(player);
+    }
+    incrementClientsSigned();
+    addNews(`✍️ ${LANG.t('Вы предложили контракт')} ${player.name} — ${LANG.t('сделка закрыта!')}`, "positive");
+    addXP((player.rating || 1) * 2);
+    notifyTutorial('client-signed');
+    updateAllDisplays();
+    saveGame();
+    renderClientsScreen();
+    return { ok: true, cost };
+}
+
+function attemptPoachFromDialogue(player, agency, signingBonus = 0, promises = [], chanceOverride = null) {
+    if (!player || !agency) return { ok: false, reason: 'no-agency' };
+    if (isMyAgencyPlayer(player)) return { ok: false, reason: 'already-mine' };
+    if (myRoster.length >= getSlots()) return { ok: false, reason: 'no-slots' };
+    const cost = Math.max(0, Math.round(signingBonus || 0));
+    if (cost > agentMoney) return { ok: false, reason: 'no-money' };
+
+    const chance = Number.isFinite(chanceOverride)
+        ? Math.max(0, Math.min(100, Math.round(chanceOverride)))
+        : getDialoguePoachChance(player, agency, cost, promises);
+    const roll = simRandom() * 100;
+    const success = roll < chance;
+
+    if (!success) {
+        careerCounters.poachFails = (careerCounters.poachFails || 0) + 1;
+        addNews(`❌ ${LANG.t('Не удалось переманить')} ${player.name} (${LANG.t('шанс')} ${chance}%)`, "negative");
+        updateAllDisplays();
+        saveGame();
+        return { ok: false, reason: 'rejected', chance, roll };
+    }
+
+    if (cost > 0) applyMoney(-cost, `Переманивание: ${player.name}`);
+    if (Array.isArray(agency.clientIds)) {
+        agency.clientIds = agency.clientIds.filter(n => n !== player.name);
+    }
+    player.agentId = -1;
+    player.loyalty = Math.min(100, (player.loyalty ?? 60) + 5 + promises.length * 2);
+    player.contractYears = Math.max(1, player.contractYears || 1);
+    myRoster.push(player);
+    if (groupTrainingAttr) {
+        trainingAuto[player.name] = groupTrainingAttr;
+        tryStartAutoTraining(player);
+    }
+    incrementClientsSigned();
+    careerCounters.poachSuccess = (careerCounters.poachSuccess || 0) + 1;
+    if (agency.rep >= 85) careerCounters.poachTopSuccess = (careerCounters.poachTopSuccess || 0) + 1;
+    addNews(`🎉 ${LANG.t('Вы переманили')} ${player.name}! (${LANG.t('шанс')} ${chance}%)`, "positive");
+    addXP((player.rating || 1) * 5);
+    notifyTutorial('client-signed');
+    updateAllDisplays();
+    saveGame();
+    renderClientsScreen();
+    return { ok: true, chance, roll, cost };
+}
+
+function openPlayerOfferDialog(player, mode, agency = null) {
+    const modal = document.getElementById('player-dialogue-modal');
+    const title = document.getElementById('player-dialogue-title');
+    const body = document.getElementById('player-dialogue-body');
+    const actions = document.getElementById('player-dialogue-actions');
+    if (!modal || !body || !actions) return;
+
+    const isPoach = mode === 'poach';
+    const maxBonus = getDialogueSigningBonusMax(player);
+    const defaultBonus = Math.min(maxBonus, Math.max(0, Math.round(((player.salary || 25) * 1000) * 0.25)));
+    let bonus = defaultBonus;
+    let promises = [];
+
+    if (title) title.textContent = isPoach ? `💬 ${LANG.t('Переманить игрока')}` : `💬 ${LANG.t('Предложить контракт')}`;
+    body.innerHTML = `
+        <div class="pd-player-card">
+            <div class="pd-avatar">${getPlayerAvatar(player)}</div>
+            <div class="pd-name">${player.name} ${getPlayerCountry(player)}</div>
+            <div class="pd-meta">${player.position} · ${player.age} ${LANG.t('лет')} · ⭐ ${player.rating}</div>
+            <div class="pd-current-agent">${isPoach && agency ? `${agency.country.split(' ')[0]} ${agency.name} (⭐ ${agency.rep})` : '🕊️ ' + LANG.t('Свободный агент')}</div>
+        </div>
+        <div class="dlg-chance-card" id="dlg-chance-card" ${isPoach ? '' : 'style="display:none;"'}>
+            <span>${LANG.t('Шанс успеха')}</span>
+            <b id="dlg-chance-value">—</b>
+        </div>
+        <div class="dlg-field-label">💰 ${LANG.t('Подъёмные')}</div>
+        <div class="dlg-range-row">
+            <input type="range" class="dlg-range" id="dlg-bonus-slider" min="0" max="${Math.max(0, maxBonus)}" step="1000" value="${Math.max(0, defaultBonus)}">
+            <b id="dlg-bonus-value">${formatMoney(bonus)}</b>
+        </div>
+        <div class="dlg-field-label">🗣 ${LANG.t('Обещания')}</div>
+        <div class="dlg-promises" id="dlg-promises">
+            ${DIALOGUE_PROMISES.map(o => `<button type="button" class="dlg-promise" data-promise="${o.id}">${o.icon} ${LANG.t(o.label)}</button>`).join('')}
+        </div>
+        <div class="dlg-hint">${isPoach
+            ? `${LANG.t('Чем выше твоя репутация относительно конкурента и уровень «Переговорщика», тем выше шанс.')}`
+            : `${LANG.t('Игрок свободен — контракт будет подписан без риска.')}`}</div>
+    `;
+    actions.innerHTML = '';
+
+    const chanceEl = () => document.getElementById('dlg-chance-value');
+    const updateChance = () => {
+        if (!isPoach) return;
+        const chance = getDialoguePoachChance(player, agency, bonus, promises);
+        const el = chanceEl();
+        if (el) {
+            el.textContent = chance + '%';
+            el.className = chance >= 60 ? 'chance-high' : chance >= 35 ? 'chance-mid' : 'chance-low';
+        }
+    };
+
+    const slider = document.getElementById('dlg-bonus-slider');
+    slider?.addEventListener('input', () => {
+        bonus = Math.max(0, Math.min(maxBonus, Math.round(Number(slider.value) || 0)));
+        const val = document.getElementById('dlg-bonus-value');
+        if (val) val.textContent = formatMoney(bonus);
+        updateChance();
+    });
+    body.querySelectorAll('.dlg-promise').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-promise');
+            if (promises.includes(id)) promises = promises.filter(x => x !== id);
+            else promises.push(id);
+            btn.classList.toggle('active', promises.includes(id));
+            updateChance();
+        });
+    });
+    updateChance();
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-neutral';
+    cancelBtn.textContent = LANG.t('Отмена');
+    cancelBtn.addEventListener('click', () => {
+        modal.style.display = 'none';
+        // v1.2.2: вернуть подсказку, если туториал ждал подписания.
+        try { tutorialManager.refresh(); } catch (e) {}
+    });
+    actions.appendChild(cancelBtn);
+
+    const submitBtn = document.createElement('button');
+    submitBtn.className = isPoach ? 'btn-warning' : 'btn-success';
+    submitBtn.id = 'player-dialogue-submit';
+    submitBtn.textContent = isPoach ? `🎯 ${LANG.t('Переманить')}` : `🤝 ${LANG.t('Предложить контракт')}`;
+    submitBtn.addEventListener('click', () => {
+        const result = isPoach
+            ? attemptPoachFromDialogue(player, agency, bonus, promises)
+            : signFreeAgentFromDialogue(player, bonus, promises);
+
+        if (!result.ok && result.reason === 'no-slots') { uiAlert(LANG.t('Нет свободных слотов')); return; }
+        if (!result.ok && result.reason === 'no-money') { uiAlert(LANG.t('Недостаточно средств')); return; }
+        if (!result.ok && result.reason === 'already-mine') { uiAlert(LANG.t('Игрок уже в агентстве')); return; }
+        if (!result.ok && result.reason === 'has-agency') { uiAlert(LANG.t('Сначала переманите игрока')); return; }
+
+        const success = !!result.ok;
+        const chance = Number.isFinite(result.chance) ? ` (${LANG.t('шанс')} ${result.chance}%)` : '';
+        body.innerHTML = `
+            <div class="pd-result ${success ? 'success' : 'fail'}">
+                <div class="pd-result-icon">${success ? '✅' : '❌'}</div>
+                <div class="pd-player-line">${player.name}</div>
+                <div class="pd-phrase">${success
+                    ? LANG.t('Игрок стал твоим клиентом!')
+                    : LANG.t('Игрок отказался менять агентство.')}</div>
+                <div class="pd-result-text">${success ? LANG.t('Сделка закрыта') : LANG.t('Попробуйте позже')}${chance}</div>
+            </div>
+        `;
+        actions.innerHTML = '';
+        const okBtn = document.createElement('button');
+        okBtn.className = 'btn-primary';
+        okBtn.textContent = 'OK';
+        okBtn.addEventListener('click', () => {
+            modal.style.display = 'none';
+            if (currentPlayerScreen && currentPlayerScreen.name === player.name) renderPlayerScreen();
+        });
+        actions.appendChild(okBtn);
+    });
+    actions.appendChild(submitBtn);
+    modal.style.display = 'flex';
+}
+
 function getLeagueRegion(lk) {
     if (!lk) return 'eu';
     if (['KHL','VHL','MHL'].includes(lk)) return 'ru';
@@ -8195,6 +10606,15 @@ function renderPlayerHistory(c, p) {
         `;
     }
 
+    // ===== v1.3: рекорды лиг =====
+    const playerRecords = getClientRecordRows(p.name);
+    const recordsHTML = playerRecords.length
+        ? `<div class="hlf-player-records">
+                <div class="hlf-player-records-title">🏆 ${LANG.t('В Зале Славы лиги')}</div>
+                ${playerRecords.map(r => `<div class="hlf-player-record-line">📜 ${escapeHtml(getLeagueName(r.league))}: #${r.place} — ${escapeHtml(LANG.t(hallRecordLabel(r.cat)))} (${formatInt(r.value)})</div>`).join('')}
+            </div>`
+        : '';
+
     // ===== Таймлайн карьеры (вертикальная линия) =====
     const timelineHTML = (() => {
         const asc = [...hist].sort((a, b) => b.season - a.season); // свежие сверху
@@ -8254,6 +10674,8 @@ function renderPlayerHistory(c, p) {
         </div>
 
         ${trophyHTML}
+
+        ${recordsHTML}
 
         ${graphHTML}
 
@@ -8318,6 +10740,12 @@ function buildCareerGraph(hist) {
 }
 
 function signPlayerFromScreen(p) {
+    if (!p) return;
+    // Защита от повторной подписи: игрок уже в агентстве.
+    if (myRoster.some(x => x.name === p.name)) {
+        openSimpleInfoModal('ℹ️ ' + LANG.t('Игрок уже в агентстве'), LANG.t('Этот игрок уже является вашим клиентом.'));
+        return;
+    }
     const slots = getSlots();
     if (myRoster.length >= slots) {
         openSimpleInfoModal(
@@ -8329,6 +10757,10 @@ function signPlayerFromScreen(p) {
     // Свободный агент — всегда согласен
     p.agentId = -1;
     myRoster.push(p);
+    if (groupTrainingAttr) {
+        trainingAuto[p.name] = groupTrainingAttr;
+        tryStartAutoTraining(p);
+    }
     incrementClientsSigned();
     // НЕ удаляем из players — игрок остаётся в составе своего клуба и в мире игры
     addNews(`✍️ Вы подписали ${p.name}!`, "positive");
@@ -8361,31 +10793,64 @@ function closePlayerScreen() {
     document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
 
     try {
-        // 1. Возврат в карточку клуба (теперь — публичный хаб)
+        // 1. Возврат в публичный хаб клуба (сохраняем вкладку и экран-источник)
+        if (playerReturnContext && playerReturnContext.type === 'pch') {
+            const ctx = playerReturnContext;
+            playerReturnContext = null;
+            pchClub = { club: ctx.clubName, league: ctx.league };
+            if (ctx.returnScreen) pchReturnScreen = ctx.returnScreen;
+            if (ctx.tab) pchTab = ctx.tab;
+            renderPublicClubHub();
+            return;
+        }
+
+        // 2. Возврат в хаб президента (состав клуба)
+        if (playerReturnContext && playerReturnContext.type === 'president-club') {
+            const ctx = playerReturnContext;
+            playerReturnContext = null;
+            if (presidentClubKey && (!ctx.clubKey || ctx.clubKey === presidentClubKey)) {
+                if (showPresidentClubHub(ctx.tab || 'roster')) return;
+            }
+        }
+
+        // 3. Возврат в карточку клуба / публичный хаб
         if (playerReturnContext && playerReturnContext.type === 'club') {
             const ctx = playerReturnContext;
             playerReturnContext = null;
+            const clubKey = ctx.league + '_' + ctx.clubName;
+            if (ctx.parentScreen === 'club-hub-screen' && presidentClubKey === clubKey) {
+                if (showPresidentClubHub('overview')) return;
+            }
             openPublicClubHub(ctx.clubName, ctx.league, ctx.parentScreen);
             return;
         }
 
-        // 2. Возврат на экран сборных
+        // 4. Возврат на экран сборных
         if (playerReturnContext && playerReturnContext.type === 'national') {
             playerReturnContext = null;
             showNationalTournamentScreen();
             return;
         }
 
-        // 3. Клиенты/поиск
+        // 5. Возврат на конкретный экран-источник (новости, лидерборд, офис и т.п.)
+        if (playerReturnContext && playerReturnContext.type === 'screen') {
+            const ctx = playerReturnContext;
+            playerReturnContext = null;
+            if (restoreScreenById(ctx.screenId, 'office-screen')) return;
+        }
+
+        // 6. Клиенты/поиск
         playerReturnContext = null;
         if (currentPlayerSource === 'search' || currentPlayerSource === 'my') {
             const cs = document.getElementById('clients-screen');
             if (cs) cs.style.display = 'flex';
+            hideClubBottomNav();
             showBottomNav();
             renderClientsScreen();
         } else {
             const os = document.getElementById('office-screen');
             if (os) os.style.display = 'flex';
+            hideClubBottomNav();
             showBottomNav();
         }
     } catch (err) {
@@ -8394,6 +10859,7 @@ function closePlayerScreen() {
         document.querySelectorAll('.mobile-screen, .modal-overlay').forEach(s => s.style.display = 'none');
         const os = document.getElementById('office-screen');
         if (os) os.style.display = 'flex';
+        hideClubBottomNav();
         showBottomNav();
     }
 }
@@ -8463,7 +10929,10 @@ function renderLeaderboard() {
                 <div class="lb-pts">${ptsStr}</div>
             </div>
         `;
-        row.addEventListener('click', () => openPlayerScreen(p, 'search'));
+        row.addEventListener('click', () => {
+            playerReturnContext = { type: 'screen', screenId: 'leaderboard-screen' };
+            openPlayerScreen(p, 'search');
+        });
         frag.appendChild(row);
     });
     c.appendChild(frag);
@@ -8861,7 +11330,10 @@ function renderPCHRoster(c, clubName, lk) {
         row.addEventListener('click', () => {
             const player = players.find(x => x.name === row.getAttribute('data-pch-player'));
             if (!player) return;
-            playerReturnContext = { type: 'pch', clubName, league: lk };
+            playerReturnContext = {
+                type: 'pch', clubName, league: lk,
+                returnScreen: pchReturnScreen, tab: pchTab
+            };
             openPlayerScreen(player, 'public');
         });
     });
@@ -8991,20 +11463,6 @@ document.getElementById('pch-back')?.addEventListener('click', () => {
 document.getElementById('pch-manage-btn')?.addEventListener('click', () => {
     showInfrastructureScreen();
 });
-
-// Возврат из карточки игрока в хаб клуба
-const _origClosePlayerScreen = closePlayerScreen;
-closePlayerScreen = function() {
-    if (playerReturnContext && playerReturnContext.type === 'pch') {
-        const ctx = playerReturnContext;
-        playerReturnContext = null;
-        currentPlayerScreen = null;
-        document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
-        openPublicClubHub(ctx.clubName, ctx.league, 'public-club-hub-screen');
-        return;
-    }
-    _origClosePlayerScreen();
-};
 
 // ============ ФОРМА КЛУБА (последние 5 матчей) ============
 // Возвращает массив последних результатов клуба: 'W' | 'Wot' | 'L' | 'Lot'
@@ -9361,6 +11819,7 @@ function simulatePlayoffRound() {
             const champPrize = getLeaguePrize(lk, 0.20);
             if (clubData[champKey]) {
                 clubData[champKey].budget += champPrize;
+                enforceClubCashCap(champKey);
                 addNews(`💰 ${st.champion} получает ${formatMoney(champPrize)} за победу в ${getCupName(lk)}!`, "positive");
             }
 
@@ -9370,6 +11829,7 @@ function simulatePlayoffRound() {
                 const finalPrize = getLeaguePrize(lk, 0.10);
                 if (clubData[finalistKey]) {
                     clubData[finalistKey].budget += finalPrize;
+                    enforceClubCashCap(finalistKey);
                     addNews(`💰 ${finalistName} получает ${formatMoney(finalPrize)} за выход в финал`, "info");
                 }
             }
@@ -9507,16 +11967,11 @@ function markMatchItemViewed(item) {
     item.viewed = true;
 }
 
-// Возврат в офис после очереди матчей (без callback).
+// Возврат после очереди матчей — на экран, откуда очередь запускалась.
 function showOfficeAfterMatchQueue() {
-    hidePagination();
-    document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
-    const os = document.getElementById('office-screen');
-    if (os) os.style.display = 'flex';
-    showBottomNav();
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    const navO = document.querySelector('.nav-item[data-nav="office"]');
-    if (navO) navO.classList.add('active');
+    const target = matchReturnScreen || 'office-screen';
+    matchReturnScreen = null;
+    restoreScreenById(target, 'office-screen');
 }
 
 // Единая точка завершения очереди: callback ровно один раз, без потери onFinish.
@@ -9543,6 +11998,7 @@ function openMatchQueueFromData(list, onFinish) {
         if (onFinish) onFinish();
         return;
     }
+    matchReturnScreen = getVisibleScreenId('office-screen');
     matchQueue = list;
     matchQueueIdx = 0;
     matchQueueOnFinish = onFinish || null;
@@ -9559,6 +12015,7 @@ function finishPlayoffs() {
 // ============ ОЧЕРЕДЬ МАТЧЕЙ ПОСЛЕ "ИГРАТЬ НЕДЕЛЮ" ============
 function openMatchQueue(matches, lk) {
     if (!matches || matches.length === 0) return;
+    matchReturnScreen = getVisibleScreenId('office-screen');
     matchQueue = matches.map(m => ({ match: m, lk }));
     matchQueueIdx = 0;
     matchQueueOnFinish = null;
@@ -9598,6 +12055,9 @@ function openNextMatchInQueue() {
 function openMatchView(match, lk) {
     const r = match.result;
     if (!r) return;
+
+    // Прямой просмотр (из расписания) возвращает на экран-источник.
+    if (!matchQueue) matchReturnScreen = getVisibleScreenId('office-screen');
 
     hidePagination();
 
@@ -10341,12 +12801,7 @@ function closeMatchView() {
     }
 
     hidePagination();
-    const os = document.getElementById('office-screen');
-    if (os) os.style.display = 'flex';
-    showBottomNav();
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    const navO = document.querySelector('.nav-item[data-nav="office"]');
-    if (navO) navO.classList.add('active');
+    showOfficeAfterMatchQueue();
     updateAllDisplays();
 }
 
@@ -10710,8 +13165,21 @@ function renderLeagueSchedule(c, lk) {
 
 function renderLeagueHistory(c, lk) {
     const hist = championsHistory[lk] || [];
+    // v1.3: мостик в общий Зал Славы → рекорды этой лиги.
+    const recordsBtn = document.createElement('button');
+    recordsBtn.type = 'button';
+    recordsBtn.className = 'hlf-deeplink';
+    recordsBtn.innerHTML = `<span>🏆 ${LANG.t('Рекорды лиги')}</span><span>${LANG.t('Зал Славы')} →</span>`;
+    recordsBtn.addEventListener('click', () => {
+        hallLeague = lk;
+        showHallOfFameScreen('leagues');
+    });
+    c.appendChild(recordsBtn);
     if (hist.length === 0) {
-        c.innerHTML += '<div class="empty-state"><div class="empty-icon">📜</div><div class="empty-title">История пуста</div><div class="empty-desc">Сыграйте сезон, чтобы появились чемпионы</div></div>';
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.innerHTML = '<div class="empty-icon">📜</div><div class="empty-title">История пуста</div><div class="empty-desc">Сыграйте сезон, чтобы появились чемпионы</div>';
+        c.appendChild(empty);
         return;
     }
 
@@ -11195,7 +13663,8 @@ function checkPresidentStatus() {
         const oldKey = presidentClubKey;
         const oldClub = clubData[oldKey]?.club || 'клуба';
         presidentClubKey = null;
-        clubCouncil = null; // v1.0: сброс совета при потере поста
+        clubCouncil = null;
+        presidentDecisions = null; // v1.0: сброс совета при потере поста
         addNews(`🚪 Вы потеряли пост президента ${oldClub} — акций меньше 51%`, "negative");
         return true;
     }
@@ -11212,6 +13681,10 @@ function getPresidentBlockHTML(key, owned) {
         const otherData = clubData[presidentClubKey];
         const otherName = otherData ? otherData.club : 'другого клуба';
         return `<div class="president-badge-warn">⚠️ Вы уже президент ${otherName}. Сначала покиньте пост.</div>`;
+    }
+    const warmupLeft = getPresidentWarmupWeeksLeft();
+    if (warmupLeft > 0) {
+        return `<div class="president-warmup">⏳ Warm-up после увольнения: ещё ${warmupLeft} ${LANG.t('нед.')}. Акции и капитал сохранены.</div>`;
     }
     return '<button class="president-action-btn" id="btn-become-president">🏛️ Стать президентом клуба</button>';
 }
@@ -11310,13 +13783,18 @@ function openStockTradeModal(club, lk) {
     buyBtn.addEventListener('click', () => {
         const count = parseFloat(input.value) || 0;
         if (count <= 0) return;
+        const affordable = price > 0 ? agentMoney / price : 0;
+        if (count > maxBuyByLimit + 1e-9 || count > affordable + 1e-9) {
+            uiAlert(LANG.t('Недостаточно денег или превышен лимит 100%'));
+            return;
+        }
         const cost = Math.round(price * count);
-    if (cost > agentMoney) { uiAlert(LANG.t('Мало денег')); return; }
+    if (!Number.isFinite(cost) || cost > agentMoney) { uiAlert(LANG.t('Мало денег')); return; }
         const pos = myPortfolio[key] || {shares: 0, avgPrice: 0};
-        const ns = pos.shares + count;
-        const na = Math.round((pos.avgPrice * pos.shares + price * count) / ns);
+        const ns = Math.min(100, pos.shares + count);
+        const na = Math.round((pos.avgPrice * pos.shares + price * (ns - pos.shares)) / ns);
         myPortfolio[key] = {shares: ns, avgPrice: na};
-        agentMoney -= cost;
+        applyMoney(-cost, `Покупка акций: ${club}`);
         addNews(`🛒 Куплено ${count}% акций ${club}`, "info");
         modal.style.display = 'none';
         updateAllDisplays();
@@ -11335,7 +13813,7 @@ function openStockTradeModal(club, lk) {
         const ns = pos.shares - count;
         if (ns <= 0.001) delete myPortfolio[key];
         else myPortfolio[key] = {shares: ns, avgPrice: pos.avgPrice};
-        agentMoney += income;
+        applyMoney(income, `Продажа акций: ${club}`);
         addNews(`💸 Продано ${count}% акций ${club}`, "info");
         modal.style.display = 'none';
 
@@ -11358,13 +13836,21 @@ function openStockTradeModal(club, lk) {
     const presBtn = body.querySelector('#btn-become-president');
     if (presBtn) {
         presBtn.addEventListener('click', () => {
+            const warmupLeft = getPresidentWarmupWeeksLeft();
+            if (warmupLeft > 0) {
+                uiAlert(`${LANG.t('Warm-up после увольнения')}: ${LANG.t('ещё')} ${warmupLeft} ${LANG.t('нед.')}`);
+                return;
+            }
             presidentClubKey = key;
             const cdata = clubData[key];
-            addNews(`🏛️ Вы стали президентом ${cdata.club}!`, "positive");
+            startPresidentTerm(key);
+            addNews(`🏛️ ${presidentFormat('Вы стали президентом {club}!', { club: cdata.club })}`, "positive");
             saveGame();
             modal.style.display = 'none';
             updateAllDisplays();
             renderMarketScreen();
+            startPresidentOnboarding();
+            if (ensurePresidentDecisions()?.onboardingSeen) maybeStartPresidentTutorial();
         });
     }
 
@@ -11375,7 +13861,8 @@ function openStockTradeModal(club, lk) {
             const cdata = clubData[key];
             presidentClubKey = null;
             clubCouncil = null; // v1.0: сброс совета при потере поста
-            addNews(`🚪 Вы покинули пост президента ${cdata.club}`, "info");
+            presidentDecisions = null;
+            addNews(`🚪 ${presidentFormat('Вы покинули пост президента {club}', { club: cdata.club })}`, "info");
             saveGame();
             modal.style.display = 'none';
             updateAllDisplays();
@@ -11481,6 +13968,8 @@ function generateFreeAgentYouth() {
     // Создаём как свободного агента: клуб пустой, но лига остаётся для определения страны
     const p = createPlayer(name, '', ln, pos, age, rating, null, nationality);
     p.club = '';
+    p.contractYears = 0;
+    p.agentId = null;
     return p;
 }
 
@@ -11747,6 +14236,101 @@ function closeDraftAndStartSeason() {
     updateAllDisplays();
 }
 
+// ============ БАТЧ 2: ОЦЕНКА СЕЗОНА И БЮДЖЕТ ============
+function getLatestSeasonReview(clubKey) {
+    return seasonReviews[clubKey]?.latest || null;
+}
+
+function recordSeasonReview(clubKey, review) {
+    if (!clubKey || !review) return null;
+    if (!seasonReviews[clubKey]) seasonReviews[clubKey] = { v: 1, latest: null, history: [] };
+    const entry = seasonReviews[clubKey];
+    entry.history = (entry.history || []).filter(r => r.season !== review.season);
+    entry.history.unshift(review);
+    if (entry.history.length > 20) entry.history.length = 20;
+    entry.latest = review;
+    const fin = ensureClubFinance(clubKey);
+    fin.seasonBudget = review.budgetNext;
+    return review;
+}
+
+function evaluateSeasonReviewForClub(clubKey, season, council) {
+    const club = clubData[clubKey];
+    if (!club) return null;
+    const positions = clubSeasonPositions[clubKey] || [];
+    const row = positions.find(p => p.season === season) || positions[positions.length - 1] || null;
+    const totalTeams = row?.total || getAllClubs(club.league).length || 1;
+    const place = row?.place || totalTeams;
+    const tasksTotal = council && Array.isArray(council.tasks) ? council.tasks.length : 0;
+    const tasksDone = council && Array.isArray(council.tasks) ? council.tasks.filter(t => t.done).length : 0;
+    const fin = ensureClubFinance(clubKey);
+    const revenue = fin.lastSeasonRevenue > 0 ? fin.lastSeasonRevenue : getClubAnnualRevenue(club);
+    const expenses = fin.lastSeasonExpenses > 0 ? fin.lastSeasonExpenses : (club.weeklyExpenses || 0) * 52;
+    const seasonChampion = (championsHistory[club.league] || []).find(h => h.season === season);
+    const champion = !!(seasonChampion && seasonChampion.champion === club.club);
+    const spots = Math.max(2, (LEAGUE_DATA[club.league]?.playoffSpots || 4) * (LEAGUE_DATA[club.league]?.divisions?.length || 1));
+    const playoff = place <= spots;
+    const graded = gradeSeason({
+        place, totalTeams, tasksDone, tasksTotal, revenue, expenses,
+        champion, playoff, prestige: club.prestige
+    });
+    const budgetNext = computeNextSeasonBudget({
+        revenue,
+        currentBudget: club.budget || 0,
+        leagueBudget: getLeagueBudget(club.league),
+        grade: graded.grade
+    });
+    const review = {
+        ...graded,
+        clubKey,
+        club: club.club,
+        league: club.league,
+        season,
+        champion,
+        playoff,
+        budgetNext,
+        recordedWeek: currentWeek
+    };
+    return recordSeasonReview(clubKey, review);
+}
+
+// ============ БАТЧ 2: ОБРАТИМОЕ УВОЛЬНЕНИЕ ============
+function pickPresidentWarmupWeeks(clubKey) {
+    const count = (presidentWarmup.count || 0) + 1;
+    const rng = makeSeededRNG(matchSeed([
+        agentName || '', agencyName || '', 'president-warmup',
+        clubKey || '', currentSeason, currentWeek, seasonPhase, count
+    ]));
+    return 2 + Math.floor(rng() * 7); // 2…8 недель
+}
+
+function getPresidentWarmupWeeksLeft() {
+    return Math.max(0, Math.round((presidentWarmup.until || 0) - presidentAbsWeek()));
+}
+
+function dismissPresident(reason = 'council') {
+    if (!presidentClubKey) return null;
+    const oldKey = presidentClubKey;
+    const oldClub = clubData[oldKey];
+    const clubName = oldClub ? oldClub.club : oldKey;
+    const weeks = pickPresidentWarmupWeeks(oldKey);
+    presidentWarmup = {
+        v: 1,
+        until: presidentAbsWeek() + weeks,
+        weeks,
+        clubKey: oldKey,
+        clubName,
+        reason,
+        count: (presidentWarmup.count || 0) + 1
+    };
+    // Возврат в агентство: деньги, клиенты, акции и портфель сохраняются.
+    presidentClubKey = null;
+    clubCouncil = null;
+    presidentDecisions = null;
+    addNews(`🚪 ${LANG.t('Вас уволили с поста президента')} ${clubName}. ${LANG.t('Возврат в агентство')}: warm-up ${weeks} ${LANG.t('нед.')}`, 'negative');
+    return { clubKey: oldKey, clubName, weeks, until: presidentWarmup.until };
+}
+
 // Оценивает задачи совета директоров за завершившийся сезон.
 // Вызывается один раз — при старте нового сезона (currentSeason уже увеличен).
 function evaluateCouncilSeason() {
@@ -11778,13 +14362,19 @@ function evaluateCouncilSeason() {
     prev.history.push({ season: prev.season, done: doneCount, total: prev.tasks.length });
     if (prev.history.length > 20) prev.history.shift();
 
-    addNews(`🏛️ Совет директоров: ${doneCount} из ${prev.tasks.length} задач выполнено. Лояльность: ${prev.loyalty}%`,
-        doneCount >= prev.tasks.length / 2 ? "positive" : "negative");
+    // Батч 2: оценка сезона и конкретный бюджет на следующий сезон.
+    const review = evaluateSeasonReviewForClub(presidentClubKey, prev.season, prev);
+    if (review) {
+        addNews(`📊 ${LANG.t('Оценка сезона')}: ${review.grade} (${doneCount}/${prev.tasks.length} ${LANG.t('задач совета')}). ${LANG.t('Бюджет на следующий сезон')}: ${formatMoney(review.budgetNext)}`,
+            doneCount >= prev.tasks.length / 2 ? 'positive' : 'info');
+    }
+
+    addNews(`🏛️ ${presidentFormat('Совет директоров: {done} из {total} задач выполнено. Лояльность: {loyalty}%', {
+        done: doneCount, total: prev.tasks.length, loyalty: prev.loyalty
+    })}`, doneCount >= prev.tasks.length / 2 ? "positive" : "negative");
 
     if (prev.failsStreak >= 3) {
-        addNews(`🚨 Совет директоров снял вас с поста президента ${club.club}!`, "negative");
-        presidentClubKey = null;
-        clubCouncil = null;
+        dismissPresident('council');
         return;
     }
     // Сразу формируем задачи на новый сезон (лояльность/история сохраняются)
@@ -11958,6 +14548,9 @@ function processRetirements() {
     players = players.filter(p => !retireSet.has(p));
     retirees.forEach(p => {
         if (rosterSet.has(p)) {
+            // v1.3: снимок ДО удаления из players — иначе карьера потеряется.
+            upsertAgencyHallEntry(p, 'retired');
+            rememberFormerClient(p.name);
             addNews(`🏒 ${p.name} завершил карьеру`, "info");
             addXP(p.rating * 3);
         }
@@ -12128,6 +14721,8 @@ function awardEndOfSeason() {
             }
         }
     }
+    // Пункт 10: призовые не должны выводить кассу за 2× выручки.
+    Object.keys(clubData).forEach(k => enforceClubCashCap(k));
     myRoster.forEach(p => {
         if (p.club && champs[p.league] === p.club) {
             if (!p.trophies) p.trophies = [];
@@ -12144,6 +14739,12 @@ function awardEndOfSeason() {
         const snipers = [...lp].sort((a, b) => b.stats.goals - a.stats.goals);
         if (snipers[0] && snipers[0].stats.goals > 0) checkAward(snipers[0], "Лучший снайпер", lk);
     }
+
+    // v1.3: пока stats всех игроков ещё живые — обновляем Зал Славы,
+    // лиговые рекорды и достижения. Идемпотентно по сезону.
+    syncAgencyHallActive();
+    updateLeagueRecords();
+    checkAchievements();
 }
 
 function checkAward(top, name, lk) {
@@ -12154,6 +14755,424 @@ function checkAward(top, name, lk) {
     addNews(`🥇 ${mp.name} — ${name} ${getLeagueName(lk)}!`, "positive");
     addXP(300);
 }
+
+// =====================================================================
+// v1.3: ЭКРАН «ЗАЛ СЛАВЫ» — АГЕНТСТВО / ЛИГИ / ДОСТИЖЕНИЯ
+// =====================================================================
+function showHallOfFameScreen(tab) {
+    hidePagination();
+    if (tab) hallTab = tab;
+    if (!LEAGUE_DATA[hallLeague]) hallLeague = Object.keys(LEAGUE_DATA)[0] || 'NHL';
+    document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
+    const s = document.getElementById('hall-of-fame-screen');
+    if (s) s.style.display = 'flex';
+    showBottomNav();
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    renderHallOfFameScreen();
+}
+
+function renderHallOfFameScreen() {
+    const c = document.getElementById('hall-content');
+    if (!c) return;
+    const title = document.getElementById('hall-title');
+    if (title) title.textContent = LANG.t('Зал Славы');
+    document.querySelectorAll('#hall-tabs [data-htab]').forEach(t => {
+        if (t.getAttribute('data-htab') === hallTab) t.classList.add('active');
+        else t.classList.remove('active');
+    });
+    const cnt = document.getElementById('hall-ach-count');
+    if (cnt) {
+        const done = ACHIEVEMENTS.filter(a => achievements.unlocked && achievements.unlocked[a.id]).length;
+        cnt.textContent = `${done}/${ACHIEVEMENTS.length}`;
+    }
+    c.innerHTML = '';
+    if (hallTab === 'leagues') renderHallLeagues(c);
+    else if (hallTab === 'achievements') renderHallAchievements(c);
+    else renderHallAgency(c);
+}
+
+function hallStatusLabel(status) {
+    if (status === 'active') return LANG.t('Действующий');
+    if (status === 'released') return LANG.t('Ушёл');
+    return LANG.t('Завершил карьеру');
+}
+
+function hallSeasonRange(e) {
+    const from = e.firstSeason || currentSeason;
+    const to = e.lastSeason || currentSeason;
+    return from === to ? String(from) : `${from}–${to}`;
+}
+
+function hallEntryStats(e) {
+    if (e.position === 'G') {
+        return [
+            { l: 'И', v: formatInt(e.gp || 0) },
+            { l: 'GAA', v: (e.gaa || 0).toFixed ? (e.gaa || 0).toFixed(2) : '0.00' },
+            { l: LANG.t('Сухие'), v: formatInt(e.bestShutouts || 0) },
+            { l: LANG.t('Сейвы'), v: formatInt(e.bestSaves || 0) }
+        ];
+    }
+    return [
+        { l: 'И', v: formatInt(e.gp || 0) },
+        { l: 'Г', v: formatInt(e.goals || 0) },
+        { l: 'П', v: formatInt(e.assists || 0) },
+        { l: 'О', v: formatInt(e.points || 0) }
+    ];
+}
+
+function renderHallAgency(c) {
+    syncAgencyHallActive();
+    const entries = ((agencyHall && agencyHall.entries) || [])
+        .slice()
+        .sort((a, b) => computeHallLegacy(b) - computeHallLegacy(a));
+
+    const hero = document.createElement('div');
+    hero.className = 'hlf-hero';
+    const active = entries.filter(e => e.status === 'active').length;
+    const trophies = entries.reduce((s, e) => s + (e.trophies || []).length, 0);
+    hero.innerHTML = `
+        <div class="hlf-hero-title">🏛 ${LANG.t('Пантеон агентства')}</div>
+        <div class="hlf-hero-sub">${LANG.t('Лучшие клиенты, их трофеи и карьера')}</div>
+        <div class="hlf-hero-stats">
+            <div><b>${entries.length}</b><span>${LANG.t('в истории')}</span></div>
+            <div><b>${active}</b><span>${LANG.t('действующих')}</span></div>
+            <div><b>${trophies}</b><span>${LANG.t('трофеев')}</span></div>
+        </div>`;
+    c.appendChild(hero);
+
+    if (entries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'hlf-empty';
+        empty.innerHTML = `<div class="hlf-empty-ico">🏛</div><div>${LANG.t('Зал Славы пока пуст')}</div><div class="hlf-empty-sub">${LANG.t('Подпишите клиентов и завершите сезон')}</div>`;
+        c.appendChild(empty);
+        return;
+    }
+
+    const podium = document.createElement('div');
+    podium.className = 'hlf-podium';
+    entries.slice(0, 3).forEach((e, idx) => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = `hlf-podium-card p${idx + 1}`;
+        card.innerHTML = `
+            <div class="hlf-podium-rank">${idx + 1}</div>
+            <div class="hlf-podium-avatar">${getPlayerAvatar({ name: e.name, position: e.position })}</div>
+            <div class="hlf-podium-name">${escapeHtml(e.name)}</div>
+            <div class="hlf-podium-pos">${e.position} • ${LANG.t('легаси')} ${formatInt(computeHallLegacy(e))}</div>`;
+        card.addEventListener('click', () => openHallClientModal(e.name));
+        podium.appendChild(card);
+    });
+    c.appendChild(podium);
+
+    const list = document.createElement('div');
+    list.className = 'hlf-list';
+    entries.forEach(e => {
+        const stats = hallEntryStats(e)
+            .map(s => `<span class="hlf-mini-stat"><b>${s.v}</b>${s.l}</span>`)
+            .join('');
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'hlf-client-row' + (e.status === 'active' ? ' is-active' : '');
+        row.innerHTML = `
+            <div class="hlf-client-avatar">${getPlayerAvatar({ name: e.name, position: e.position })}</div>
+            <div class="hlf-client-main">
+                <div class="hlf-client-name">${escapeHtml(e.name)} <span class="hlf-client-status ${e.status}">${hallStatusLabel(e.status)}</span></div>
+                <div class="hlf-client-sub">${e.position} • ${hallSeasonRange(e)} • 🏆 ${(e.trophies || []).length}</div>
+                <div class="hlf-mini-stats">${stats}</div>
+            </div>
+            <div class="hlf-client-legacy">
+                <b>${formatInt(computeHallLegacy(e))}</b>
+                <span>${LANG.t('легаси')}</span>
+            </div>`;
+        row.addEventListener('click', () => openHallClientModal(e.name));
+        list.appendChild(row);
+    });
+    c.appendChild(list);
+}
+
+function hallRecordRowsForLeague(lk) {
+    const rec = leagueRecords[lk];
+    if (!rec || !rec.cats) return [];
+    return rec.cats;
+}
+
+function renderHallBoard(c, lk, rows, title, icon, valueLabel) {
+    const block = document.createElement('div');
+    block.className = 'hlf-board';
+    const head = document.createElement('div');
+    head.className = 'hlf-board-title';
+    head.innerHTML = `<span class="hlf-board-ico">${icon}</span><span>${escapeHtml(LANG.t(title))}</span><span class="hlf-board-hint">${escapeHtml(LANG.t(valueLabel))}</span>`;
+    block.appendChild(head);
+    if (!Array.isArray(rows) || rows.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'hlf-empty small';
+        empty.textContent = LANG.t('Пока нет данных');
+        block.appendChild(empty);
+        c.appendChild(block);
+        return;
+    }
+    rows.forEach((row, idx) => {
+        const mine = isMyClientName(row.name);
+        const el = document.createElement('div');
+        el.className = 'hlf-record-row' + (mine ? ' is-client' : '') + (idx === 0 ? ' is-first' : '');
+        el.innerHTML = `
+            <span class="hlf-rank">${idx + 1}</span>
+            <span class="hlf-record-main">
+                <span class="hlf-record-name">${escapeHtml(row.name)}${mine ? ` <span class="hlf-client-badge">★ ${LANG.t('ВАШ КЛИЕНТ')}</span>` : ''}</span>
+                <span class="hlf-record-meta">${escapeHtml(row.club || '—')} • ${row.season || '—'}</span>
+            </span>
+            <span class="hlf-record-value">${formatInt(row.value)}</span>`;
+        if (mine) {
+            el.classList.add('clickable');
+            el.addEventListener('click', () => openHallRecordTarget(row.name));
+        }
+        block.appendChild(el);
+    });
+    c.appendChild(block);
+}
+
+function openHallRecordTarget(name) {
+    const active = (myRoster || []).find(p => p.name === name);
+    if (active) {
+        openPlayerScreen(active, 'my');
+        return;
+    }
+    if ((agencyHall.entries || []).some(e => e.name === name)) openHallClientModal(name);
+}
+
+function renderHallLeagues(c) {
+    const chips = document.createElement('div');
+    chips.className = 'hlf-league-chips';
+    Object.keys(LEAGUE_DATA).forEach(lk => {
+        const info = LEAGUE_DATA[lk] || {};
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'hlf-league-chip' + (lk === hallLeague ? ' active' : '');
+        btn.innerHTML = `<span>${String(info.country || '').split(' ')[0]}</span> ${escapeHtml(getLeagueName(lk))}`;
+        btn.addEventListener('click', () => {
+            hallLeague = lk;
+            renderHallFameOnly();
+        });
+        chips.appendChild(btn);
+    });
+    c.appendChild(chips);
+
+    const rec = leagueRecords[hallLeague] || blankLeagueRecord();
+    const info = LEAGUE_DATA[hallLeague] || {};
+    const head = document.createElement('div');
+    head.className = 'hlf-league-head';
+    head.innerHTML = `
+        <div class="hlf-league-title">${String(info.country || '').split(' ')[0]} ${escapeHtml(getLeagueName(hallLeague))}</div>
+        <div class="hlf-league-sub">${rec.updatedSeason > 0 ? `${LANG.t('Обновлено после сезона')} ${rec.updatedSeason}` : LANG.t('Архив до вашей карьеры')}</div>`;
+    c.appendChild(head);
+
+    const cats = rec.cats || blankLeagueRecord().cats;
+    const ownRows = [];
+    const seen = new Set();
+    const scan = (rows, cat) => {
+        (rows || []).forEach(r => {
+            if (!isMyClientName(r.name)) return;
+            const key = `${cat}|${r.name}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            ownRows.push({ ...r, cat });
+        });
+    };
+    LEAGUE_RECORD_CATS.forEach(cat => scan(cats[cat], cat));
+    LEAGUE_GOALIE_CATS.forEach(cat => scan((cats.goalie || {})[cat], 'goalie_' + cat));
+
+    const mine = document.createElement('div');
+    mine.className = 'hlf-own-summary' + (ownRows.length ? ' has' : '');
+    if (ownRows.length) {
+        const names = [...new Set(ownRows.map(r => r.name))];
+        mine.innerHTML = `<span class="hlf-own-ico">★</span><span>${LANG.t('Ваши клиенты в истории лиги')}: <b>${names.length}</b> · ${LANG.t('записей')}: <b>${ownRows.length}</b></span>`;
+    } else {
+        mine.innerHTML = `<span class="hlf-own-ico">☆</span><span>${LANG.t('Ваших клиентов в этой истории пока нет')}</span>`;
+    }
+    c.appendChild(mine);
+
+    renderHallBoard(c, hallLeague, cats.goals, 'Лучшие снайперы', '🎯', 'голы');
+    renderHallBoard(c, hallLeague, cats.assists, 'Лучшие ассистенты', '🧠', 'передачи');
+    renderHallBoard(c, hallLeague, cats.points, 'Лучшие бомбардиры', '⚡', 'очки');
+    renderHallBoard(c, hallLeague, (cats.goalie || {}).shutouts, 'Лучшие вратари: сухие игры', '🧱', 'сухие игры');
+    renderHallBoard(c, hallLeague, (cats.goalie || {}).saves, 'Лучшие вратари: сейвы', '🧤', 'сейвы');
+}
+
+// Перерисовка только содержимого (без сброса активной вкладки).
+function renderHallFameOnly() {
+    renderHallOfFameScreen();
+}
+
+function achievementRewardText(a) {
+    const r = a.reward || {};
+    const parts = [];
+    if (r.xp) parts.push(`+${r.xp} XP`);
+    if (r.money) parts.push(`+$${formatInt(Math.min(50000, r.money))}`);
+    if (r.rep) parts.push(`+${r.rep} ${LANG.t('репутация')}`);
+    if (r.title) parts.push(`🏅 ${LANG.t(r.title)}`);
+    return parts.join(' · ');
+}
+
+function renderHallAchievements(c) {
+    const unlocked = (achievements && achievements.unlocked) || {};
+    const ctx = buildAchievementContext();
+    const done = ACHIEVEMENTS.filter(a => unlocked[a.id]).length;
+    const pct = Math.round((done / Math.max(1, ACHIEVEMENTS.length)) * 100);
+
+    const hero = document.createElement('div');
+    hero.className = 'hlf-ach-hero';
+    hero.innerHTML = `
+        <div class="hlf-ach-hero-top">
+            <div>
+                <div class="hlf-ach-hero-title">🎖 ${LANG.t('Достижения')}</div>
+                <div class="hlf-ach-hero-sub">${done} / ${ACHIEVEMENTS.length}</div>
+            </div>
+            <div class="hlf-ach-hero-pct">${pct}%</div>
+        </div>
+        <div class="hlf-ach-hero-bar"><i style="width:${pct}%"></i></div>`;
+    c.appendChild(hero);
+
+    const filters = document.createElement('div');
+    filters.className = 'hlf-ach-filters';
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    allBtn.className = 'hlf-ach-filter' + (hallAchFilter === 'all' ? ' active' : '');
+    allBtn.textContent = LANG.t('Все');
+    allBtn.addEventListener('click', () => { hallAchFilter = 'all'; renderHallFameOnly(); });
+    filters.appendChild(allBtn);
+    Object.entries(ACHIEVEMENT_CATS).forEach(([key, info]) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'hlf-ach-filter' + (hallAchFilter === key ? ' active' : '');
+        b.innerHTML = `${info.icon} ${escapeHtml(LANG.t(info.name))}`;
+        b.addEventListener('click', () => { hallAchFilter = key; renderHallFameOnly(); });
+        filters.appendChild(b);
+    });
+    c.appendChild(filters);
+
+    const list = ACHIEVEMENTS
+        .filter(a => hallAchFilter === 'all' || a.cat === hallAchFilter)
+        .slice()
+        .sort((a, b) => {
+            const ua = unlocked[a.id] ? 1 : 0;
+            const ub = unlocked[b.id] ? 1 : 0;
+            if (ua !== ub) return ub - ua;
+            const va = Number(a.check(ctx)) || 0, vb = Number(b.check(ctx)) || 0;
+            return (vb / Math.max(1, b.target)) - (va / Math.max(1, a.target));
+        });
+
+    const grid = document.createElement('div');
+    grid.className = 'hlf-ach-grid';
+    list.forEach(a => {
+        const got = unlocked[a.id];
+        const value = Math.max(0, Math.min(a.target, Number(a.check(ctx)) || 0));
+        const p = Math.min(100, Math.round((value / Math.max(1, a.target)) * 100));
+        const card = document.createElement('div');
+        card.className = 'hlf-ach-card ' + (got ? 'unlocked' : 'locked');
+        card.innerHTML = `
+            <div class="hlf-ach-ico">${a.icon}</div>
+            <div class="hlf-ach-body">
+                <div class="hlf-ach-title">${escapeHtml(LANG.t(a.title))}</div>
+                <div class="hlf-ach-desc">${escapeHtml(LANG.t(a.desc))}</div>
+                ${got
+                    ? `<div class="hlf-ach-meta got">✅ ${LANG.t('Получено')} • ${got.season}</div>`
+                    : `<div class="hlf-ach-bar"><i style="width:${p}%"></i></div>
+                       <div class="hlf-ach-meta">${formatInt(value)} / ${formatInt(a.target)}</div>`}
+                <div class="hlf-ach-reward">${escapeHtml(achievementRewardText(a))}</div>
+            </div>
+            <div class="hlf-ach-cat">${ACHIEVEMENT_CATS[a.cat] ? ACHIEVEMENT_CATS[a.cat].icon : '🎖'}</div>`;
+        grid.appendChild(card);
+    });
+    c.appendChild(grid);
+}
+
+function openHallClientModal(name) {
+    const e = ((agencyHall && agencyHall.entries) || []).find(x => x.name === name);
+    if (!e) return;
+    hallSelectedEntry = name;
+    const modal = document.getElementById('hall-client-modal');
+    const body = document.getElementById('hall-client-body');
+    const title = document.getElementById('hall-client-title');
+    if (!modal || !body) return;
+    if (title) title.textContent = e.name;
+    const records = getClientRecordRows(e.name);
+    const stats = hallEntryStats(e)
+        .map(s => `<div class="hlf-modal-stat"><b>${s.v}</b><span>${s.l}</span></div>`)
+        .join('');
+    const trophies = (e.trophies || []).slice().reverse().map(t =>
+        `<div class="hlf-modal-line">🏆 ${escapeHtml(t.name || '')}${t.season ? ` <span>${t.season}</span>` : ''}</div>`
+    ).join('') || `<div class="hlf-modal-empty">${LANG.t('Трофеев пока нет')}</div>`;
+    const awards = (e.awards || []).slice().reverse().map(a =>
+        `<div class="hlf-modal-line">🥇 ${escapeHtml(a.name || '')}${a.season ? ` <span>${a.season}</span>` : ''}</div>`
+    ).join('') || `<div class="hlf-modal-empty">${LANG.t('Наград пока нет')}</div>`;
+    const recHtml = records.length
+        ? records.map(r => `<div class="hlf-modal-line">📜 ${escapeHtml(getLeagueName(r.league))}: #${r.place} — ${escapeHtml(LANG.t(hallRecordLabel(r.cat)))} (${formatInt(r.value)})</div>`).join('')
+        : `<div class="hlf-modal-empty">${LANG.t('Рекордов пока нет')}</div>`;
+    const clubs = (e.clubs || []).map(c2 =>
+        `<span class="hlf-club-chip">${escapeHtml(c2.club)}${c2.league ? ` <i>${escapeHtml(getLeagueName(c2.league))}</i>` : ''}</span>`
+    ).join('') || `<div class="hlf-modal-empty">${LANG.t('Нет клубов')}</div>`;
+    body.innerHTML = `
+        <div class="hlf-modal-hero">
+            <div class="hlf-modal-avatar">${getPlayerAvatar({ name: e.name, position: e.position })}</div>
+            <div class="hlf-modal-id">
+                <div class="hlf-modal-name">${escapeHtml(e.name)}</div>
+                <div class="hlf-modal-sub">${e.position} • ${hallSeasonRange(e)} • ${hallStatusLabel(e.status)}</div>
+                <div class="hlf-modal-legacy">${LANG.t('Легаси')}: <b>${formatInt(computeHallLegacy(e))}</b></div>
+            </div>
+        </div>
+        <div class="hlf-modal-stats">${stats}</div>
+        <div class="hlf-modal-section-title">🏆 ${LANG.t('Трофеи')}</div>
+        <div class="hlf-modal-lines">${trophies}</div>
+        <div class="hlf-modal-section-title">🥇 ${LANG.t('Награды')}</div>
+        <div class="hlf-modal-lines">${awards}</div>
+        <div class="hlf-modal-section-title">📜 ${LANG.t('Рекорды лиг')}</div>
+        <div class="hlf-modal-lines">${recHtml}</div>
+        <div class="hlf-modal-section-title">🏒 ${LANG.t('Клубы')}</div>
+        <div class="hlf-modal-clubs">${clubs}</div>`;
+    modal.style.display = 'flex';
+}
+
+function hallRecordLabel(cat) {
+    return {
+        goals: 'Лучший снайпер',
+        assists: 'Лучший ассистент',
+        points: 'Лучший бомбардир',
+        goalie_shutouts: 'Сухие игры',
+        goalie_saves: 'Сейвы'
+    }[cat] || cat;
+}
+
+function closeHallClientModal() {
+    const modal = document.getElementById('hall-client-modal');
+    if (modal) modal.style.display = 'none';
+    hallSelectedEntry = null;
+}
+
+document.getElementById('hall-back')?.addEventListener('click', () => {
+    hidePagination();
+    document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
+    const os = document.getElementById('office-screen');
+    if (os) os.style.display = 'flex';
+    showBottomNav();
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    const navO = document.querySelector('.nav-item[data-nav="office"]');
+    if (navO) navO.classList.add('active');
+    updateAllDisplays();
+});
+
+document.querySelectorAll('#hall-tabs [data-htab]').forEach(tab => {
+    tab.addEventListener('click', function () {
+        const t = this.getAttribute('data-htab');
+        if (!t) return;
+        hallTab = t;
+        renderHallFameOnly();
+    });
+});
+
+document.getElementById('hall-client-close')?.addEventListener('click', closeHallClientModal);
+document.getElementById('hall-client-modal')?.addEventListener('click', (e) => {
+    if (e.target && e.target.id === 'hall-client-modal') closeHallClientModal();
+});
 
 // ============ 23. АГЕНТСТВО ============
 function showAgencyScreen() {
@@ -12179,6 +15198,7 @@ function renderAgencyScreen() {
         else t.classList.remove('active');
     });
     if (agencyTab === 'upgrade') renderUpgradeTab(c);
+    else if (agencyTab === 'finance') renderFinanceTab(c);
     else renderRatingTab(c);
 }
 
@@ -12188,6 +15208,29 @@ document.querySelectorAll('#agency-screen .clients-tab').forEach(tab => {
         renderAgencyScreen();
     });
 });
+
+function renderFinanceTab(c) {
+    const income = financeHistory.filter(e => e.type === 'income').reduce((sum, e) => sum + e.amount, 0);
+    const expense = financeHistory.filter(e => e.type === 'expense').reduce((sum, e) => sum + e.amount, 0);
+    const wrap = document.createElement('div');
+    wrap.className = 'finance-wrap';
+    const rows = financeHistory.slice().reverse().map(e => `
+        <div class="finance-row ${e.type}">
+            <div class="finance-main">
+                <span class="finance-reason">${escapeHtml(e.reason)}</span>
+                <span class="finance-meta">${e.season} • ${LANG.t('Неделя')} ${e.week}</span>
+            </div>
+            <span class="finance-amount ${e.type}">${e.type === 'income' ? '+' : '−'}${formatMoney(e.amount)}</span>
+        </div>`).join('');
+    wrap.innerHTML = `
+        <div class="finance-summary">
+            <div class="finance-sum"><span>${LANG.t('Доходы')}</span><b class="income">+${formatMoney(income)}</b></div>
+            <div class="finance-sum"><span>${LANG.t('Расходы')}</span><b class="expense">−${formatMoney(expense)}</b></div>
+            <div class="finance-sum"><span>${LANG.t('Баланс')}</span><b class="${agentMoney >= 0 ? 'income' : 'expense'}">${agentMoney >= 0 ? '+' : '−'}${formatMoney(Math.abs(agentMoney))}</b></div>
+        </div>
+        <div class="finance-list">${rows || `<div class="finance-empty">${LANG.t('Пока нет операций')}</div>`}</div>`;
+    c.appendChild(wrap);
+}
 
 function renderUpgradeTab(c) {
     const isDebt = agentMoney < 0;
@@ -12204,7 +15247,42 @@ function renderUpgradeTab(c) {
         ${isDebt ? '<div class="ap-debt">⚠️ В ДОЛГАХ! Работает только офис</div>' : ''}
     `;
     c.appendChild(profile);
-    for (const key of Object.keys(UPGRADE_CARDS)) c.appendChild(buildUpgradeCard(key, isDebt));
+    c.appendChild(buildGroupTrainingPanel());
+
+    // v1.2: на экране агентства по умолчанию только главное — офис.
+    const keys = Object.keys(UPGRADE_CARDS);
+    const visibleKeys = agencyShowAllUpgrades ? keys : keys.filter(k => k === 'office');
+    for (const key of visibleKeys) c.appendChild(buildUpgradeCard(key, isDebt));
+
+    if (!agencyShowAllUpgrades) {
+        const more = document.createElement('button');
+        more.className = 'agency-more-btn';
+        more.textContent = LANG.t('Все улучшения');
+        more.addEventListener('click', () => { agencyShowAllUpgrades = true; renderAgencyScreen(); });
+        c.appendChild(more);
+    }
+}
+
+function buildGroupTrainingPanel() {
+    const div = document.createElement('div');
+    div.className = 'agency-group-training';
+    const current = groupTrainingAttr ? getTrainingByAttr(groupTrainingAttr) : null;
+    div.innerHTML = `
+        <div class="agt-head">
+            <span class="agt-title">👥 ${LANG.t('Групповая тренировка')}</span>
+            <button class="agt-off ${groupTrainingAttr ? '' : 'active'}" data-group-off>${LANG.t('Выкл')}</button>
+        </div>
+        <div class="agt-hint">${LANG.t('Один атрибут для всех клиентов. Автотренировка включена по умолчанию при выборе.')}</div>
+        <div class="agt-attrs">
+            ${TRAINING_OPTIONS.map(t => `<button class="agt-attr ${groupTrainingAttr === t.attr ? 'active' : ''}" data-group-attr="${t.attr}">${t.icon} ${LANG.t(t.name)}</button>`).join('')}
+        </div>
+        <div class="agt-status">${current ? `${LANG.t('Цель')}: ${LANG.t(current.name)}` : LANG.t('Не выбрано')}</div>
+    `;
+    div.querySelectorAll('[data-group-attr]').forEach(btn => {
+        btn.addEventListener('click', () => setGroupTraining(btn.getAttribute('data-group-attr')));
+    });
+    div.querySelector('[data-group-off]')?.addEventListener('click', () => setGroupTraining(null));
+    return div;
 }
 
 function buildUpgradeCard(key, isDebt) {
@@ -12218,7 +15296,7 @@ function buildUpgradeCard(key, isDebt) {
     div.className = 'agency-card' + (isMax ? ' maxed' : '');
 
     let cur = '', nxt = '';
-    if (key === 'office') { cur = `${getSlots()} ${LANG.t('слотов')}`; nxt = `${5 + lvl + 1} ${LANG.t('слотов')}`; }
+    if (key === 'office') { cur = `${getSlots()} ${LANG.t('слотов')}`; nxt = `${1 + lvl + 1} ${LANG.t('слотов')}`; }
     else if (key === 'scouting') { cur = `${LANG.t('до')} ${getMaxRatingVisible()}`; nxt = `${LANG.t('до')} ${30 + Math.round(lvl * 2.9)}`; }
     else if (key === 'reveal') { 
         const r = getRevealRange(); 
@@ -12252,7 +15330,7 @@ function buildUpgradeCard(key, isDebt) {
     `;
     if (!disabled) {
         div.querySelector('.ac-upgrade-btn').addEventListener('click', () => {
-            agentMoney -= cost;
+            applyMoney(-cost, `Улучшение: ${card.name}`);
             upgrades[key]++;
             addNews(`${card.icon} ${card.name} улучшен до ${upgrades[key]}!`, "positive");
             renderAgencyScreen();
@@ -12264,19 +15342,6 @@ function buildUpgradeCard(key, isDebt) {
 }
 
 function renderRatingTab(c) {
-    const myCard = document.createElement('div');
-    myCard.className = 'rating-my-card';
-    myCard.innerHTML = `
-        <div class="rmc-label">🏢 МОЁ АГЕНТСТВО</div>
-        <div class="rmc-name">${agencyFlag} ${agencyName}</div>
-        <div class="rmc-stats">
-            <div class="rmc-stat"><span>⭐</span><span>${getMyAgentReputation()}</span></div>
-            <div class="rmc-stat"><span>👥</span><span>${myRoster.length}</span></div>
-            <div class="rmc-stat"><span>💰</span><span>${formatMoney(agentMoney)}</span></div>
-        </div>
-    `;
-    c.appendChild(myCard);
-
     if (!window.agencyFilter) window.agencyFilter = 'rep';
     const filterRow = document.createElement('div');
     filterRow.className = 'market-filter-row';
@@ -12290,32 +15355,52 @@ function renderRatingTab(c) {
     });
     c.appendChild(filterRow);
 
-    const sorted = [...npcAgencies];
+    // v1.2.2: своё агентство живёт в общем рейтинге и сортируется по тем же правилам.
+    const myEntry = {
+        id: 'mine',
+        isMine: true,
+        name: agencyName,
+        country: `${agencyFlag} ${agencyCountry || ''}`.trim(),
+        description: LANG.t('Твоё агентство'),
+        rep: getMyAgentReputation(),
+        clientCount: myRoster.length,
+        budget: agentMoney
+    };
+    const sorted = [
+        ...npcAgencies.map(a => ({ ...a, clientCount: (a.clientIds || []).length })),
+        myEntry
+    ];
     if (window.agencyFilter === 'rep') sorted.sort((a, b) => b.rep - a.rep);
-    else if (window.agencyFilter === 'clients') sorted.sort((a, b) => b.clientIds.length - a.clientIds.length);
+    else if (window.agencyFilter === 'clients') sorted.sort((a, b) => b.clientCount - a.clientCount);
     else sorted.sort((a, b) => b.budget - a.budget);
 
     sorted.forEach((ag, idx) => {
+        const isMine = !!ag.isMine;
         const row = document.createElement('div');
-        row.className = 'agency-row';
-        const fl = ag.country.split(' ')[0];
-        const code = ag.country.split(' ')[1] || '';
+        row.className = `agency-row${isMine ? ' agency-row-mine' : ''}`;
+        row.style.animationDelay = `${Math.min(idx, 14) * 35}ms`;
+        if (isMine) row.setAttribute('data-agency-mine', '1');
+        const fl = (ag.country || '').split(' ')[0];
+        const code = (ag.country || '').split(' ')[1] || '';
         row.innerHTML = `
     <div class="ar-place">#${idx + 1}</div>
     <div class="ar-info">
-        <div class="ar-name"><span style="opacity:0.7;">${fl || code}</span> ${ag.name}</div>
-                <div class="ar-meta">${ag.description}</div>
-            </div>
-            <div class="ar-stats">
-                <span class="ar-stat">⭐ ${ag.rep}</span>
-                <span class="ar-stat">👥 ${ag.clientIds.length}</span>
-            </div>
+        <div class="ar-name"><span style="opacity:0.7;">${fl || code}</span> ${ag.name}${isMine ? `<span class="ar-mine-badge">${LANG.t('ТЫ')}</span>` : ''}</div>
+        <div class="ar-meta">${ag.description}</div>
+    </div>
+    <div class="ar-stats">
+        <span class="ar-stat">⭐ ${ag.rep}</span>
+        <span class="ar-stat">👥 ${ag.clientCount}</span>
+        <span class="ar-stat ar-stat-budget">💰 ${formatMoney(ag.budget)}</span>
+    </div>
         `;
-        row.addEventListener('click', () => openNpcAgency(ag));
+        if (!isMine) row.addEventListener('click', () => openNpcAgency(ag));
         c.appendChild(row);
     });
 }
 
+// v1.2.1: карточка NPC-агентства — только справочная информация:
+// репутация, бюджет и список клиентов. Переманивание живёт в карточке игрока.
 function openNpcAgency(ag) {
     const modal = document.getElementById('npc-agency-modal');
     const title = document.getElementById('npc-agency-title');
@@ -12325,8 +15410,6 @@ function openNpcAgency(ag) {
     title.textContent = ag.name;
 
     const clientPlayers = players.filter(p => p.agentId === ag.id);
-    const isClosed = !!closedAgencies[ag.id];
-    const attempts = agencyPoachAttempts[ag.id] || 0;
     let html = `
         <div class="npc-agency-header">
             <div class="nah-flag">${fl}</div>
@@ -12338,88 +15421,50 @@ function openNpcAgency(ag) {
                 <div class="nah-stat"><span>💰</span><span>${formatMoney(ag.budget)}</span></div>
             </div>
         </div>
-        ${isClosed
-            ? '<div class="npc-agency-warning danger">🚨 Агентство закрыло доступ к своим клиентам до конца сезона</div>'
-            : (attempts > 0 ? `<div class="npc-agency-warning yellow">⚠️ Попыток переманить: ${attempts}/3</div>` : '')}
         <div class="npc-clients-title">👥 Клиенты (${clientPlayers.length})</div>
     `;
     if (clientPlayers.length === 0) html += '<div class="empty-state-small">Нет клиентов</div>';
     else {
         const top = [...clientPlayers].sort((a, b) => b.rating - a.rating).slice(0, 30);
         top.forEach(p => {
-            const can = !poachedPlayersThisSeason[p.name] && !isClosed;
             html += `
-                <div class="npc-client-row ${!can ? 'locked' : ''}" data-pname="${p.name}">
+                <div class="npc-client-row" data-npc-client="${escapeHtml(p.name)}">
                     <div class="ncr-avatar">${getPlayerAvatar(p)}</div>
                     <div class="ncr-info">
                         <div class="ncr-name">${p.name} ${getPlayerCountry(p)}</div>
-                        <div class="ncr-meta">${p.age} лет • ${p.club}</div>
+                        <div class="ncr-meta">${p.age} лет • ${p.club || LANG.t('Свободный агент')}</div>
                     </div>
                     <div class="ncr-rating">${p.rating}</div>
-                    ${can ? '<div class="ncr-action">→</div>' : '<div class="ncr-lock">🔒</div>'}
                 </div>
             `;
         });
     }
     body.innerHTML = html;
+    // v1.2.3: клик по клиенту чужого агентства открывает его карточку и вкладку «Диалог».
+    body.querySelectorAll('.npc-client-row[data-npc-client]').forEach(row => {
+        row.addEventListener('click', () => {
+            const p = players.find(x => x.name === row.getAttribute('data-npc-client'));
+            if (!p) return;
+            modal.style.display = 'none';
+            playerReturnContext = { type: 'screen', screenId: 'agency-screen' };
+            agencyTab = 'rating';
+            openPlayerScreen(p, 'public');
+            playerTab = 'dialogue';
+            renderPlayerScreen();
+        });
+    });
     actions.innerHTML = '';
     const closeBtn = document.createElement('button');
     closeBtn.className = 'btn-neutral';
     closeBtn.textContent = LANG.t('Закрыть');
     closeBtn.addEventListener('click', () => modal.style.display = 'none');
     actions.appendChild(closeBtn);
-
-    body.querySelectorAll('.npc-client-row').forEach(row => {
-        const pName = row.getAttribute('data-pname');
-        const p = clientPlayers.find(x => x.name === pName);
-        if (!p || poachedPlayersThisSeason[p.name] || isClosed) return;
-        row.addEventListener('click', () => { modal.style.display = 'none'; openPoachDialog(p, ag); });
-    });
     modal.style.display = 'flex';
 }
 
-// ============ 24. ДИАЛОГ ПЕРЕМАНИВАНИЯ ============
-const CHARACTERS = {
-    ambitious: { name: '🚀 Амбициозный', correct: ['nhl', 'star', 'media'], wrong: ['friend', 'loyal'] },
-    calm: { name: '😌 Спокойный', correct: ['stability', 'never_leave'], wrong: ['star', 'whim'] },
-    pragmatic: { name: '💼 Прагматик', correct: ['numbers', 'money', 'percent'], wrong: ['friend', 'ambition'] },
-    capricious: { name: '🎭 Капризный', correct: ['only_you', 'personal'], wrong: ['loyal', 'nhl'] },
-    loyal: { name: '🐺 Лояльный', correct: ['friend', 'truth'], wrong: ['money', 'ambition'] }
-};
-
-const POACH_REPLIES = {
-    nhl: '«Пойдём ко мне — выведу в NHL»',
-    star: '«Ты будешь звездой, братан!»',
-    media: '«Дам медийную поддержку»',
-    stability: '«Гарантирую стабильность и покой»',
-    never_leave: '«Никогда не брошу — слово агента»',
-    numbers: '«Покажу цифры и проценты»',
-    money: '«Предлагаю $50K подъёмных»',
-    percent: '«У меня лучшие проценты в отрасли»',
-    only_you: '«Ты будешь моим единственным клиентом»',
-    personal: '«Личное внимание 24/7»',
-    friend: '«Я не агент — я друг»',
-    truth: '«Покажу, как тебя тормозит твой агент»',
-    whim: '«Даю слово — будешь доволен»'
-};
-
-const SUCCESS_PHRASES = {
-    ambitious: ['Да! Я хочу в NHL. Погнали!', 'Круто. Только не подведи.', 'Наконец-то кто-то серьёзный.'],
-    calm: ['Хм... окей. Может, ты прав.', 'Я подумаю. Но ты мне нравишься.', 'Ладно, попробуем.'],
-    pragmatic: ['Сколько? Покажи цифры.', 'Если условия лучше — я согласен.', 'Давай обсудим проценты.'],
-    capricious: ['Ооо, ты мне нравишься! Погнали!', 'Скучно с ними, давай с тобой!', 'Ок, но я могу передумать.'],
-    loyal: ['...ладно. Но знай: я предаю друга.', 'Он меня вырастил. Но ты прав.', 'Прости меня, старый друг.']
-};
-
-const FAIL_PHRASES = {
-    ambitious: ['Ты? Не смеши.', 'Мне нужен агент уровня, а не новичок.', 'Я жду предложения от топов.'],
-    calm: ['Мне и так хорошо. Не хочу менять.', 'Спасибо, но нет.', 'Я ценю стабильность.'],
-    pragmatic: ['Мало денег предлагаешь.', 'Твой бюджет видно за версту.', 'Ставка должна быть выше.'],
-    capricious: ['Не-не-не. Не сегодня.', 'Фу, нет.', 'Не хочу. Отстань.'],
-    loyal: ['Он мой друг. Я не уйду.', 'Мы вместе с самого начала.', 'Никогда. Даже за миллион.']
-};
-
-// ============ ПЕРЕМАНИВАНИЕ: ПРЕСЕТЫ ОФФЕРА И ЧИСТЫЙ ШАНС ============
+// ============ 24. ПЕРЕМАНИВАНИЕ: ОБЩИЕ ПРЕСЕТЫ ОФФЕРА ============
+// v1.2.1: UI-диалог переманивания удалён из экрана агентств. Чистые
+// помощники качества/шанса сохранены как общий слой расчётов и для тестов.
 // Три предложения игроку с разной ценой для агента и разным качеством.
 // salary/commission/signingBonus/promises напрямую влияют на offerQuality.
 const POACH_OFFER_PRESETS = [
@@ -12520,162 +15565,19 @@ function getPoachChance(player, agency, reply, offer, myRep = null) {
     return Math.max(5, Math.min(85, Math.round(chance)));
 }
 
-function openPoachDialog(player, npcAgency) {
-    const modal = document.getElementById('poach-dialog-modal');
-    const body = document.getElementById('poach-dialog-body');
-    const actions = document.getElementById('poach-dialog-actions');
-    const country = getPlayerCountry(player);
-    const agencyFlag = npcAgency.country.split(' ')[0];
-    const presets = getPoachOfferPresets(player);
-    let selectedOffer = presets[0];
-
-    const isTruth = simRandom() < 0.8;
-    const rumorKeys = ['ambitious', 'calm', 'pragmatic', 'capricious', 'loyal'];
-    const rumorChar = isTruth ? player.character : simChoice(rumorKeys.filter(r => r !== player.character));
-    const rumorMap = {ambitious:'очень амбициозный парень', calm:'спокойный и ценит стабильность', pragmatic:'прагматик до мозга костей', capricious:'характер у него — не сахар', loyal:'очень верный своему агенту'};
-    const rumorText = LANG.t(rumorMap[rumorChar] || 'ничего не слышно');
-
-    const revealRange = getRevealRange();
-    let potHTML = '???';
-    // Точный потенциал виден только при максимальном скаутинге (range === 0),
-    // иначе конкурент не раскрывает данные игрока
-    if (revealRange === 0) potHTML = `${player.potential}`;
-
-    body.innerHTML = `
-        <div class="pd-player-card">
-            <div class="pd-avatar">${getPlayerAvatar(player)}</div>
-            <div class="pd-name">${player.name} ${country}</div>
-            <div class="pd-meta">${player.age} ${LANG.t('лет')} • ${player.position}</div>
-            <div class="pd-stats">
-                <div class="pd-stat"><span>⭐ ${LANG.t('Рейтинг')}</span><b>${player.rating}</b></div>
-                <div class="pd-stat"><span>🎯 ${LANG.t('Потенциал')}</span><b>${potHTML}</b></div>
-                <div class="pd-stat"><span>💵 ${LANG.t('Зарплата')}</span><b>${formatSalary(player.salary)}</b></div>
-            </div>
-            <div class="pd-current-agent">${agencyFlag} ${npcAgency.name} (⭐ ${npcAgency.rep})</div>
-        </div>
-        <div class="pd-rumor">💬 ${LANG.t('Слухи')}: ${rumorText}</div>
-        <div class="pd-dialog-title">💰 ${LANG.t('Предложение игроку')}</div>
-        <div class="pd-offer-presets" id="pd-offer-presets"></div>
-        <div class="pd-dialog-title">🗣 ${LANG.t('Ты обращаешься к игроку')}:</div>
-        <div class="pd-replies" id="pd-replies"></div>
-    `;
-    actions.innerHTML = '';
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'btn-neutral';
-    closeBtn.textContent = LANG.t('Отмена');
-    closeBtn.addEventListener('click', () => modal.style.display = 'none');
-    actions.appendChild(closeBtn);
-
-    const offerCont = document.getElementById('pd-offer-presets');
-    presets.forEach((o) => {
-        const canPay = o.cost <= agentMoney;
-        const btn = document.createElement('button');
-        btn.className = 'pd-offer-preset' + (o.id === selectedOffer.id ? ' active' : '') + (canPay ? '' : ' disabled');
-        btn.disabled = !canPay;
-        btn.setAttribute('data-offer', o.id);
-        btn.innerHTML = `
-            <span class="pop-head"><span class="pop-name">${LANG.t(o.name)}</span><span class="pop-quality">${Math.round(o.quality * 100)}%</span></span>
-            <span class="pop-meta">${formatSalary(o.newSalary)} · ${Math.round(o.agentCommissionRate * 100)}% · ${o.cost ? formatMoney(o.cost) : LANG.t('Бесплатно')}</span>
-        `;
-        btn.addEventListener('click', () => {
-            if (!canPay) return;
-            selectedOffer = o;
-            offerCont.querySelectorAll('.pd-offer-preset').forEach(x => x.classList.remove('active'));
-            btn.classList.add('active');
-        });
-        offerCont.appendChild(btn);
-    });
-
-    const pool = [];
-    const charData = CHARACTERS[player.character];
-    Object.keys(POACH_REPLIES).forEach(k => {
-        let type = 'neutral';
-        if (charData.correct.includes(k)) type = 'correct';
-        else if (charData.wrong.includes(k)) type = 'wrong';
-        pool.push({key: k, text: LANG.t(POACH_REPLIES[k]), type});
-    });
-    for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(simRandom() * (i + 1));
-        [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-    const cont = document.getElementById('pd-replies');
-    pool.slice(0, 6).forEach(r => {
-        const btn = document.createElement('button');
-        btn.className = 'pd-reply-btn';
-        btn.textContent = r.text;
-        btn.addEventListener('click', () => resolvePoach(player, npcAgency, r, selectedOffer));
-        cont.appendChild(btn);
-    });
-    modal.style.display = 'flex';
-}
-
-function resolvePoach(player, npcAgency, reply, offer) {
-    const modal = document.getElementById('poach-dialog-modal');
-    const body = document.getElementById('poach-dialog-body');
-    const chosenOffer = offer || getPoachOfferPresets(player)[0];
-    const offerCost = Math.max(0, Math.round(chosenOffer.cost || 0));
-
-    // Цена оффера списывается только если хватает денег — в минус не уходим.
-    if (offerCost > agentMoney) {
-        uiAlert(LANG.t('Недостаточно средств для этого предложения'));
-        return;
-    }
-
-    // ОДНА ПОПЫТКА ЗА СЕЗОН — помечаем сразу, чтобы нельзя было долбить одного и того же
-    poachedPlayersThisSeason[player.name] = true;
-    
-    // СЧЁТЧИК ПОПЫТОК ПО АГЕНТСТВУ
-    if (!agencyPoachAttempts[npcAgency.id]) agencyPoachAttempts[npcAgency.id] = 0;
-    agencyPoachAttempts[npcAgency.id]++;
-    const attemptsNow = agencyPoachAttempts[npcAgency.id];
-    if (attemptsNow >= 3 && !closedAgencies[npcAgency.id]) {
-        closedAgencies[npcAgency.id] = true;
-        addNews(`🚨 ${npcAgency.name} закрыло доступ к своим игрокам до конца сезона!`, "negative");
-    }
-
-    if (offerCost > 0) agentMoney -= offerCost;
-
-    const chance = getPoachChance(player, npcAgency, reply, chosenOffer);
-    const success = simRandom() * 100 < chance;
-
-    if (success) {
-        player.agentId = -1;
-        myRoster.push(player);
-        incrementClientsSigned();
-        careerCounters.poachSuccess = (careerCounters.poachSuccess || 0) + 1;
-        if (npcAgency.rep >= 85) careerCounters.poachTopSuccess = (careerCounters.poachTopSuccess || 0) + 1;
-        const phrases = SUCCESS_PHRASES[player.character] || SUCCESS_PHRASES.calm;
-        body.innerHTML = `<div class="pd-result success"><div class="pd-result-icon">✅</div><div class="pd-player-line">${player.name}</div><div class="pd-phrase">${LANG.t(simChoice(phrases))}</div><div class="pd-result-text">${LANG.t('Игрок стал твоим клиентом!')} (${LANG.t('шанс')} ${chance}%)</div></div>`;
-        addNews(`🎉 Вы переманили ${player.name}!`, "positive");
-        addXP(player.rating * 5);
-        updateAllDisplays();
-        saveGame();
-    } else {
-        careerCounters.poachFails = (careerCounters.poachFails || 0) + 1;
-        const phrases = FAIL_PHRASES[player.character] || FAIL_PHRASES.calm;
-        body.innerHTML = `<div class="pd-result fail"><div class="pd-result-icon">❌</div><div class="pd-player-line">${player.name}</div><div class="pd-phrase">${LANG.t(simChoice(phrases))}</div><div class="pd-result-text">${LANG.t('До конца сезона к нему не подойти')} (${LANG.t('шанс')} ${chance}%)</div></div>`;
-        addNews(`❌ Не удалось переманить ${player.name}`, "negative");
-        updateAllDisplays();
-        saveGame();
-    }
-
-    const actions = document.getElementById('poach-dialog-actions');
-    actions.innerHTML = '';
-    const okBtn = document.createElement('button');
-    okBtn.className = 'btn-neutral';
-    okBtn.textContent = 'OK';
-    okBtn.addEventListener('click', () => { modal.style.display = 'none'; renderAgencyScreen(); });
-    actions.appendChild(okBtn);
-}
-
 // ============ 25. ИГРА НЕДЕЛИ ============
-btnPlayWeek.addEventListener('click', function () {
-    // Защита от double-click: неделя/раунд не должны прокручиваться дважды
+function requestPlayWeek() {
+    // Защита от двойного клика из любых кнопок (офис, хаб президента, решения).
     if (window._playWeekLock) return;
     window._playWeekLock = true;
     setTimeout(() => { window._playWeekLock = false; }, 600);
-
-if (myRoster.length === 0 && seasonPhase === 'regular') { uiAlert(LANG.t('Нет клиентов!')); return; }
+    // Батч 1: президент не играет неделю без решения (курс + брифинг + событие).
+    if (presidentClubKey && seasonPhase !== 'draft' && seasonPhase !== 'world_champ' && !presidentWeekReady()) {
+        showPresidentDecisionsScreen();
+        uiAlert(LANG.t('Сначала примите решения недели: курс, один брифинг и реакцию на событие.'));
+        return;
+    }
+    if (myRoster.length === 0 && seasonPhase === 'regular' && !presidentClubKey) { uiAlert(LANG.t('Нет клиентов!')); return; }
     if (seasonPhase === 'regular') { tickTransferOffers(); playRegularWeek(); }
     else if (seasonPhase === 'transfer_mid' || seasonPhase === 'transfer_off') { tickTransferOffers(); playTransferWeek(); }
     else if (seasonPhase === 'playoffs') simulatePlayoffRound();
@@ -12689,8 +15591,13 @@ if (myRoster.length === 0 && seasonPhase === 'regular') { uiAlert(LANG.t('Нет
             runDraft();
         }
     }
+    finishPresidentWeek();
     updateAllDisplays();
     saveGame();
+}
+
+btnPlayWeek.addEventListener('click', function () {
+    requestPlayWeek();
 });
 
 function playTournamentWeek() {
@@ -12781,19 +15688,18 @@ function playRegularWeek() {
     
     // Расходы агентства
     const weekly = totalWeeklyCost();
-    if (agentMoney >= 0) agentMoney -= weekly;
-    else agentMoney -= weeklyCostForCard('office');
+    applyMoney(-(agentMoney >= 0 ? weekly : weeklyCostForCard('office')), 'Расходы агентства');
 
     // Налог на богатство (в офис-тратах)
     const tax = getWealthTax();
     if (tax > 0) {
-        agentMoney -= tax;
+        applyMoney(-tax, 'Налог на активы');
         // Логируем не каждую неделю, чтобы не спамить
-        if (currentWeek % 4 === 0) addNews(`🏦 Налог на активы: −$${formatInt(tax)}`, "info");
+        if (currentWeek % 4 === 0) addNews(`🏦 Налог на активы: −${formatInt(tax)}`, "info");
     }
 
     // Доходы
-    agentMoney += calculatePassiveIncome();
+    applyMoney(calculatePassiveIncome(), 'Пассивный доход');
 
     // Симуляция
     const weeklyStatsBefore = new Map();
@@ -12825,7 +15731,7 @@ function playRegularWeek() {
 
     // Комиссии
     activeCommissions.forEach(c => {
-        if (c.weeksLeft > 0) { agentMoney += c.weeklyAmount; c.weeksLeft--; }
+        if (c.weeksLeft > 0) { applyMoney(c.weeklyAmount, `Комиссия: ${c.playerName}`); c.weeksLeft--; }
     });
     activeCommissions = activeCommissions.filter(c => c.weeksLeft > 0);
 
@@ -12858,13 +15764,18 @@ function playRegularWeek() {
 
     // Случайный старт новой цепочки (8% шанс в неделю, если нет активных)
     if (activeChains.length === 0 && simRandom() < 0.08) {
+        // v1.2: «жирные» цепочки не стартуют на ранних уровнях.
+        const chainMinLevel = {
+            doping_chain: 5, crypto_scheme_chain: 4, business_empire_chain: 6,
+            national_team_chain: 5, media_mogul_chain: 5, rival_war: 3
+        };
         const chainPool = [
             'bad_press_chain', 'rival_war',
             'doping_chain', 'home_return_chain', 'coach_conflict_chain',
             'crypto_scheme_chain', 'youth_growth_chain', 'philanthropy_chain',
             'personal_crisis_chain', 'career_turn_chain', 'business_empire_chain',
             'national_team_chain', 'media_mogul_chain'
-        ];
+        ].filter(id => (chainMinLevel[id] || 1) <= agentLevel);
         const pick = chainPool[Math.floor(simRandom() * chainPool.length)];
         const nowChainKey = currentSeason * 100 + currentWeek;
         if ((eventCooldowns[pick] || 0) <= nowChainKey && !activeChains.some(c => c.chainId === pick)) {
@@ -12901,18 +15812,17 @@ function playTransferWeek() {
 
     // ===== ФИНАНСЫ: работают и в ТО, а не только в regular =====
     const weekly = totalWeeklyCost();
-    if (agentMoney >= 0) agentMoney -= weekly;
-    else agentMoney -= weeklyCostForCard('office');
+    applyMoney(-(agentMoney >= 0 ? weekly : weeklyCostForCard('office')), 'Расходы агентства');
 
     const tax = getWealthTax();
-    if (tax > 0) agentMoney -= tax;
+    if (tax > 0) applyMoney(-tax, 'Налог на активы');
 
-    agentMoney += calculatePassiveIncome();
+    applyMoney(calculatePassiveIncome(), 'Пассивный доход');
     calculateDividends();
 
     // Комиссии с прошлых трансферов
     activeCommissions.forEach(c => {
-        if (c.weeksLeft > 0) { agentMoney += c.weeklyAmount; c.weeksLeft--; }
+        if (c.weeksLeft > 0) { applyMoney(c.weeklyAmount, `Комиссия: ${c.playerName}`); c.weeksLeft--; }
     });
     activeCommissions = activeCommissions.filter(c => c.weeksLeft > 0);
 
@@ -13024,6 +15934,7 @@ function simulateWeekForPlayer(p) {
             const ga = Math.max(0, Math.round(simInt(0, 5) - power * 2.5 - gaReduction * 0.5));
             p.stats.goalsAgainst += ga;
             p.stats.pim += simInt(0, 2);
+            recordGoalieAppearance(p, ga);
             // В реальном хоккее вратарям +/- не считают. Оставляем plusMinus = 0.
         } else if (p.position === 'D') {
             const atkBoost = teamBonusPM * 0.03;
@@ -13126,7 +16037,7 @@ const EVENT_POOL = [
         ]
     },
     {
-        id: 'doping_suspicion', icon: '💊', title: 'ПОДОЗРЕНИЯ В ДОПИНГЕ',
+        id: 'doping_suspicion', icon: '💊', title: 'ПОДОЗРЕНИЯ В ДОПИНГЕ', minLevel: 5,
         condition: () => myRoster.some(p => p.rating >= 80),
         getPlayer: () => myRoster.find(p => p.rating >= 80),
         text: (p) => `Допинг-проба клиента <b>${p.name}</b> дала сомнительный результат. Дело грозит дисквалификацией.`,
@@ -13196,13 +16107,13 @@ const EVENT_POOL = [
             { icon: '✅', label: 'Разрешить', desc: 'Личная жизнь важна', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 10); p.rating = Math.max(1, p.rating - 1); return { text: 'Клиент счастлив. Лояльность +10, рейтинг −1.', type: 'positive' }; } },
             { icon: '❌', label: 'Запретить', desc: 'Только хоккей', apply: (p) => { p.loyalty = Math.max(0, p.loyalty - 15); return { text: 'Клиент обижен. Лояльность −15.', type: 'negative' }; } },
             { icon: '🤝', label: 'Помочь с идеей ($10K)', desc: 'Вложить в развитие', apply: (p) => { if (agentMoney < 10000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 10000; p.loyalty = Math.min(100, p.loyalty + 15); return { text: 'Помог с бизнесом. −$10K, лояльность +15.', type: 'positive' }; } },
-            { icon: '💼', label: 'Взять долю', desc: 'Стать партнёром', apply: (p) => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 5000; if (simRandom() < 0.5) { agentMoney += 20000; return { text: 'Бизнес окупился! +$20K.', type: 'positive' }; } agentMoney -= 15000; return { text: 'Бизнес провалился. −$15K.', type: 'negative' }; } }
+            { icon: '💼', label: 'Взять долю', invested: 5000, desc: 'Стать партнёром', apply: (p) => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 5000; if (simRandom() < 0.5) { agentMoney += 20000; return { text: 'Бизнес окупился! +$20K.', type: 'positive' }; } agentMoney -= 15000; return { text: 'Бизнес провалился. −$15K.', type: 'negative' }; } }
         ]
     },
 
     // ============ КАТЕГОРИЯ 3. Деньги и спонсоры ============
     {
-        id: 'sponsor_offer', icon: '🏦', title: 'СПОНСОРСКОЕ ПРЕДЛОЖЕНИЕ',
+        id: 'sponsor_offer', icon: '🏦', title: 'СПОНСОРСКОЕ ПРЕДЛОЖЕНИЕ', minLevel: 4,
         condition: () => myRoster.some(p => p.rating >= 70 && (p.loyalty ?? 100) >= 50),
         getPlayer: () => myRoster.find(p => p.rating >= 70 && (p.loyalty ?? 100) >= 50),
         text: (p) => `Банк «Прогресс» хочет снять <b>${p.name}</b> в рекламном ролике за $40K. Клиент недоволен — считает, что отвлечёт от хоккея.`,
@@ -13214,7 +16125,7 @@ const EVENT_POOL = [
         ]
     },
     {
-        id: 'equipment_ad', icon: '👟', title: 'РЕКЛАМА ЭКИПИРОВКИ',
+        id: 'equipment_ad', icon: '👟', title: 'РЕКЛАМА ЭКИПИРОВКИ', minLevel: 3,
         condition: () => myRoster.some(p => p.rating >= 70),
         getPlayer: () => myRoster.find(p => p.rating >= 70),
         text: (p) => `Бренд клюшек предлагает <b>${p.name}</b> контракт на $30K. Клиент не любит их продукцию.`,
@@ -13226,7 +16137,7 @@ const EVENT_POOL = [
         ]
     },
     {
-        id: 'tax_audit', icon: '💸', title: 'НАЛОГОВАЯ ПРОВЕРКА',
+        id: 'tax_audit', icon: '💸', title: 'НАЛОГОВАЯ ПРОВЕРКА', minLevel: 5,
         condition: () => myRoster.some(p => p.rating >= 75),
         getPlayer: () => myRoster.find(p => p.rating >= 75),
         text: (p) => `У <b>${p.name}</b> проблемы с налоговой. Грозит штраф или разбирательство.`,
@@ -13238,7 +16149,7 @@ const EVENT_POOL = [
         ]
     },
     {
-        id: 'shady_investor', icon: '🎰', title: 'СОМНИТЕЛЬНЫЙ ИНВЕСТОР',
+        id: 'shady_investor', icon: '🎰', title: 'СОМНИТЕЛЬНЫЙ ИНВЕСТОР', minLevel: 8,
         condition: () => myRoster.some(p => p.rating >= 75),
         getPlayer: () => myRoster.find(p => p.rating >= 75),
         text: (p) => `Незнакомец предлагает $100K за долю в будущих доходах <b>${p.name}</b>. Слишком выгодно, чтобы быть честным.`,
@@ -13264,7 +16175,7 @@ const EVENT_POOL = [
         ]
     },
     {
-        id: 'medical_error', icon: '🏥', title: 'МЕДИЦИНСКАЯ ОШИБКА',
+        id: 'medical_error', icon: '🏥', title: 'МЕДИЦИНСКАЯ ОШИБКА', minLevel: 4,
         condition: () => myRoster.some(p => (p.injuryWeeks || 0) > 0 || (p.seasonHistory || []).some(s => s.gp < 30)),
         getPlayer: () => myRoster.find(p => (p.injuryWeeks || 0) > 0) || myRoster[0],
         text: (p) => `Врачи клуба неверно лечили травму <b>${p.name}</b>. Восстановление затянулось.`,
@@ -13376,7 +16287,7 @@ const EVENT_POOL = [
         ]
     },
     {
-        id: 'documentary', icon: '🎥', title: 'ДОКУМЕНТАЛЬНЫЙ ФИЛЬМ',
+        id: 'documentary', icon: '🎥', title: 'ДОКУМЕНТАЛЬНЫЙ ФИЛЬМ', minLevel: 4,
         condition: () => myRoster.some(p => p.rating >= 75),
         getPlayer: () => myRoster.find(p => p.rating >= 75),
         text: (p) => `Канал хочет снять документальный фильм о <b>${p.name}</b>.`,
@@ -13414,7 +16325,7 @@ const EVENT_POOL = [
 
     // ============ КАТЕГОРИЯ 7. Интриги ============
     {
-        id: 'rival_poach', icon: '🕵', title: 'КОНКУРЕНТ ПЕРЕМАНИВАЕТ',
+        id: 'rival_poach', icon: '🕵', title: 'КОНКУРЕНТ ПЕРЕМАНИВАЕТ', minLevel: 3,
         condition: () => myRoster.some(p => (p.loyalty ?? 100) < 70),
         getPlayer: () => myRoster.find(p => (p.loyalty ?? 100) < 70),
         text: (p) => `Другое агентство предлагает <b>${p.name}</b> контракт с лучшими условиями.`,
@@ -13426,7 +16337,7 @@ const EVENT_POOL = [
         ]
     },
     {
-        id: 'dirty_article', icon: '📰', title: 'ГРЯЗНАЯ СТАТЬЯ',
+        id: 'dirty_article', icon: '📰', title: 'ГРЯЗНАЯ СТАТЬЯ', minLevel: 8,
         condition: () => myRoster.length >= 5,
         getPlayer: () => myRoster[0],
         text: () => `Журналист опубликовал разгромную статью о твоём агентстве. Клиенты нервничают.`,
@@ -13438,12 +16349,12 @@ const EVENT_POOL = [
         ]
     },
     {
-        id: 'insider_leak', icon: '🕳', title: 'ИНСАЙД ИЗ ОФИСА',
+        id: 'insider_leak', icon: '🕳', title: 'ИНСАЙД ИЗ ОФИСА', minLevel: 4,
         condition: () => myRoster.length >= 3,
         getPlayer: () => myRoster[0],
         text: () => `Бывший сотрудник украл список твоих клиентов. Грозит массовое переманивание.`,
         choices: [
-            { icon: '⚖️', label: 'Судиться ($20K)', desc: 'Наказать вора', apply: () => { if (agentMoney < 20000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 20000; if (simRandom() < 0.6) { agentMoney += 50000; return { text: 'Выиграл суд! +$50K компенсации.', type: 'positive' }; } return { text: 'Проиграл дело.', type: 'negative' }; } },
+            { icon: '⚖️', label: 'Судиться ($20K)', invested: 20000, desc: 'Наказать вора', apply: () => { if (agentMoney < 20000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 20000; if (simRandom() < 0.6) { agentMoney += 50000; return { text: 'Выиграл суд! +$50K компенсации.', type: 'positive' }; } return { text: 'Проиграл дело.', type: 'negative' }; } },
             { icon: '🤐', label: 'Купить молчание ($30K)', desc: 'Тихо решить', apply: () => { if (agentMoney < 30000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 30000; return { text: 'Молчит. −$30K.', type: 'positive' }; } },
             { icon: '🚪', label: 'Уволить', desc: 'Уже уволен', apply: () => { return { text: 'Ничего.', type: 'negative' }; } },
             { icon: '👤', label: 'Нанять нового ($5K)', desc: 'Восстановить штат', apply: () => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 5000; return { text: 'Штат восстановлен. −$5K.', type: 'positive' }; } }
@@ -13501,7 +16412,7 @@ const EVENT_POOL = [
 
     // ============ КАТЕГОРИЯ 9. Международные ============
     {
-        id: 'national_team', icon: '🌍', title: 'ВЫЗОВ В СБОРНУЮ',
+        id: 'national_team', icon: '🌍', title: 'ВЫЗОВ В СБОРНУЮ', minLevel: 8,
         condition: () => myRoster.some(p => p.rating >= 75 && ['NHL','KHL','SHL','Liiga','NL_Switzerland','Czech_Extraliga'].includes(p.league)),
         getPlayer: () => myRoster.find(p => p.rating >= 75 && ['NHL','KHL','SHL','Liiga','NL_Switzerland','Czech_Extraliga'].includes(p.league)),
         text: (p) => `<b>${p.name}</b> вызван в сборную на товарищеские матчи.`,
@@ -13513,7 +16424,7 @@ const EVENT_POOL = [
         ]
     },
     {
-        id: 'citizenship_change', icon: '🏳️', title: 'СМЕНА ГРАЖДАНСТВА',
+        id: 'citizenship_change', icon: '🏳️', title: 'СМЕНА ГРАЖДАНСТВА', minLevel: 4,
         condition: () => myRoster.some(p => p.age >= 25 && !isInHomeCountry(p)),
         getPlayer: () => myRoster.find(p => p.age >= 25 && !isInHomeCountry(p)),
         text: (p) => `Другая страна предлагает <b>${p.name}</b> сменить спортивное гражданство. Шанс на Олимпиаду.`,
@@ -13537,7 +16448,7 @@ const EVENT_POOL = [
         ]
     },
     {
-        id: 'world_cup', icon: '🏆', title: 'КУБОК МИРА',
+        id: 'world_cup', icon: '🏆', title: 'КУБОК МИРА', minLevel: 10,
         condition: () => myRoster.some(p => p.rating >= 78 && ['NHL','KHL','SHL','Liiga','NL_Switzerland','Czech_Extraliga'].includes(p.league)),
         getPlayer: () => myRoster.find(p => p.rating >= 78 && ['NHL','KHL','SHL','Liiga','NL_Switzerland','Czech_Extraliga'].includes(p.league)),
         text: (p) => `<b>${p.name}</b> вызван на Кубок мира! Огромный турнир.`,
@@ -13545,7 +16456,7 @@ const EVENT_POOL = [
             { icon: '✅', label: 'Отпустить', desc: 'Честь страны', apply: (p) => { upgrades.reputation = Math.min(25, upgrades.reputation + 5); p.loyalty = Math.min(100, p.loyalty + 20); if (simRandom() < 0.15) { p.injuryWeeks = 3; return { text: 'Травма! Но репутация +5, лояльность +20.', type: 'negative' }; } if (simRandom() < 0.3) { agentMoney += 100000; upgrades.reputation = Math.min(25, upgrades.reputation + 5); return { text: 'MVP турнира! +$100K, репутация +10, лояльность +20.', type: 'positive' }; } return { text: 'Успех! Репутация +5, лояльность +20.', type: 'positive' }; } },
             { icon: '❌', label: 'Отказать', desc: 'Клуб важнее', apply: (p) => { upgrades.reputation = Math.max(1, upgrades.reputation - 3); p.loyalty = Math.max(0, p.loyalty - 30); return { text: 'Репутация −3, лояльность −30.', type: 'negative' }; } },
             { icon: '📝', label: 'С условием страховки', desc: 'Только без травм', apply: (p) => { p.loyalty = Math.min(100, p.loyalty + 10); upgrades.reputation = Math.min(25, upgrades.reputation + 2); if (simRandom() < 0.2) { agentMoney += 100000; return { text: 'MVP! +$100K, репутация +2, лояльность +10.', type: 'positive' }; } return { text: 'Успех. Репутация +2, лояльность +10.', type: 'positive' }; } },
-            { icon: '🎯', label: 'Лично сопровождать ($30K)', desc: 'Помогать на турнире', apply: (p) => { if (agentMoney < 30000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 30000; upgrades.reputation = Math.min(25, upgrades.reputation + 5); p.loyalty = Math.min(100, p.loyalty + 25); if (simRandom() < 0.5) { agentMoney += 200000; return { text: 'MVP! −$30K, +$200K, репутация +5, лояльность +25.', type: 'positive' }; } return { text: 'Помог! −$30K, репутация +5, лояльность +25.', type: 'positive' }; } }
+            { icon: '🎯', label: 'Лично сопровождать ($30K)', invested: 30000, desc: 'Помогать на турнире', apply: (p) => { if (agentMoney < 30000) return { text: 'Недостаточно денег.', type: 'negative', skip: true }; agentMoney -= 30000; upgrades.reputation = Math.min(25, upgrades.reputation + 5); p.loyalty = Math.min(100, p.loyalty + 25); if (simRandom() < 0.5) { agentMoney += 200000; return { text: 'MVP! −$30K, +$200K, репутация +5, лояльность +25.', type: 'positive' }; } return { text: 'Помог! −$30K, репутация +5, лояльность +25.', type: 'positive' }; } }
         ]
     }
 ];
@@ -13790,7 +16701,7 @@ EVENT_CHAINS.crypto_scheme_chain = {
           getPlayer: () => myRoster.find(p => p.rating >= 75),
           text: (p) => `Сомнительный инвестор предлагает вложиться в «крипто-проект» для клиента ${p.name}.`,
           choices: [
-            { icon: '💰', label: 'Вложить $30K', desc: 'Рискнуть',
+            { icon: '💰', label: 'Вложить $30K', invested: 30000, desc: 'Рискнуть',
               apply: (p) => { if (agentMoney < 30000) return { text: 'Недостаточно денег.', skip: true }; agentMoney -= 30000; return { text: '−$30K вложено.', type: 'positive' }; } },
             { icon: '🔍', label: 'Проверить $5K', desc: 'Осторожно',
               apply: (p) => { if (agentMoney < 5000) return { text: 'Недостаточно денег.', skip: true }; agentMoney -= 5000; return { text: 'Проверка запущена. −$5K.', type: 'positive' }; } },
@@ -13962,9 +16873,9 @@ EVENT_CHAINS.business_empire_chain = {
           getPlayer: () => null, requiresPlayer: false,
           text: () => `Партнёр предлагает открыть спорт-бар. Вложить $50K?`,
           choices: [
-            { icon: '💰', label: 'Вложить $50K', desc: 'Рискнуть',
+            { icon: '💰', label: 'Вложить $50K', invested: 50000, desc: 'Рискнуть',
               apply: () => { if (agentMoney < 50000) return { text: 'Недостаточно денег.', skip: true }; agentMoney -= 50000; return { text: '−$50K вложено.', type: 'positive' }; } },
-            { icon: '💎', label: 'Вложить $100K', desc: 'По-крупному',
+            { icon: '💎', label: 'Вложить $100K', invested: 100000, desc: 'По-крупному',
               apply: () => { if (agentMoney < 100000) return { text: 'Недостаточно денег.', skip: true }; agentMoney -= 100000; return { text: '−$100K вложено.', type: 'positive' }; } },
             { icon: '❌', label: 'Отказаться', desc: 'Не интересно',
               apply: () => { return { text: 'Отказ.', type: 'negative' }; } }
@@ -13982,7 +16893,7 @@ EVENT_CHAINS.business_empire_chain = {
           getPlayer: () => null, requiresPlayer: false,
           text: () => `Открыть второй бар за $80K? Это будет сеть.`,
           choices: [
-            { icon: '✅', label: 'Да', desc: 'Строить сеть',
+            { icon: '✅', label: 'Да', invested: 80000, desc: 'Строить сеть',
               apply: () => { if (agentMoney < 80000) return { text: 'Недостаточно денег.', skip: true }; agentMoney -= 80000; return { text: '−$80K. Сеть растёт.', type: 'positive' }; } },
             { icon: '❌', label: 'Нет', desc: 'Хватит',
               apply: () => { agentMoney += 20000; return { text: '+$20K. Остановились.', type: 'positive' }; } }
@@ -14133,7 +17044,10 @@ function findTaskPlayer(task) {
 }
 
 function removeClientFromRoster(p) {
+    // v1.3: сохраняем карьеру в Зале Славы агентства до ухода из ростера.
+    if (p && p.name) upsertAgencyHallEntry(p, 'released');
     myRoster = myRoster.filter(x => x.name !== p.name);
+    rememberFormerClient(p.name);
     addNews(`🚪 ${p.name} покинул ваше агентство`, "negative");
 }
 
@@ -14143,7 +17057,7 @@ function completeTask(task, customMessage) {
     const p = findTaskPlayer(task);
     if (task.reward.loyalty && p) p.loyalty = Math.max(0, Math.min(100, (p.loyalty ?? 100) + task.reward.loyalty));
     if (task.reward.rep) upgrades.reputation = Math.min(25, upgrades.reputation + task.reward.rep);
-    if (task.reward.money) agentMoney += task.reward.money;
+    if (task.reward.money) applyMoney(task.reward.money, `Задача: ${task.description}`);
     if (task.reward.xp) addXP(task.reward.xp);
     addNews(customMessage || `✅ Обещание выполнено: ${task.description}`, "positive");
     addEventHistory({ type: 'task_done', task: task.description });
@@ -14158,7 +17072,12 @@ function failTask(task) {
     const p = findTaskPlayer(task);
     if (task.penalty.loyalty && p) p.loyalty = Math.max(0, Math.min(100, (p.loyalty ?? 100) + task.penalty.loyalty));
     if (task.penalty.rep) upgrades.reputation = Math.max(1, upgrades.reputation + task.penalty.rep);
-    if (task.penalty.money) agentMoney = Math.max(-100000, agentMoney + task.penalty.money);
+    if (task.penalty.money) {
+        const moneyBefore = agentMoney;
+        agentMoney = Math.max(-100000, agentMoney + task.penalty.money);
+        const delta = agentMoney - moneyBefore;
+        if (delta !== 0) logTransaction(delta > 0 ? 'income' : 'expense', Math.abs(delta), `Штраф: ${task.description}`);
+    }
     addNews(`❌ Обещание провалено: ${task.description}`, "negative");
     addEventHistory({ type: 'task_failed', task: task.description });
     if (p && (p.loyalty || 0) <= 0) removeClientFromRoster(p);
@@ -14222,7 +17141,7 @@ function checkActiveTasks() {
             if (weeksLeft <= 0) {
                 if (simRandom() < 0.6) {
                     const bonus = simInt(20000, 50000);
-                    agentMoney += bonus;
+                    applyMoney(bonus, 'Найден спонсор');
                     completeTask(task, `✅ Спонсор найден! +$${formatInt(bonus)}`);
                 } else failTask(task);
             }
@@ -14259,6 +17178,7 @@ function renderActiveTasks() {
             if (!task || !task.playerName) return;
             const player = myRoster.find(p => p.name === task.playerName);
             if (!player) { uiAlert(LANG.t('Игрок больше не в агентстве')); return; }
+            playerReturnContext = { type: 'screen', screenId: 'office-screen' };
             openPlayerScreen(player, 'my');
             playerTab = 'transfer';
             setTimeout(() => renderPlayerScreen(), 50);
@@ -14379,17 +17299,29 @@ function renderChainStage(chain, stage, player) {
             const moneyBefore = agentMoney;
             const result = choice.apply(player);
             if (result && result.skip) return;
-            // МАСШТАБИРОВАНИЕ: дельта баланса пересчитывается по уровню агента
+            // v1.2: та же экономика, что и у обычных событий.
+            // Вложенные на прошлых этапах деньги возвращаются при выводе.
+            const chainState = activeChains.find(c => c.chainId === chain.id);
             const delta = agentMoney - moneyBefore;
+            let repayment = 0;
+            if (chainState) {
+                chainState.invested = Math.max(0, Math.round(chainState.invested || 0));
+                if (delta < 0 && choice.invested) chainState.invested += choice.invested;
+                if (delta > 0 && chainState.invested > 0) {
+                    repayment = Math.min(chainState.invested, delta);
+                    chainState.invested -= repayment;
+                }
+            }
             if (delta !== 0) {
-                agentMoney = moneyBefore + scaleEventMoney(delta);
+                const settled = settleEventMoney(
+                    delta, agentLevel, choice.label,
+                    Math.max(choice.invested || 0, repayment)
+                );
+                agentMoney = moneyBefore + settled;
+                if (settled !== 0) logTransaction(settled > 0 ? 'income' : 'expense', Math.abs(settled), choice.label);
             }
-            // ФИЛЬТР: доход от этапа цепочки режем в 3 раза
-            if (agentMoney > moneyBefore) {
-                const delta = agentMoney - moneyBefore;
-                const cut = Math.round(delta / 3);
-                agentMoney = moneyBefore + cut;
-            }
+            const rawXp = Number.isFinite(result && result.xp) ? Math.max(0, Math.round(result.xp)) : (result && result.type === 'positive' ? 25 : 0);
+            if (rawXp > 0) addXP(agentLevel <= 3 ? Math.min(rawXp, 100) : rawXp);
             eventTitle.textContent = result.type === 'positive' ? '✅ РЕШЕНИЕ ПРИНЯТО' : '❌ РЕШЕНИЕ ПРИНЯТО';
             eventText.innerHTML = `<div class="event-result-text">${result.text}</div>`;
             eventDetails.innerHTML = '';
@@ -14657,6 +17589,7 @@ function tryWeeklyEvent() {
     const nowKey = currentSeason * 100 + currentWeek;
     const available = EVENT_POOL.filter(e => {
         if ((eventCooldowns[e.id] || 0) > nowKey) return false;
+        if ((e.minLevel || 1) > agentLevel) return false;
         try { return e.condition(); } catch (err) { return false; }
     });
     if (available.length === 0) return false;
@@ -14696,14 +17629,17 @@ function applyEventChoice(ev, choice, player) {
         eventActions.appendChild(cancelBtn);
         return false;
     }
-    // МАСШТАБИРОВАНИЕ: дельта баланса пересчитывается по уровню агента,
-    // положительный доход от событий дополнительно режется (один проход)
+    // v1.2: расходы списываются по номиналу, взнос возвращается,
+    // а прибыль ограничена капом уровня (см. event-rewards.js).
     const rawDelta = agentMoney - moneyBefore;
     if (rawDelta !== 0) {
-        let delta = scaleEventMoney(rawDelta);
-        if (delta > 0) delta = Math.round(delta / 3);
-        agentMoney = moneyBefore + delta;
+        const settled = settleEventMoney(rawDelta, agentLevel, choice.label, choice.invested || 0);
+        agentMoney = moneyBefore + settled;
+        if (settled !== 0) logTransaction(settled > 0 ? 'income' : 'expense', Math.abs(settled), choice.label);
     }
+    // Награда XP за принятое решение. На ранних уровнях — не больше 100 XP.
+    const rawXp = Number.isFinite(result.xp) ? Math.max(0, Math.round(result.xp)) : (result.type === 'positive' ? 25 : 0);
+    if (rawXp > 0) addXP(agentLevel <= 3 ? Math.min(rawXp, 100) : rawXp);
     eventTitle.textContent = result.type === 'positive' ? '✅ РЕШЕНИЕ ПРИНЯТО' : '❌ РЕШЕНИЕ ПРИНЯТО';
     eventText.innerHTML = `<div class="event-result-text">${result.text}</div>`;
     eventDetails.innerHTML = '';
@@ -14760,7 +17696,7 @@ function renderPoachingEvent(player, agent, newSalary, compensation) {
     b1.textContent = `Удержать (${formatSalary(cost)})`;
     b1.addEventListener('click', () => {
         if (agentMoney < cost * 1000) { uiAlert(LANG.t('Недостаточно денег!')); return; }
-        agentMoney -= cost * 1000;
+        applyMoney(-cost * 1000, `Удержание игрока: ${player.name}`);
         player.salary = newSalary;
         player.loyalty = Math.min(100, player.loyalty + 20);
         addNews(`Вы удержали ${player.name}`, "positive");
@@ -14771,8 +17707,10 @@ function renderPoachingEvent(player, agent, newSalary, compensation) {
     b2.className = 'btn-warning';
     b2.textContent = `Отпустить (${formatSalary(compensation)})`;
     b2.addEventListener('click', () => {
-        agentMoney += compensation * 1000;
+        applyMoney(compensation * 1000, `Компенсация за ${player.name}`);
+        upsertAgencyHallEntry(player, 'released');
         myRoster = myRoster.filter(p => p !== player);
+        rememberFormerClient(player.name);
         player.agentId = agent.id; // клиент перешёл к конкуренту, а не «в никуда»
         if (!Array.isArray(agent.clientIds)) agent.clientIds = [];
         if (!agent.clientIds.includes(player.name)) agent.clientIds.push(player.name);
@@ -14792,7 +17730,9 @@ function renderPoachingEvent(player, agent, newSalary, compensation) {
             player.loyalty = Math.min(100, player.loyalty + 10);
             addNews(`Угроза удалась!`, "positive");
         } else {
+            upsertAgencyHallEntry(player, 'released');
             myRoster = myRoster.filter(p => p !== player);
+            rememberFormerClient(player.name);
             player.agentId = agent.id;
             if (!Array.isArray(agent.clientIds)) agent.clientIds = [];
             if (!agent.clientIds.includes(player.name)) agent.clientIds.push(player.name);
@@ -15167,7 +18107,7 @@ function acceptTransferOffer(player, offer) {    // Игрок может отк
         weeklyAmount: weeklyComm, weeksLeft: 26, totalWeeks: 26, newSalary: offer.newSalary
     });
     if (offer.signingBonus) {
-        agentMoney += offer.signingBonus;
+        applyMoney(offer.signingBonus, `Подписной бонус: ${player.name}`);
         addNews(`🎁 ${LANG.t('Подписной бонус')}: +${formatMoney(offer.signingBonus)}`, "positive");
     }
 
@@ -15438,9 +18378,11 @@ function renderPassiveOffer(player, bestOffer, allOffers) {
         allBtn.className = 'btn-primary';
         allBtn.textContent = `📋 Все предложения (${allOffers.length})`;
         allBtn.addEventListener('click', () => {
+            const returnScreen = getVisibleScreenId('office-screen');
             closeEventModal();
             transferOffers[player.name] = {offers: allOffers, weeksLeft: 3, returnCount: 0, active: false, declinedClubs: []};
             saveGame();
+            playerReturnContext = { type: 'screen', screenId: returnScreen };
             openPlayerScreen(player, 'my');
             playerTab = 'transfer';
             renderPlayerScreen();
@@ -15678,7 +18620,7 @@ function applyContractRenewal(player, offer) {
     applyContractTerms(player, offer);
     player.declinedRenewal = false;
     if (offer.signingBonus > 0) {
-        agentMoney += offer.signingBonus;
+        applyMoney(offer.signingBonus, `Продление контракта: ${player.name}`);
         addNews(`💰 Бонус от ${offer.club}: +${formatMoney(offer.signingBonus)}`, "positive");
     }
     addNews(`📝 ${player.name} продлил контракт на ${formatContractYears(offer.years)}`, "positive");
@@ -15807,6 +18749,7 @@ document.querySelectorAll('.tile').forEach(tile => {
         else if (a === 'about') aboutModal.style.display = 'flex';
         else if (a === 'infrastructure') showInfrastructureScreen();
         else if (a === 'goals') showCareerGoalsScreen();
+        else if (a === 'hall') showHallOfFameScreen('agency');
         else if (a === 'history') {
             document.querySelectorAll('.mobile-screen').forEach(s => s.style.display = 'none');
             const hs = document.getElementById('event-history-screen');
@@ -15894,10 +18837,37 @@ function renderCreateAgency() {
     });
 }
 
+// v1.2 «Lean Agency»: на старте только два клиента — полевой и вратарь.
+// Дальше слоты открываются исключительно через апгрейд офиса.
+function seedStartingClients() {
+    // v1.2.3: стартовые клиенты — сырые свободные агенты без клубных контрактов.
+    const usedNames = new Set(players.map(p => p && p.name).filter(Boolean));
+    const specs = [
+        { position: 'C', rating: 44 },
+        { position: 'G', rating: 42 }
+    ];
+    for (const spec of specs) {
+        const generated = generatePlayerName('MHL');
+        const name = makeUniqueName(generated.name, 'MHL', usedNames);
+        const p = createPlayer(
+            name, null, 'MHL', spec.position,
+            18, spec.rating, null, generated.nationality || '🇷🇺'
+        );
+        p.club = null;
+        p.contractYears = 0;
+        p.agentId = -1;
+        p.isScouted = true;
+        p.loyalty = 80;
+        players.push(p);
+        myRoster.push(p);
+    }
+}
+
 function startNewGame() {
     resetGame();
     // Новая карьера: сразу наполняем базу талантов, иначе подписывать некого.
     generateFreeAgentWindow(1);
+    seedStartingClients();
     document.getElementById('create-agency-screen').style.display = 'none';
     showMobileScreen('office-screen');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -15905,6 +18875,7 @@ function startNewGame() {
     if (nav) nav.classList.add('active');
     updateAllDisplays();
     saveGame();
+    startAgentTutorial();
 }
 
 // ============ 30. МЕНЮ ============
@@ -16104,7 +19075,7 @@ if (aboutModal) aboutModal.addEventListener('click', e => { if (e.target === abo
 
 const SETTINGS_KEY = 'hockeyLegendSettings';
 const MATCH_VIEW_DEFAULT = 'full';
-let gameSettings = {sound: true, vibration: true, notifications: true, matchView: MATCH_VIEW_DEFAULT};
+let gameSettings = {sound: true, vibration: true, notifications: true, matchView: MATCH_VIEW_DEFAULT, tutorialAgentDone: false, tutorialPresidentDone: false};
 
 // ============ ЗВУК (Web Audio API, без файлов) ============
 let _audioCtx = null;
@@ -16295,7 +19266,7 @@ function dismissWorldToast(el, instant) {
     setTimeout(() => el.remove(), 380);
 }
 
-function showWorldToast(text, type, icon) {
+function showWorldToast(text, type, icon, title) {
     if (!gameSettings.notifications) return;
     try {
         let wrap = document.getElementById('world-toast-wrap');
@@ -16312,7 +19283,7 @@ function showWorldToast(text, type, icon) {
         el.innerHTML =
             `<span class="world-toast-ico"></span>` +
             `<span class="world-toast-body">` +
-                `<span class="world-toast-title">${LANG.t('Внимание')}</span>` +
+                `<span class="world-toast-title">${escapeHtml(LANG.t(title || 'Внимание'))}</span>` +
                 `<span class="world-toast-text"></span>` +
             `</span>` +
             `<span class="world-toast-bar"></span>`;
@@ -16343,6 +19314,65 @@ function loadSettings() {
     renderNationalTeamSetting();
 }
 function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(gameSettings)); } catch (e) {} }
+
+// ============ ТУТОРИАЛЫ ============
+const tutorialManager = new TutorialManager({
+    getSettings: () => gameSettings,
+    saveSettings,
+    t: (key) => LANG.t(key),
+    onStepEnter: ({ scenario, step }) => {
+        if (scenario === 'agent') {
+            if (step.id === 'contract') {
+                // Игрок уже выбран на предыдущем шаге — сразу открываем «Диалог».
+                if (currentPlayerScreen) {
+                    playerTab = 'dialogue';
+                    renderPlayerScreen();
+                }
+            } else if (step.id === 'play-week') {
+                // Ждём закрытия модалки контракта, затем показываем офис с кнопкой недели.
+                const revealOffice = (attempt = 0) => {
+                    const dlg = document.getElementById('player-dialogue-modal');
+                    if (dlg && dlg.style.display === 'flex' && attempt < 40) {
+                        setTimeout(() => revealOffice(attempt + 1), 150);
+                        return;
+                    }
+                    const office = document.getElementById('office-screen');
+                    if (office && office.style.display === 'none') showMobileScreen('office-screen');
+                    tutorialManager.refresh();
+                };
+                revealOffice();
+            }
+        } else if (scenario === 'president') {
+            if (step.id === 'club-screen' || step.id === 'board') {
+                showPresidentDecisionsScreen();
+            } else if (step.id === 'infrastructure') {
+                showInfrastructureScreen();
+            } else if (step.id === 'match-sim') {
+                if (settingsModal) settingsModal.style.display = 'flex';
+            }
+        }
+    },
+    onStepExit: ({ scenario, step }) => {
+        if (scenario === 'president' && step.id === 'match-sim' && settingsModal) {
+            settingsModal.style.display = 'none';
+        }
+    }
+});
+
+function startAgentTutorial() {
+    return tutorialManager.start('agent');
+}
+
+function maybeStartPresidentTutorial() {
+    if (!presidentClubKey) return false;
+    const st = ensurePresidentDecisions();
+    if (st && !st.onboardingSeen) return false;
+    return tutorialManager.start('president');
+}
+
+function notifyTutorial(eventName) {
+    return tutorialManager.notify(eventName);
+}
 
 // ============ ЭКСПОРТ / ИМПОРТ СЕЙВА (v1.0) ============
 function exportSave() {
@@ -16765,8 +19795,9 @@ const BACK_HANDLERS = [
     { id: 'nt-pick-modal',     close: () => { const m = document.getElementById('nt-pick-modal'); if (m) m.style.display = 'none'; } },
     { id: 'nt-team-modal',     close: () => { const m = document.getElementById('nt-team-modal'); if (m) m.style.display = 'none'; } },
     { id: 'npc-agency-modal',  close: () => { const m = document.getElementById('npc-agency-modal'); if (m) m.style.display = 'none'; if (typeof renderAgencyScreen === 'function') renderAgencyScreen(); } },
-    { id: 'poach-dialog-modal',close: () => { const m = document.getElementById('poach-dialog-modal'); if (m) m.style.display = 'none'; if (typeof renderAgencyScreen === 'function') renderAgencyScreen(); } },
+    { id: 'player-dialogue-modal', close: () => { const m = document.getElementById('player-dialogue-modal'); if (m) m.style.display = 'none'; if (typeof renderPlayerScreen === 'function' && currentPlayerScreen) renderPlayerScreen(); } },
     { id: 'client-modal',      close: () => { const m = document.getElementById('client-modal'); if (m) m.style.display = 'none'; } },
+    { id: 'hall-client-modal', close: () => { if (typeof closeHallClientModal === 'function') closeHallClientModal(); } },
     { id: 'stock-modal',       close: () => { const m = document.getElementById('stock-modal'); if (m) m.style.display = 'none'; } },
     { id: 'transfer-modal',    close: () => { const m = document.getElementById('transfer-modal'); if (m) m.style.display = 'none'; } }
 ];
@@ -17401,19 +20432,19 @@ function awardNationalTournamentMedals(gold, silver, bronze) {
             p.trophies.push({ name: `🥇 ${t.name} ${t.year}`, season: t.year, club: gold.name });
             addXP(1500);
             const bonus = scaleEventMoney(12000);
-            agentMoney += bonus;
+            applyMoney(bonus, `Золото: ${t.name}`);
             addNews(`🥇 ${p.name} — чемпион ${t.name}! +$${formatInt(bonus)}`, "positive");
         } else if (inSilver) {
             p.trophies.push({ name: `🥈 ${t.name} ${t.year}`, season: t.year, club: silver.name });
             addXP(800);
             const bonus = scaleEventMoney(6000);
-            agentMoney += bonus;
+            applyMoney(bonus, `Серебро: ${t.name}`);
             addNews(`🥈 ${p.name} — серебро ${t.name}! +$${formatInt(bonus)}`, "positive");
         } else if (inBronze) {
             p.trophies.push({ name: `🥉 ${t.name} ${t.year}`, season: t.year, club: bronze.name });
             addXP(400);
             const bonus = scaleEventMoney(2500);
-            agentMoney += bonus;
+            applyMoney(bonus, `Бронза: ${t.name}`);
             addNews(`🥉 ${p.name} — бронза ${t.name}! +$${formatInt(bonus)}`, "positive");
         }
     });
@@ -18008,6 +21039,7 @@ function onLanguageChanged() {
         if (currentBranchKey) renderBranchDetail();
         else renderCareerGoalsTree();
     }
+    if (visible('hall-of-fame-screen')) renderHallOfFameScreen();
     if (visible('news-feed-screen')) renderNewsFeedScreen();
     if (visible('event-history-screen')) renderEventHistory();
     if (visible('match-view-screen') && matchViewState) mvRemount();
@@ -18024,6 +21056,19 @@ if (import.meta.env.DEV) {
         loadGame,
         resetGame,
         deleteSave,
+        tutorialState: () => tutorialManager.getState(),
+        startTutorialForTest: (scenario, force = true) => tutorialManager.start(scenario, { force }),
+        skipTutorialNow: () => tutorialManager.skip(),
+        nextTutorialNow: () => tutorialManager.next(),
+        notifyTutorialForTest: (eventName) => tutorialManager.notify(eventName),
+        setTutorialFlagForTest: (scenario, value) => {
+            const flag = TUTORIAL_FLAGS[scenario];
+            if (!flag) return false;
+            gameSettings[flag] = !!value;
+            saveSettings();
+            return true;
+        },
+        maybeStartPresidentTutorialForTest: () => maybeStartPresidentTutorial(),
         getState: () => ({
             agentName,
             agencyName,
@@ -18032,8 +21077,175 @@ if (import.meta.env.DEV) {
             agentMoney,
             seasonPhase,
             playersCount: players.length,
-            roster: myRoster.map((p) => p.name)
+            roster: myRoster.map((p) => p.name),
+            rosterPositions: myRoster.map((p) => p.position),
+            slots: getSlots(),
+            agentLevel,
+            version: VERSION,
+            groupTrainingAttr
         }),
+        officeUpgradeCostForTest: () => upgradeCost('office', upgrades.office),
+        upgradeOfficeNow: () => {
+            const cost = upgradeCost('office', upgrades.office);
+            if (agentMoney < cost) return { ok: false, cost, money: agentMoney, office: upgrades.office, slots: getSlots() };
+            applyMoney(-cost, 'Улучшение офиса');
+            upgrades.office = Math.min(25, upgrades.office + 1);
+            return { ok: true, cost, money: agentMoney, office: upgrades.office, slots: getSlots() };
+        },
+        agencyScreenProbe: () => {
+            agencyTab = 'upgrade';
+            renderAgencyScreen();
+            return {
+                cards: document.querySelectorAll('#agency-content .agency-card').length,
+                groupPanel: !!document.querySelector('#agency-content .agency-group-training'),
+                moreButton: !!document.querySelector('#agency-content .agency-more-btn')
+            };
+        },
+        // ===== v1.2.3: шанс подписания и финансовая история =====
+        contractChanceProbe: (playerName, offer) => {
+            const p = players.find(x => x.name === playerName);
+            return p ? getContractSuccessChance(p, offer) : null;
+        },
+        logTransaction: (type, amount, reason) => logTransaction(type, amount, reason),
+        financeHistoryProbe: () => JSON.parse(JSON.stringify(financeHistory)),
+        clearFinanceHistoryForTest: () => { financeHistory = []; },
+        financeTabHTMLForTest: () => {
+            agencyTab = 'finance';
+            renderAgencyScreen();
+            const el = document.getElementById('agency-content');
+            return el ? el.innerHTML : '';
+        },
+        // Батч 1: тестовый доступ к недельным решениям президента.
+        presidentEventsProbe: () => ({
+            events: presidentEventPool().length,
+            briefs: presidentBriefPool().length,
+            stances: presidentStancePool().length
+        }),
+        presidentBecomeForTest: (lk = 'ICE_HL', club = null) => {
+            const c = club || getAllClubs(lk)[0];
+            const key = lk + '_' + c;
+            if (!clubData[key]) return null;
+            myPortfolio[key] = { shares: 51, avgPrice: clubData[key].stockPrice || 1, invested: 0 };
+            startPresidentTerm(key);
+            ensurePresidentWeek();
+            return { key, club: c, league: lk };
+        },
+        presidentWeekProbe: () => {
+            const st = ensurePresidentWeek();
+            if (!st) return null;
+            return {
+                weekKey: st.weekKey,
+                ready: st.ready,
+                stance: st.stance,
+                briefIds: st.briefIds.slice(),
+                chosenBriefId: st.chosenBriefId,
+                chosenOptionId: st.chosenOptionId,
+                eventId: st.eventId,
+                eventChoiceId: st.eventChoiceId,
+                delayed: st.delayed.map(d => ({ ...d })),
+                meters: { ...st.meters },
+                decisions: st.decisions,
+                log: st.log.slice(0, 3).map(x => ({ ...x }))
+            };
+        },
+        presidentChooseForTest: (stance, briefId, optionId, eventChoiceId = null) => {
+            const st = ensurePresidentWeek();
+            if (!st) return null;
+            st.stance = stance;
+            st.chosenBriefId = briefId;
+            st.chosenOptionId = optionId;
+            st.eventChoiceId = eventChoiceId;
+            st.ready = false;
+            return { stance, briefId, optionId, eventChoiceId };
+        },
+        presidentApplyWeekForTest: () => applyPresidentWeekChoices(),
+        // Пункт 9: измеримая сделка и строгие лимиты.
+        formerClientDealProbe: () => {
+            const d = getFormerClientDeal();
+            if (!d) return null;
+            return {
+                playerName: d.playerName, clubKey: d.clubKey, clubName: d.clubName,
+                marketFee: d.marketFee, fee: d.fee, savings: d.savings,
+                discountPct: d.discountPct, risk: d.risk,
+                seasonCount: d.seasonCount, termCount: d.termCount,
+                seasonLeft: d.seasonLeft, termLeft: d.termLeft,
+                blockReason: getFormerClientSigningBlockReason(d)
+            };
+        },
+        formerClientSignNow: () => {
+            const beforeDeal = getFormerClientDeal();
+            const before = beforeDeal ? {
+                playerName: beforeDeal.playerName, marketFee: beforeDeal.marketFee,
+                fee: beforeDeal.fee, savings: beforeDeal.savings,
+                discountPct: beforeDeal.discountPct, risk: beforeDeal.risk
+            } : null;
+            const r = registerFormerClientSigning();
+            return {
+                ok: r.ok, reason: r.reason || null, deal: before,
+                limits: window.__HL.formerClientLimitsProbe()
+            };
+        },
+        formerClientLimitsProbe: () => {
+            const st = ensurePresidentDecisions();
+            const book = st ? ensureFormerClientBookkeeping(st) : null;
+            return book ? {
+                season: book.season, seasonCount: book.seasonCount,
+                seasonLimit: FORMER_CLIENT_SEASON_LIMIT,
+                termStartSeason: book.termStartSeason, termCount: book.termCount,
+                termLimit: FORMER_CLIENT_TERM_LIMIT
+            } : null;
+        },
+        setFormerClientSigningsForTest: (seasonCount = 0, termCount = 0) => {
+            const st = ensurePresidentDecisions();
+            if (!st) return null;
+            const book = ensureFormerClientBookkeeping(st);
+            book.season = currentSeason;
+            book.seasonCount = Math.max(0, Math.min(FORMER_CLIENT_SEASON_LIMIT, Math.round(seasonCount)));
+            book.termCount = Math.max(0, Math.min(FORMER_CLIENT_TERM_LIMIT, Math.round(termCount)));
+            return window.__HL.formerClientLimitsProbe();
+        },
+        setFormerClientsForTest: (names = []) => {
+            const st = ensurePresidentDecisions();
+            if (!st) return null;
+            st.formerClients = Array.isArray(names) ? names.filter(n => typeof n === 'string') : [];
+            return st.formerClients.slice();
+        },
+        presidentStateProbe: () => presidentDecisions ? JSON.parse(JSON.stringify(presidentDecisions)) : null,
+        presidentEventProbe: (id) => {
+            const ev = getPresidentEventData(id);
+            if (!ev) return null;
+            return JSON.parse(JSON.stringify(ev));
+        },
+        presidentReadyProbe: () => presidentWeekReady(),
+        presidentRenderProbe: () => {
+            showPresidentDecisionsScreen();
+            return document.getElementById('club-hub-content')?.innerHTML || '';
+        },
+        presidentOverviewProbe: () => {
+            clubHubTab = 'overview';
+            showInfrastructureScreen();
+            return document.getElementById('club-hub-content')?.innerHTML || '';
+        },
+        // Навигация: какой экран реально виден и куда настроен возврат.
+        navProbe: () => ({
+            screen: getVisibleScreenId('none'),
+            presidentClubKey,
+            clubHubTab,
+            pchClub: pchClub ? { ...pchClub } : null,
+            pchTab,
+            pchReturnScreen,
+            playerReturnContext: playerReturnContext ? { ...playerReturnContext } : null,
+            matchReturnScreen
+        }),
+        openPublicClubHubForTest: (clubName, lk, fromScreenId) => {
+            openPublicClubHub(clubName, lk, fromScreenId);
+            return getVisibleScreenId('none');
+        },
+        setClubHubTabForTest: (tab) => {
+            clubHubTab = tab || 'overview';
+            if (document.getElementById('club-hub-screen')?.style.display === 'flex') renderClubHub();
+            return clubHubTab;
+        },
         // Детерминированный прогон матча: одинаковые входы → одинаковый результат.
         simulateMatch: (lk = 'NHL') => {
             const clubs = getAllClubs(lk);
@@ -18046,7 +21258,99 @@ if (import.meta.env.DEV) {
             const p = createPlayer(name, clubs[0], lk, position, 22, 75, null, 'RU');
             players.push(p);
             myRoster.push(p);
+            if (groupTrainingAttr) {
+                trainingAuto[p.name] = groupTrainingAttr;
+                tryStartAutoTraining(p);
+            }
             return p.name;
+        },
+        // ===== v1.2.1: единое окно игрока =====
+        setScoutingLevelForTest: (level) => {
+            upgrades.scouting = Math.max(1, Math.min(25, Math.round(level) || 1));
+            return upgrades.scouting;
+        },
+        scoutingRangeProbe: () => getScoutingRatingRange(),
+        createTestFreeAgent: (name = 'Свободный Тест', rating = 50) => {
+            const p = createPlayer(name, '', 'MHL', 'C', 19, Math.max(1, Math.min(99, rating)), null, 'RU');
+            p.agentId = null;
+            p.isScouted = true;
+            p.club = '';
+            players.push(p);
+            return p.name;
+        },
+        createTestAgencyPlayer: (name = 'Чужой Тест', agencyId = 0, rating = 70) => {
+            const agency = npcAgencies.find(a => a.id === agencyId) || npcAgencies[0];
+            const lk = 'NHL';
+            const clubs = getAllClubs(lk);
+            const p = createPlayer(name, clubs[0], lk, 'C', 24, Math.max(1, Math.min(99, rating)), null, 'RU');
+            p.agentId = agency ? agency.id : 0;
+            if (agency) {
+                if (!Array.isArray(agency.clientIds)) agency.clientIds = [];
+                if (!agency.clientIds.includes(p.name)) agency.clientIds.push(p.name);
+            }
+            players.push(p);
+            return p.name;
+        },
+        openPlayerForTest: (name, source = 'search') => {
+            const p = players.find(x => x.name === name);
+            if (!p) return null;
+            openPlayerScreen(p, source);
+            return p.name;
+        },
+        setPlayerTabForTest: (tab = 'info') => {
+            playerTab = tab;
+            renderPlayerScreen();
+            return playerTab;
+        },
+        playerDialogueProbe: (name) => {
+            const p = players.find(x => x.name === name);
+            if (!p) return null;
+            return {
+                mine: isMyAgencyPlayer(p),
+                agency: getPlayerDialogueAgency(p),
+                isFree: !isMyAgencyPlayer(p) && !getPlayerDialogueAgency(p)
+            };
+        },
+        dialoguePoachChanceProbe: (name, agencyRep, signingBonus = 0, promises = [], myRepOverride = null) => {
+            const p = players.find(x => x.name === name);
+            if (!p) return null;
+            return getDialoguePoachChanceWithRep(
+                p, agencyRep, signingBonus, promises,
+                Number.isFinite(myRepOverride) ? myRepOverride : getMyAgentReputation()
+            );
+        },
+        signFreeAgentNow: (name, signingBonus = 0, promises = []) => {
+            const p = players.find(x => x.name === name);
+            return p ? signFreeAgentFromDialogue(p, signingBonus, promises) : null;
+        },
+        attemptPoachNow: (name, agencyId, signingBonus = 0, promises = [], chanceOverride = null) => {
+            const p = players.find(x => x.name === name);
+            const agency = npcAgencies.find(a => a.id === agencyId);
+            return p && agency ? attemptPoachFromDialogue(p, agency, signingBonus, promises, chanceOverride) : null;
+        },
+        releaseClientNow: (name) => {
+            const p = players.find(x => x.name === name) || myRoster.find(x => x.name === name);
+            return p ? releasePlayerContract(p) : false;
+        },
+        openNpcAgencyForTest: (index = 0) => {
+            const ag = npcAgencies[index];
+            if (!ag) return null;
+            openNpcAgency(ag);
+            return {
+                name: ag.name,
+                body: document.getElementById('npc-agency-body')?.innerHTML || '',
+                actions: document.getElementById('npc-agency-actions')?.textContent || ''
+            };
+        },
+        renderAgencyRatingForTest: () => {
+            agencyTab = 'rating';
+            showAgencyScreen();
+            return document.getElementById('agency-content')?.innerHTML || '';
+        },
+        freeAgentContractProbe: (name) => {
+            const p = players.find(x => x.name === name);
+            if (!p) return null;
+            return { club: p.club, contractYears: p.contractYears, agentId: p.agentId };
         },
         // Проверка позиционных бонусов: первый валидный оффер и доступные пункты.
         transferOfferProbe: (playerName) => {
@@ -18076,7 +21380,8 @@ if (import.meta.env.DEV) {
                 name: p.name, position: p.position, nationality: p.nationality,
                 rating: p.rating, potential: p.potential,
                 attack: p.attributes.attack, defense: p.attributes.defense,
-                archetype: getPlayerArchetype(p.position, p.name)
+                archetype: getPlayerArchetype(p.position, p.name),
+                club: p.club, contractYears: p.contractYears, agentId: p.agentId
             }));
         },
         buildTalentCardHTML: (name) => {
@@ -18209,6 +21514,8 @@ if (import.meta.env.DEV) {
             return cost;
         },
         trainingAutoState: () => JSON.parse(JSON.stringify(trainingAuto)),
+        groupTrainingState: () => groupTrainingAttr,
+        setGroupTrainingNow: (attr) => { setGroupTraining(attr); return groupTrainingAttr; },
         trainingProbe: (playerName) => {
             const p = myRoster.find(x => x.name === playerName) || players.find(x => x.name === playerName);
             if (!p) return null;
@@ -18475,6 +21782,11 @@ if (import.meta.env.DEV) {
         completeCareerGoalsForTest: () => {
             if (!careerGoals) careerGoals = {};
             Object.keys(CAREER_GOALS).forEach(b => { careerGoals[b] = CAREER_GOALS[b].length; });
+            // v1.3: денежные награды достижений не должны искажать дельты в тестах.
+            if (!achievements.unlocked) achievements.unlocked = {};
+            ACHIEVEMENTS.forEach(a => {
+                achievements.unlocked[a.id] = { season: currentSeason, week: currentWeek };
+            });
         },
         // A7: отставки — один бросок на игрока, myRoster/players синхронны.
         retirementsNow: () => {
@@ -18487,6 +21799,90 @@ if (import.meta.env.DEV) {
             };
         },
         agePlayersForTest: (minAge) => { players.forEach(p => { p.age = Math.max(p.age, minAge); }); },
+        // ===== v1.3: Зал Славы / лиговые рекорды / достижения =====
+        leagueRecordsProbe: (lk) => JSON.parse(JSON.stringify(lk ? (leagueRecords[lk] || null) : leagueRecords)),
+        updateLeagueRecordsNow: (force = true) => {
+            updateLeagueRecords(!!force);
+            return JSON.parse(JSON.stringify(leagueRecords));
+        },
+        seedLeagueRecordsForTest: () => {
+            leagueRecords = generateVirtualLeagueRecords();
+            invalidateHallRecordCache();
+            return Object.keys(leagueRecords).length;
+        },
+        setPlayerSeasonStatsForTest: (name, stats = {}) => {
+            const p = players.find(x => x.name === name);
+            if (!p) return null;
+            p.stats = {
+                gp: 0, goals: 0, assists: 0, pim: 0, plusMinus: 0, ratingSum: 0, goalsAgainst: 0,
+                ...stats
+            };
+            if (stats.league) p.league = stats.league;
+            if (stats.club) p.club = stats.club;
+            if (stats.position) p.position = stats.position;
+            return p.name;
+        },
+        setGoalieSeasonStatsForTest: (name, stats = {}) => {
+            if (!name) return null;
+            seasonGoalie[name] = {
+                gp: Math.max(0, Math.round(stats.gp || 0)),
+                saves: Math.max(0, Math.round(stats.saves || 0)),
+                shutouts: Math.max(0, Math.round(stats.shutouts || 0))
+            };
+            return { ...seasonGoalie[name] };
+        },
+        agencyHallProbe: () => JSON.parse(JSON.stringify(agencyHall)),
+        syncAgencyHallNow: () => {
+            syncAgencyHallActive();
+            return (agencyHall.entries || []).map(e => e.name);
+        },
+        upsertHallNow: (name, status = 'active') => {
+            const p = myRoster.find(x => x.name === name) || players.find(x => x.name === name);
+            if (!p) return null;
+            upsertAgencyHallEntry(p, status);
+            return JSON.parse(JSON.stringify(agencyHall));
+        },
+        hallEntryProbe: (name) => {
+            const e = (agencyHall.entries || []).find(x => x.name === name);
+            return e ? { ...e, legacy: computeHallLegacy(e) } : null;
+        },
+        removeClientNow: (name) => {
+            const p = myRoster.find(x => x.name === name);
+            if (!p) return false;
+            removeClientFromRoster(p);
+            return true;
+        },
+        achievementsProbe: () => JSON.parse(JSON.stringify(achievements)),
+        checkAchievementsNow: (opts = {}) => checkAchievements({ silent: true, save: false, ...opts }),
+        achievementValueProbe: (id) => {
+            const a = ACHIEVEMENTS.find(x => x.id === id);
+            return a ? (Number(a.check(buildAchievementContext())) || 0) : null;
+        },
+        resetAchievementsForTest: () => { achievements = { v: 1, unlocked: {}, counters: {} }; return true; },
+        achievementCatalogProbe: () => ACHIEVEMENTS.map(a => ({
+            id: a.id, cat: a.cat, title: a.title, target: a.target,
+            money: (a.reward && a.reward.money) || 0,
+            xp: (a.reward && a.reward.xp) || 0,
+            rep: (a.reward && a.reward.rep) || 0
+        })),
+        seasonGoalieProbe: () => JSON.parse(JSON.stringify(seasonGoalie)),
+        setCareerCountersForTest: (patch = {}) => {
+            careerCounters = { ...careerCounters, ...patch };
+            return { ...careerCounters };
+        },
+        hallScreenHTMLForTest: (tab = 'agency', lk = null) => {
+            if (lk) hallLeague = lk;
+            hallTab = tab;
+            renderHallOfFameScreen();
+            const c = document.getElementById('hall-content');
+            return c ? c.innerHTML : '';
+        },
+        setHallTabForTest: (tab = 'agency', lk = null) => {
+            if (lk) hallLeague = lk;
+            hallTab = tab;
+            renderHallOfFameScreen();
+            return { tab: hallTab, league: hallLeague };
+        },
         // A8: пополнение молодёжи — лига берётся из ключа YPS.
         replenishYouthNow: () => replenishYouth(),
         worldLeagueProbe: () => {
@@ -18562,8 +21958,16 @@ if (import.meta.env.DEV) {
             let condition = false, player = null;
             try { condition = !!ev.condition(); } catch (e) {}
             try { player = ev.getPlayer ? ev.getPlayer() : null; } catch (e) {}
-            return { condition, playerName: player ? player.name : null };
+            return {
+                condition,
+                playerName: player ? player.name : null,
+                minLevel: ev.minLevel || 1,
+                availableAtLevel: (ev.minLevel || 1) <= agentLevel
+            };
         },
+        eventRewardCapProbe: (level = agentLevel) => getEventRewardCap(level),
+        settleEventMoneyProbe: (rawDelta, level = agentLevel, label = '', invested = 0) => settleEventMoney(rawDelta, level, label, invested),
+        eventInvestmentProbe: (label) => parseEventInvestment(label),
         eventChoiceNow: (eventId, choiceIndex) => {
             const ev = EVENT_POOL.find(e => e.id === eventId);
             if (!ev) return null;
@@ -18910,7 +22314,120 @@ if (import.meta.env.DEV) {
         careerGoalProbe: (branch, lvl) => {
             const goal = (CAREER_GOALS[branch] || []).find(g => g.lvl === lvl);
             return goal ? { target: goal.target, title: goal.title, reward: { ...(goal.reward || {}) } } : null;
-        }
+        },
+        // ===== Батч 2: экономика, баланс, оценка сезона, warm-up =====
+        economyTickNow: (clubKey) => {
+            const keys = clubKey ? [clubKey] : Object.keys(clubData);
+            const out = {};
+            keys.forEach(k => { out[k] = simulateClubEconomyForClub(k); });
+            return clubKey ? out[clubKey] : out;
+        },
+        economyProbe: (clubKey) => {
+            const c = clubData[clubKey];
+            if (!c) return null;
+            const fin = ensureClubFinance(clubKey);
+            return {
+                key: clubKey,
+                income: c.weeklyIncome || 0,
+                expenses: c.weeklyExpenses || 0,
+                result: c.weeklyResult || 0,
+                budget: c.budget || 0,
+                fanbase: getClubFanbase(c),
+                annualRevenue: getClubAnnualRevenue(c),
+                cashCap: getClubCashCap(c),
+                seasonRevenue: fin.seasonRevenue,
+                seasonExpenses: fin.seasonExpenses,
+                weeks: fin.weeks,
+                seasonBudget: fin.seasonBudget,
+                capExceptionUntilSeason: fin.capExceptionUntilSeason
+            };
+        },
+        clubFanbaseProbe: (lk, club) => getClubFanbase((lk || '') + '_' + (club || '')),
+        setPresidentFansForTest: (value) => {
+            const st = ensurePresidentDecisions();
+            if (!st) return null;
+            st.meters.fans = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+            return { fans: st.meters.fans };
+        },
+        applyResultForTest: (lk, home, away, homeScore, awayScore) => {
+            updateClubFormFromResult(lk, home, away, { homeScore, awayScore });
+            return {
+                homeForm: clubData[lk + '_' + home] ? [...clubData[lk + '_' + home].form] : null,
+                awayForm: clubData[lk + '_' + away] ? [...clubData[lk + '_' + away].form] : null,
+                presidentFans: presidentDecisions ? presidentDecisions.meters.fans : null
+            };
+        },
+        clubAnnualRevenueProbe: (clubKey) => getClubAnnualRevenue(clubKey),
+        clubCashCapProbe: (clubKey) => getClubCashCap(clubKey),
+        approveCashCapNow: (clubKey, seasons = 1) => approveClubCashCap(clubKey, seasons),
+        enforceCashCapNow: (clubKey) => enforceClubCashCap(clubKey),
+        economySeasonsNow: (clubKey, seasons = 5) => {
+            const totalSeasons = Math.max(1, Math.round(seasons));
+            for (let s = 0; s < totalSeasons; s++) {
+                for (let w = 0; w < 52; w++) simulateClubEconomyForClub(clubKey);
+                const fin = clubFinance[clubKey];
+                if (fin) {
+                    fin.lastSeasonRevenue = fin.seasonRevenue;
+                    fin.lastSeasonExpenses = fin.seasonExpenses;
+                    fin.seasonRevenue = 0;
+                    fin.seasonExpenses = 0;
+                    fin.weeks = 0;
+                }
+            }
+            return window.__HL.economyProbe(clubKey);
+        },
+        seasonReviewNow: (clubKey = presidentClubKey, season = currentSeason - 1, council = clubCouncil) => {
+            if (!clubKey) return null;
+            return evaluateSeasonReviewForClub(clubKey, season, council);
+        },
+        seasonReviewProbe: (clubKey = presidentClubKey) => {
+            if (!clubKey) return null;
+            return JSON.parse(JSON.stringify(seasonReviews[clubKey] || null));
+        },
+        setClubSeasonPlaceForTest: (clubKey, season, place, total) => {
+            if (!clubSeasonPositions[clubKey]) clubSeasonPositions[clubKey] = [];
+            clubSeasonPositions[clubKey] = clubSeasonPositions[clubKey].filter(p => p.season !== season);
+            clubSeasonPositions[clubKey].push({ season, place, total });
+            return clubSeasonPositions[clubKey];
+        },
+        presidentWarmupProbe: () => ({
+            warmup: JSON.parse(JSON.stringify(presidentWarmup)),
+            weeksLeft: getPresidentWarmupWeeksLeft(),
+            presidentClubKey,
+            hasPortfolio: !!(presidentWarmup.clubKey && myPortfolio[presidentWarmup.clubKey])
+        }),
+        dismissPresidentNow: (reason = 'council') => dismissPresident(reason),
+        clearPresidentWarmupForTest: () => { presidentWarmup = normalizePresidentWarmup(null); return window.__HL.presidentWarmupProbe(); },
+        aiUpgradesNow: (seed = 9001) => {
+            setSimulationSeed(seed);
+            const before = Object.fromEntries(Object.keys(clubData).map(k => [k, {
+                total: getClubUpgradesTotal(clubData[k]),
+                budget: clubData[k].budget || 0
+            }]));
+            simulateAIUpgrades();
+            const changed = Object.keys(clubData)
+                .filter(k => getClubUpgradesTotal(clubData[k]) !== before[k].total)
+                .map(k => ({
+                    key: k,
+                    before: before[k].total,
+                    after: getClubUpgradesTotal(clubData[k]),
+                    budgetBefore: before[k].budget,
+                    budgetAfter: clubData[k].budget || 0
+                }));
+            return { changed, total: changed.length };
+        },
+        tacticsProbe: () => TACTIC_IDS.map(id => ({ ...getTacticMods(id) })),
+        tacticsMonteCarlo: (samples = 1200) => runTacticsMonteCarlo(samples),
+        tacticWinRate: (tacticId, samples = 1200) => simulateTacticWinRate(tacticId, samples),
+        tacticForStanceNow: (stanceId) => tacticForStance(stanceId),
+        presidentTacticProbe: () => {
+            if (!presidentClubKey) return null;
+            const tactic = getClubMatchTactic(presidentClubKey);
+            return { clubKey: presidentClubKey, stance: presidentDecisions?.stance || null, tactic: { ...tactic } };
+        },
+        gradeSeasonProbe: (input) => gradeSeason(input || {}),
+        nextSeasonBudgetProbe: (input) => computeNextSeasonBudget(input || {}),
+        cashCapProbe: (revenue) => cashCapForRevenue(revenue)
     };
 }
 

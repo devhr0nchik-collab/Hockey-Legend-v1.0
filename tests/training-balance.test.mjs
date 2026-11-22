@@ -62,6 +62,9 @@ beforeAll(async () => {
     document.getElementById('ca-agency').value = 'Training Agency';
     document.getElementById('ca-start').click();
     window.__HL.addClient('Тренируемый Клиент');
+    // v1.2: на старте уже 2 клиента — фиксируем карьерные цели, чтобы их
+    // денежные награды не искажали проверки стоимости тренировок.
+    window.__HL.completeCareerGoalsForTest();
 });
 
 describe('2.1 Тренировки: динамическая цена', () => {

@@ -166,3 +166,124 @@
 - Документация: README/маршрутный лист обновлены, package.json 1.1.1, CACHE_NAME hockey-legend-v1.1.1.
 - Тесты: добавлен tests/roadmap-block-bc.test.mjs (19). Итог: test:unit 225/225 (28 файлов), test:season 1/1, tsc 0, build 0. Статус: ОК.
 - Хуки __HL: + xpThresholdsProbe/weeklyEventChanceProbe/wealthTaxProbe/awardWeeklyXPForTest/careerGoalMoneyProbe/careerGoalProbe/worldCupTeamsNow/clubStrengthProbe/refreshStrengthsNow/teamInjuryPenaltyProbe/setPlayerInjuryForTest/setClubFormForTest/escapeHtmlProbe/checkTaskProgressNow/backHandlersProbe/topModalProbe/closeTopModalNow/modalA11yProbe/continueClientsProbe/newsRenderProbe/setChampionForTest/setPlayerRatingForTest/clubPrestigeProbe/clubPlayersProbe/leagueClubsProbe/rebalanceRostersNow.
+
+
+# Батч 1: события, недельные решения и UX
+- Реализован недельный цикл президента: 4 курса недели + 3 брифинга + 1 событие. Без подтверждения решений кнопка «Играть неделю» ведёт на экран «Решения» и не прокручивает неделю.
+- Добавлено 31 событие (E00–E30) и 11 брифингов в src/features/president/events.js. У каждого события 2–4 варианта, видимая цена, минимум одно отложенное последствие (1–5 недель), chance для рискованных исходов.
+- Отложенные последствия хранятся в presidentDecisions.delayed и разрешаются при смене недели; рискованные — детерминированным seeded-RNG.
+- Проверка доминирования: нет варианта, который строго лучше другого по cash/trust/fans/dressing/prestige/conflict с учётом ожидаемых отложенных эффектов.
+- Первый вход в президентство: онбординг-модалка (роль, мандат, 3 решения, обратимость), затем экран решений. Первая неделя гарантированно даёт 3 решения: курс, брифинг, событие E00.
+- UI: вкладка «Решения» в хабе клуба и нижней навигации; карточка «Решения недели» на обзоре; дашборд обзора — 6 виджетов + футер (≤7); «Почему?»-тултипы для баланса, ведомости, фанатов, раздевалки, престижа.
+- Шрифты: проверка исходников на U+FFFD; HUD-шрифт имеет кириллический fallback (Segoe UI/Noto Sans/Arial/system-ui).
+- Сейв: presidentDecisions добавлен в save/load с нормализацией и дефолтами для старых сейвов; сбрасывается при уходе с поста.
+- Тесты: tests/president-events.test.mjs — 11 тестов (контент, доминирование, первый цикл, рендер, ≤7 виджетов, кириллица).
+- Проверка: test:unit 236/236, test:season 1/1, tsc 0, build 0.
+
+# Батч 2: экономика, баланс и ИИ
+- Пункт 3: замкнутый контур «деньги → штат/трансферы → сила → результат → фанаты → деньги». Сила клуба учитывает уровни training/medical/scouting; форма клуба обновляется только по реальным результатам матчей (случайный form-бросок убран); фанаты зависят от результатов/престижа и повышают билетную выручку; у президента результат двигает недельную шкалу фанатов.
+- Пункт 4: 4 тактики (balanced/attack/defense/physical) в src/features/economy/balance.js. Курс недели президента превращается в тактику матча. Monte Carlo 2000 матчей: ни одна тактика не превышает 70% побед, тактики различимы, прогон детерминирован.
+- Пункт 6: после сезона выставляется грейд S/A/B/C/D/F по месту, задачам совета и финансам; считается конкретный бюджет на следующий сезон (потолок 2× выручки) и показывается в обзоре клуба. История отзывов сохраняется.
+- Пункт 7: увольнение советом возвращает в агентство без потери денег/клиентов/акций; warm-up 2–8 недель (seeded-RNG), блокирует повторное президентство, сохраняется в сейве.
+- Пункт 10: касса клуба ограничена 2× годовой выручки; избыток выводится собственникам. Решение совета (approveClubCashCap) может временно поднять потолок. Проверен прогон 5 сезонов.
+- Пункт 14: ИИ-клубы reinvestируют бюджет в инфраструктуру/штат (деньги → сила), президентский клуб не получает автоматических апгрейдов и скрытого бонуса силы без выбранного курса.
+- Сейв: clubFinance, seasonReviews, presidentWarmup добавлены в корень сейва с нормализацией; PackedClub/PackedPlayer не менялись.
+- Хуки __HL: + economyTickNow/economyProbe/economySeasonsNow/clubFanbaseProbe/clubAnnualRevenueProbe/clubCashCapProbe/approveCashCapNow/enforceCashCapNow/seasonReviewNow/seasonReviewProbe/setClubSeasonPlaceForTest/presidentWarmupProbe/dismissPresidentNow/clearPresidentWarmupForTest/aiUpgradesNow/tacticsProbe/tacticsMonteCarlo/tacticWinRate/tacticForStanceNow/presidentTacticProbe/gradeSeasonProbe/nextSeasonBudgetProbe/cashCapProbe/setPresidentFansForTest/applyResultForTest.
+- Тесты: tests/economy-ai-batch2.test.mjs (13). Итог: test:unit 249/249 (30 файлов), test:season 1/1, tsc 0, build 0. Статус: ОК.
+
+# Батч 3: бывший клиент, миграция сейва, детерминизм, локализация
+- Пункт 9: бывший клиент — реальная сделка с измеряемой скидкой и риском. При вступлении в должность клиенты замороженного агентства попадают в `presidentDecisions.formerClients`; глобальная история `formerClientNames` переживает save/load и фиксируется при уходе/переманивании/завершении карьеры. `getFormerClientDeal()` считает рыночную цену (от рейтинга), скидку 15–35% (от лояльности), экономию и риск аудита 10–40; `commitFormerClientSigning` переводит игрока в клуб, начисляет conflict и пишет новость. Событие E15 и брифинг `former_client` собираются динамически (`buildFormerClientOffer`), показывают точные цифры и блокируются при лимите.
+- Лимиты строгие и централизованы: `FORMER_CLIENT_SEASON_LIMIT = 2`, `FORMER_CLIENT_TERM_LIMIT = 4`; проверка до применения эффектов, один бывший клиент за неделю, GM-вариант тоже считается. Счётчики сбрасываются по сезону и по сроку полномочий; при лимите событие/брифинг не выдаются, кнопка disabled.
+- Пункт 11: `presidentState`/`presidentDecisions` нормализуются с явным `loadedPresidentClubKey` до восстановления глобального ключа; поддержан старый алиас `presidentState`, сохраняются meters/log/delayed/cooldowns/formerClients/лимиты. Сейв без состояния получает безопасный default для действующего клуба. Порядок загрузки не меняет поведение КЧ/биржи.
+- Пункт 12: убран `Math.random` из runtime-симуляции: `sim-random` по умолчанию использует фиксированный seeded-поток, `generateAttributes` без имени — seeded от позиции/рейтинга, мир новой игры сеется `matchSeed([agent,agency,'game',season])`. Аудит расширен на `script.js`, датапаки и все `src/**/*.{js,ts}` (с вырезанием комментариев). Полный сезон по-прежнему воспроизводим.
+- Пункт 15: добавлены `src/features/president/events-i18n.js` (566 EN-ключей: все события, брифинги, курсы, отложенные последствия, тактики) и `src/features/president/ui-i18n.js` (президентский UI, инфраструктура, отчёты, динамические сделки). i18n.js импортирует словари и добавляет RU-identities для обратного перевода DOM. Логика президента/экономики переведена на `LANG.t`/`presidentFormat`; события рендерятся через `LANG.t`.
+- Тесты: tests/batch3.test.mjs (7) — измеримость сделки, лимиты 2/4 и сброс по сезону, миграция `presidentState` без потери данных, default без состояния, детерминизм атрибутов, полнота EN-перевода событий, перевод через LANG. Обновлён determinism-audit (runtime-модули).
+- Хуки __HL: + formerClientDealProbe/formerClientSignNow/formerClientLimitsProbe/setFormerClientSigningsForTest/setFormerClientsForTest/presidentStateProbe/presidentEventProbe.
+- Проверка: test:unit 257/257 (31 файл), test:season 1/1, tsc 0, build 0. Формат PackedPlayer/PackedClub/v23 не изменён. Статус: ОК.
+
+# Этап: интерактивные туториалы агента и президента (21.11.2026)
+- Добавлен `src/features/tutorial/TutorialManager.js`: движок шагов, сценарии `agent`/`president`, ожидание кнопки «Далее» или клика по подсвеченному элементу, `waitFor`-события, затемняющий оверлей, spotlight-рамка и неоновая карточка с «Далее»/«Пропустить».
+- Флаги `tutorialAgentDone`/`tutorialPresidentDone` живут в `gameSettings` (localStorage `hockeyLegendSettings`), сохраняются через `saveSettings`. `start()` не запускает сценарий после флага; «Пропустить» и завершение всех шагов ставят только соответствующий флаг.
+- Агент (5 шагов): приветствие → база талантов (`[data-nav="clients"]`) → «Играть неделю» (`#btn-play-week`) → агентство (`[data-nav="agency"]`) → переговоры. Шаг 5 ждёт событие `negotiation`; `renderNegotiationModal` вызывает `notifyTutorial('negotiation')`, затем подсвечивается первый `.neg-range` в конструкторе контракта.
+- Президент (5 шагов): приветствие → экран клуба (`#club-hub-screen .mobile-header`) → инфраструктура (`[data-chub="upgrade"]`) → симуляция матчей (`#setting-match-view-full`, на шаге открывается модалка настроек) → совет директоров (`[data-chub="decisions"]`). Запуск: после онбординга первой покупки 51% (кнопка «Стать президентом»), повторно не запускается.
+- Все тексты вынесены в `i18n.js` (ru/en, ~19 ключей на язык). CSS NEON RINK: `.tutorial-overlay/.tutorial-shade/.tutorial-spotlight/.tutorial-card/.tutorial-btn`, адаптив ≤480px, prefers-reduced-motion.
+- Тесты: tests/tutorial.test.mjs (7) — агент и президент стартуют один раз, клик по spotlight переводит шаг, шаг переговоров ждёт событие (в т.ч. пришедшее заранее), завершение ставит флаг, «Пропустить» ставит только нужный флаг, состав/таргеты 5 президентских шагов.
+- Хуки __HL: + tutorialState/startTutorialForTest/skipTutorialNow/nextTutorialNow/notifyTutorialForTest/setTutorialFlagForTest/maybeStartPresidentTutorialForTest.
+- Проверка: test:unit 264/264 (32 файла), test:season 1/1, tsc 0, build 0. Формат сейва не изменён. Статус: ОК.
+
+# QA v1.2 — глобальная проверка навигации/логики/экономики (22.11.2026)
+- Критический баг подтверждён: Президент → Состав → игрок → «Назад» → офис агента.
+- Причина 1: `#player-back` подписывался на исходную `closePlayerScreen`, а позднее переопределение функции (`_origClosePlayerScreen`) слушатель не заменяло.
+- Причина 2: `buildRosterRow` (состав президента) сбрасывал `playerReturnContext = null`.
+- Фикс: единая `closePlayerScreen` с ветками `president-club` / `pch` / `club` / `national` / `screen`; возврат в `club-hub-screen` через `showPresidentClubHub()` с сохранением вкладки; позднее переопределение удалено.
+- Дополнительно найдено и исправлено:
+  - Публичный хаб терял вкладку и экран-источник после карточки игрока (передавались `public-club-hub-screen` вместо исходных значений).
+  - Прямой просмотр матча из расписания всегда вёл в офис; теперь возврат на экран-источник (лига/хаб/офис).
+  - Карточка игрока из новостей, лидерборда, активных обещаний и «Все предложения» вела в клиентов/офис; добавлен контекст `screen`.
+  - Экономика: покупка акций принимала введённое вручную количество > лимита 100% (дивиденды росли сверх доли) — добавлена проверка лимита/денег и clamp.
+  - Старые/повреждённые сейвы с долей >100% нормализуются (`normalizePortfolio`).
+  - Повторная подпись уже подписанного свободного агента дублировала клиента и начисляла XP/счётчики — добавлен guard и скрытие кнопки.
+  - `requestPlayWeek` не был защищён от double-click из хаба президента (риск двойного тика экономики) — lock перенесён внутрь функции.
+- Новый тест: `tests/navigation-return.test.mjs` (2) — президентский состав → карточка → хаб президента; публичный хаб → карточка → хаб/вкладка/источник. На baseline-коде тесты падают.
+- Хуки __HL: + `navProbe`, `openPublicClubHubForTest`, `setClubHubTabForTest`.
+- Проверка: test:unit 266/266 (33 файла), test:season 1/1, tsc 0, build 0. Статус: ОК.
+
+# v1.2 «Lean Agency» — экономика событий, 2 клиента, групповая тренировка (22.11.2026)
+- Экономика событий вынесена в `src/features/economy/event-rewards.js`: капы наград по уровню агента (1–3 → $500, 4–6 → $5K, 7–9 → $15K, 10–14 → $35K, 15–19 → $75K, 20+ → $150K).
+- Критический фикс: расходы больше не масштабируются (списываются по номиналу), вложенные в событие деньги возвращаются полностью, прибыль сверху ограничена капом. XP за событие — до 100 на ур. 1–3. Логика применена и к событиям, и к этапам цепочек; в цепочках `invested` копится и возвращается при выводе.
+- Пул событий: у «жирных» событий добавлен `minLevel` (спонсоры, допинг, налоговая, инсайд, документалка, Кубок мира, сборная и т.д.); цепочки с крупными суммами не стартуют на ранних уровнях.
+- Старт: `seedStartingClients()` создаёт 2 клиентов (полевой + вратарь) в МХЛ. `getSlots() = 1 + upgrades.office` → 2 слота на старте; первый апгрейд офиса стоит $1 500 и открывает 3-й слот.
+- Тренировки: `groupTrainingAttr` + `setGroupTraining(attr)` — один атрибут на всех клиентов, автостарт блоков; сохраняется в сейве (`groupTrainingAttr`), старые сейвы читаются с `null`. Новые клиенты автоматически подхватывают групповой режим.
+- UI: экран агентства по умолчанию показывает групповую тренировку и офис; остальные карточки — по кнопке «Все улучшения». Версия в футере/титуле — `v1.2` из константы `VERSION = '1.2.0'`.
+- Тесты: `tests/v1.2-lean-agency.test.mjs` (8) — версия, 2 стартовых клиента/2 слота, дешёвый офис → 3 слота, кап $500 на ур. 1, возврат вложенных денег, `minLevel` жирных событий, упрощённый экран, групповая тренировка. `training-balance` изолирован от денежных наград карьерных целей.
+- Проверка: test:unit 275/275 (35 файлов), test:season 1/1, tsc 0, build 0. Статус: ОК.
+
+# v1.2.1 «Единое окно игрока» — ребаланс скаутинга, вкладка «Диалог», чистые агентства (22.11.2026)
+- Скаутинг: `getScoutingRatingRange()` жёстко привязан к `upgrades.scouting`. Ур.1 → рейтинг 18–53 (потолок ≤55), 70+ появляются примерно с 13 уровня (формула до 88 на ур.25). Сильные новички больше не выпадают на старте.
+- Экран «Рейтинг агентств» стал информационным: `openNpcAgency` показывает только репутацию, бюджет и клиентов. Удалены `openPoachDialog`, `resolvePoach`, клики/счётчики попыток/замки и модалка `poach-dialog-modal`.
+- Карточка игрока: 5-я вкладка `playerTab = 'dialogue'` («Диалог»). Статусы:
+  - нет агентства → «Предложить контракт» + мини-диалог (ползунок подъёмных, обещания);
+  - чужое агентство → «Переманить», шанс от разницы репутаций и уровня «Переговорщика» + качество пакета;
+  - свой клиент → текущие условия контракта и «Разорвать контракт» (освобождает слот, `agentId = null`).
+- UI NEON RINK: `.dlg-*` (hero, статусы, сравнение репутаций, контракт, chance-card, неоновый range, promise-чипы), адаптив ≤400px. Модалка `player-dialogue-modal` зарегистрирована в BACK_HANDLERS.
+- i18n: ru/en ключи для вкладки, диалога, обещаний, ошибок и результатов.
+- Тесты: `tests/v1.2.1-player-dialogue.test.mjs` (8) — скаутинг ур.1 ≤55, 70+ только при прокачке, кнопка «Предложить контракт» у свободного агента, «Переманить» у чужого, условия + «Разорвать контракт» у своего, ползунок/обещания в мини-диалоге, рост шанса от разницы репутаций, информационная карточка NPC-агентства.
+- Хуки __HL: + setScoutingLevelForTest/scoutingRangeProbe/createTestFreeAgent/createTestAgencyPlayer/openPlayerForTest/setPlayerTabForTest/playerDialogueProbe/dialoguePoachChanceProbe/signFreeAgentNow/attemptPoachNow/releaseClientNow/openNpcAgencyForTest.
+- Проверка: test:unit 282/282 (35 файлов), test:season 1/1, tsc 0, build 0. Статус: ОК.
+
+# v1.2.2 «NEON RINK Polish» — рейтинг, старт и обучение (22.11.2026)
+- Рейтинг агентств: своё агентство встроено в общий список `renderRatingTab`, сортируется по тем же фильтрам (репутация/клиенты/бюджет), строка выделена лаймовой неоновой рамкой, бейджем «ТЫ» и свечением.
+- UI: для `.agency-row`, `.talent-card`, `.npc-client-row` добавлены clip-path со срезанными углами, градиентные поверхности, hover-glow, блик-свайп и плавное появление (`hl-hud-appear`); у карточек FA появился лаймовый бейдж. prefers-reduced-motion отключает анимации.
+- Ребаланс старта: `getScoutingRatingRange()` на ур.1 скаутинга даёт 28–48 (было 18–53); свободные агенты из `generateFreeAgentProfile` и `generateFreeAgentYouth` создаются как FA без клуба и с `contractYears = 0`, `agentId = null`.
+- Туториал агента — 4 шага: «Клиенты» → карточка игрока с FA → вкладка «Диалог»/«Предложить контракт» → «Играть неделю». Добавлен `advanceOn: 'client-signed'`: клик по кнопке скрывает оверлей, шаг завершается после реального подписания; офис для шага недели открывается после закрытия модалки.
+- Хуки __HL: + renderAgencyRatingForTest/freeAgentContractProbe; generateFreeAgentWindow отдаёт club/contractYears/agentId.
+- Тесты: `tests/v1.2.2-polish.test.mjs` (3) — ур.1 ≤48, FA без клубного контракта, своя строка в рейтинге; `tests/tutorial.test.mjs` обновлён под 4 шага и advanceOn.
+- Проверка: `npm test` 285/285 (37 файлов), tsc 0, build 0. Статус: ОК.
+
+# v1.2.3 «Фиксы UX патча v1.2.2» — рейтинг, клиенты NPC, старт, обучение (22.11.2026)
+- Рейтинг агентств: `.agency-row` больше не сжимается как flex-item внутри `.mobile-content` (`flex: 0 0 auto`), колонка имени `minmax(0, 1fr)`, имя/мета обрезаются через ellipsis, блок статистики зафиксирован (`flex-shrink: 0`, tabular-nums). Строки списка снова отображают название, репутацию, клиентов и бюджет без схлопывания.
+- Клиенты чужого агентства: у `.npc-client-row` появился `data-npc-client` и обработчик клика; открывается карточка игрока (`openPlayerScreen`) сразу на вкладке «Диалог», модалка агентства закрывается, возврат ведёт на экран агентства. Курсор строки — pointer.
+- Стартовые 2 клиента (`seedStartingClients`): создаются как свободные агенты с `club = null`, `contractYears = 0`, `agentId = -1`, `isScouted = true`, рейтинг 44/42 (диапазон 40–48), без клубной зарплаты/контракта.
+- Обучение: `resetGame()` принудительно сбрасывает `gameSettings.tutorialAgentDone` и `tutorialPresidentDone`, сохраняет настройки; новая карьера снова запускает туториал агента.
+- Проверка: `npm test` 285/285 (37 файлов), `npm run typecheck` 0, `npm run build` 0. Статус: ОК.
+
+# v1.2.3 «Шанс подписания + финансовая история» (22.11.2026)
+- Шаг 1: в конструкторе контракта появился блок `#neg-chance` («Шанс подписания», прогресс-бар + %). `getContractSuccessChance(player, offer)` вызывает `evaluateContractPackage(..., 'club')` и учитывает бюджет пакета (годовая ЗП + подписной бонус + комиссия). Цвета: >75% — зелёный (лайм), 40–75% — жёлтый (янтарь), <40% — красный. При превышении бюджета — «Превышен бюджет!» и 0%. `updateNegotiationChance` вызывается на каждое событие `input` ползунков (ЗП/срок/комиссия/бонусы/гарантии).
+- Шаг 2: `financeHistory = []` в корне сейва, лимит `FINANCE_HISTORY_LIMIT = 100` (старые записи удаляются). `logTransaction(type, amount, reason)` пишет `{season, week, type: 'income'|'expense', amount, reason}`; `applyMoney(delta, reason)` — централизованная точка изменения `agentMoney` + лог. Переведены комиссии, зарплаты/пассивный доход, налог, дивиденды, тренировки, апгрейды, трансферы/переманивание, подписные бонусы, задачи/штрафы, спонсоры, биржа, события и цепочки (нетто-сумма после `settleEventMoney`), медали сборной.
+- Шаг 3: в хабе «Моё агентство» новая вкладка «Финансы» (`data-atab="finance"`). `renderFinanceTab`: сводка доходов/расходов/баланса и список NEON RINK — слева причина + сезон/неделя, справа сумма (зелёная с «+» / красная с «−»). Стили `.finance-*`, адаптив ≤420px.
+- Шаг 4: `tests/v1.2.3-finance.test.mjs` (5) — input на ползунке ЗП обновляет `#neg-chance` и цвет; «Превышен бюджет!»; лимит 100 записей; save/load истории; вкладка «Финансы» и разметка строк.
+- Хуки __HL: + contractChanceProbe/logTransaction/financeHistoryProbe/clearFinanceHistoryForTest/financeTabHTMLForTest.
+- Версия: `VERSION = '1.2.3'`, package.json/package-lock 1.2.3, `CACHE_NAME = hockey-legend-v1.2.3`. Формат PackedPlayer/PackedClub/v23 не изменён.
+- Проверка: test:unit 289/289 (37 файлов), test:season 1/1, tsc 0, build 0. Статус: ОК.
+
+# v1.3 «Карьера глубже» — Зал Славы, лиговые рекорды, достижения (22.11.2026)
+- Данные — только в корне сейва: `agencyHall`, `leagueRecords`, `achievements`, `seasonGoalie`. `PackedPlayer` (33)/`PackedClub` (17)/v23 не менялись, `SAVE_KEY` прежний. Старые сейвы получают виртуальную историю лиг и снимки текущих клиентов.
+- Зал Славы агентства: снимок карьеры (`buildHallEntry`) при refresh активных, увольнении (`removeClientFromRoster`), переманивании и пенсии (`processRetirements` — до удаления из `players`). Хранит сезоны, пик рейтинга, GP/G/A/P, лучшие сухари/сейвы, трофеи, награды, клубы; `legacyScore` = очки + голы×1.5 + трофеи×40 + награды×15 + рейтинг×2 + рекорды×50. Лимит 72, дедуп по имени.
+- Лиговые рекорды: `updateLeagueRecords()` в конце `awardEndOfSeason()` (stats ещё живые), идемпотентно по `updatedSeason`. 13 лиг × 5 таблиц: голы, передачи, очки, сухие игры, сейвы; топ-10, только улучшение, клуб+сезон. Маркер «ВАШ КЛИЕНТ» — динамический (`isMyClientName` = roster + hall).
+- Вратари: `seasonGoalie {gp,saves,shutouts}` обновляется в `simulateMatchWithDetails` и `simulateWeekForPlayer`; сейвы считаются детерминированно (без новых `simRandom`) — season-regression не сдвинут. Сбрасывается в `resetWorldPlayerStats`.
+- Достижения: 39 ачивок в 6 категориях (деньги, карьера, лига/рекорды, трофеи, интриги, наследие). `checkAchievements()` идемпотентен, ретро-активен при load (silent), хуки — `updateAllDisplays` и конец сезона. Награды: XP/титул/репутация + деньги ≤ $50K, без слотов. Лиговые: «Первопроходец», «Король снайперов», «Маэстро передач», «Легенда лиги», «Стена», «Полный комплект», «Мировой рекордсмен», «Снайпер», «Сухой сезон».
+- UI: новый экран `hall-of-fame-screen` (плитка офиса «Зал Славы»), 3 вкладки — Агентство / Лиги / Достижения; подиум топ-3, карточки клиентов с аватарами, 5 таблиц рекордов с чипами лиг, сетка достижений с прогрессом и фильтрами, модалка карьеры (`hall-client-modal`, в `BACK_HANDLERS`). Деплинк «Рекорды лиги →» во вкладке истории лиги и бейдж рекордов в истории игрока. NEON RINK-классы `.hlf-*` (без конфликта с `.hall-of-fame/.hof-*`). i18n RU/EN ~150 ключей.
+- Версия: `VERSION = '1.3.0'`, package.json/package-lock 1.3.0, `CACHE_NAME = hockey-legend-v1.3.0`, about-тег v1.3.
+- Тесты: `tests/v1.3-hall-of-fame.test.mjs` (16) — виртуальные рекорды 13 лиг, топ-10/улучшение, вратарские таблицы, маркер клиента, снимок при уходе, модалка, каталог 30–40, ретро/идемпотентность, лимит $50K, save/load/reset, UI/CSS/i18n. Обновлён `v1.2-lean-agency` под версию 1.3.
+- Хуки __HL: + leagueRecordsProbe/updateLeagueRecordsNow/seedLeagueRecordsForTest/setPlayerSeasonStatsForTest/setGoalieSeasonStatsForTest/seasonGoalieProbe/agencyHallProbe/syncAgencyHallNow/upsertHallNow/hallEntryProbe/removeClientNow/achievementsProbe/checkAchievementsNow/achievementValueProbe/achievementCatalogProbe/resetAchievementsForTest/setCareerCountersForTest/hallScreenHTMLForTest/setHallTabForTest.
+- Проверка: test:unit 305/305 (38 файлов), test:season 1/1, tsc 0, build 0. Статус: ОК.
